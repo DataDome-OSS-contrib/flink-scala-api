@@ -3,8 +3,87 @@ package org.apache.flinkx
 import org.apache.flink.api.common.typeinfo.{BasicTypeInfo, TypeInformation}
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
+import org.apache.flink.util.FlinkRuntimeException
+
+import scala.annotation.StaticAnnotation
 
 package object api {
+
+  /** Marks current schema version of an ADT (case class or sealed trait). Enables ADT evolutions while keeping
+    * checkpoint state compatibility.
+    *
+    * An ADT without `@version` annotation is considered to have version 0. You can enable evolution by adding `version`
+    * annotation from a checkpoint without.
+    *
+    * Annotation of ADT (case class or sealed trait).
+    * @param current
+    *   Current version number
+    */
+  final case class version(current: Int) extends StaticAnnotation {
+    if (current <= 0) throw new FlinkRuntimeException(s"Current version must be positive, got @version($current)")
+  }
+
+  /** Trait marker indicating an evolution annotation. */
+  trait Evolved extends StaticAnnotation
+
+  /** Applies transformation to whole instance after deserialization.
+    *
+    * Annotation of ADT (case class or sealed trait).
+    * @param mapper
+    *   Function transforming deserialized instance
+    */
+  final case class postDeserialize[A <: AnyRef](mapper: A => A) extends Evolved {
+    override def toString: String = s"postDeserialize(<mapper>)"
+  }
+
+  /** Marks field added in a specific version. Requires default value.
+    *
+    * Annotation of case class parameter.
+    * @param since
+    *   Version when addition occurred
+    */
+  final case class added(since: Int) extends Evolved
+
+  /** On case class parameter, marks field renamed from previous name.
+    *
+    * On sealed trait subtype, marks subtype renamed from previous name or moved from another location.
+    *
+    * Annotation of case class parameter or sealed trait subtype.
+    * @param since
+    *   Version when rename occurred
+    * @param from
+    *   Previous field name or subtype name, which can be:
+    *   - A simple name: `"OldName"`
+    *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
+    *   - An absolute path: `"org.example.OldName"`
+    */
+  final case class renamed(since: Int, from: String) extends Evolved {
+    override def toString: String = s"renamed($since,\"$from\")"
+  }
+
+  /** Marks field with type transformation. Mapper function converts old type to new type.
+    *
+    * Annotation of case class parameter.
+    * @param since
+    *   Version when transformation occurred
+    * @param mapper
+    *   Function converting old type A to new type B
+    */
+  final case class transformed[A, B](since: Int, mapper: A => B) extends Evolved {
+    override def toString: String = s"transformed($since,<mapper>)"
+  }
+
+  /** Marks deleted members (fields of a case class, subtypes of a sealed trait) not present in current schema.
+    *
+    * Annotation of ADT (case class or sealed trait).
+    * @param since
+    *   Version when deletions occurred
+    * @param names
+    *   Names of deleted members (fields of a case class, subtypes of a sealed trait)
+    */
+  final case class deletedMembers(since: Int, names: Array[String]) extends Evolved {
+    override def toString: String = s"deletedMembers($since,${names.mkString("Array(\"", "\",\"", "\")")})"
+  }
 
   /** Basic type has an arity of 1. See [[BasicTypeInfo#getArity()]] */
   private[api] val BasicTypeArity: Int = 1
@@ -27,7 +106,7 @@ package object api {
     * If one of these conditions is not met, consider using another marker or wrap your serializer into a
     * [[NullableSerializer]].
     */
-  private[api] val NullMarker: Int = Int.MinValue
+  private[api] val NullMarker: Int      = Int.MinValue
   private[api] val NullMarkerByte: Byte = Byte.MinValue
 
 }

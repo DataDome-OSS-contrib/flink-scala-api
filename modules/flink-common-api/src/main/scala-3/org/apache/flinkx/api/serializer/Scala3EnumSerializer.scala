@@ -4,10 +4,12 @@ import org.apache.flink.api.common.typeutils.CompositeTypeSerializerUtil.setNest
 import org.apache.flink.api.common.typeutils.base.array.StringArraySerializer
 import org.apache.flink.api.common.typeutils.{CompositeTypeSerializerSnapshot, TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
+import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 
 /** Serializer for Scala 3 enum. Handle nullable value. */
 class Scala3EnumSerializer[T <: Product](
+    val clazz: Class[T],
     val enumValueNames: Array[String],
     val enumValueSerializers: Array[TypeSerializer[_]]
 ) extends MutableSerializer[T] {
@@ -28,7 +30,7 @@ class Scala3EnumSerializer[T <: Product](
     if (isImmutableSerializer) {
       this
     } else {
-      new Scala3EnumSerializer[T](enumValueNames, enumValueSerializers.map(_.duplicate()))
+      new Scala3EnumSerializer[T](clazz, enumValueNames, enumValueSerializers.map(_.duplicate()))
     }
   }
 
@@ -64,12 +66,13 @@ class Scala3EnumSerializer[T <: Product](
       null.asInstanceOf[T]
     } else {
       val subtype = enumValueSerializers(index.toInt)
-      subtype.asInstanceOf[TypeSerializer[T]].deserialize(source)
+      val evolution = Evolutions.get(clazz)
+      evolution.applyPostDeserialize(subtype.asInstanceOf[TypeSerializer[T]].deserialize(source))
     }
   }
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {
-    val index   = source.readByte()
+    val index = source.readByte()
     target.writeByte(index)
     if (index != NullMarkerByte) {
       val subtype = enumValueSerializers(index.toInt)
@@ -89,11 +92,13 @@ class Scala3EnumSerializerSnapshot[T <: Product](
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
+  private var clazz: Class[T] = _
   private var enumValueNames: Array[String] = Array.empty
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
     setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
+    clazz = s.clazz
     enumValueNames = s.enumValueNames
   }
 
@@ -105,17 +110,20 @@ class Scala3EnumSerializerSnapshot[T <: Product](
   override protected def createOuterSerializerWithNestedSerializers(
       nestedSerializers: Array[TypeSerializer[_]]
   ): Scala3EnumSerializer[T] =
-    new Scala3EnumSerializer(enumValueNames, nestedSerializers)
+    new Scala3EnumSerializer(clazz, enumValueNames, nestedSerializers)
 
-  override def writeOuterSnapshot(out: DataOutputView): Unit =
+  override def writeOuterSnapshot(out: DataOutputView): Unit = {
+    out.writeUTF(clazz.getName)
     StringArraySerializer.INSTANCE.serialize(enumValueNames, out)
+  }
 
   override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
+    clazz = if (readOuterSnapshotVersion > 1) Evolutions.resolveFormerClass(in.readUTF(), cl) else null
     enumValueNames = StringArraySerializer.INSTANCE.deserialize(in)
   }
 
 }
 
 object Scala3EnumSerializerSnapshot {
-  private val CurrentVersion = 1
+  private val CurrentVersion = 2
 }

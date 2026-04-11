@@ -6,19 +6,50 @@ import org.apache.flink.api.java.typeutils.TupleTypeInfoBase
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flink.api.java.typeutils.runtime.kryo.KryoSerializer
 import org.apache.flink.core.memory._
-import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.semiauto.infoToSer
+import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, MappedTypeInformation}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, Inspectors}
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectOutputStream}
+import java.io._
 import java.lang.reflect.{Field, Modifier}
 import java.time.{LocalDate, LocalDateTime, LocalTime}
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeSet
 
 trait TestUtils extends Matchers with Inspectors {
+
+  private def snapshotPath(fileName: String): String =
+    getClass.getResource("/").toURI.resolve(s"../../../src/test/resources/$fileName.snapshot").getPath
+
+  def serializeToFile[T](fileName: String, data: T)(implicit ser: TypeSerializer[T]): Unit = {
+    val output = new DataOutputViewStreamWrapper(new FileOutputStream(snapshotPath(fileName)))
+    TypeSerializerSnapshot.writeVersionedSnapshot(output, ser.snapshotConfiguration())
+    val snapSize = output.size()
+    output.writeInt(snapSize)
+    ser.serialize(data, output)
+    val dataSize = output.size() - snapSize
+    output.writeInt(dataSize)
+    output.close()
+  }
+
+  def testDeserializeFromFile[T: TypeSerializer](
+      fileName: String,
+      expected: T,
+      assertion: (T, T) => Assertion = (_: T) shouldBe (_: T)
+  ): Unit = {
+    val input            = new DataInputViewStreamWrapper(new FileInputStream(snapshotPath(fileName)))
+    val totalsize        = input.available()
+    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, expected.getClass.getClassLoader)
+    val snapSize         = totalsize - input.available()
+    snapSize shouldBe input.readInt()
+    val restoredSerializer = restoredSnapshot.restoreSerializer()
+    val result             = restoredSerializer.deserialize(input)
+    val dataSize           = totalsize - snapSize - input.available()
+    dataSize shouldBe input.readInt()
+    assertion(result, expected)
+  }
 
   /** Serializes and deserializes the given object using the provided serializer, then asserts that the result matches
     * the expected value.

@@ -5,6 +5,10 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
+import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.evolution.Evolutions.throwEvolutionNotAllowed
+import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
 import org.apache.flinkx.api.serializer.{
   CaseClassSerializer,
   CoproductSerializer,
@@ -17,6 +21,7 @@ import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformati
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
 
 import scala.IArray.genericWrapArray
+import scala.collection.immutable.SortedSet
 import scala.collection.mutable
 import scala.reflect.ClassTag
 
@@ -42,6 +47,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
+        val version    = ctx.annotations.collectFirst { case v: version => v.current }.getOrElse(0)
+        val fieldNames = ctx.parameters.map(_.label).toArray
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumValueSerializer[T & Product](typeTag.companion.get.runtimeClass, ctx.typeInfo.short)
@@ -49,18 +56,51 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           else
             new CaseClassSerializer[T & Product](
               clazz = clazz,
-              scalaFieldSerializers = ctx.params.map { p =>
+              isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
+              version = version,
+              fieldNames = fieldNames,
+              paramSerializers = ctx.params.map { p =>
                 val ser = p.typeclass.createSerializer(config)
                 if (p.annotations.exists(_.isInstanceOf[nullable])) {
                   NullableSerializer.wrapIfNullIsNotSupported(ser, true)
                 } else ser
-              }.toArray,
-              isCaseClassImmutable = isCaseClassImmutable(clazz, ctx.params.map(_.label))
+              }.toArray
             )
+
+        val evolution = Evolutions.get(clazz)
+        evolution.addFieldNames(fieldNames) // Need field names even with version 0
+        if version == 0 then
+          // Do not allow Evolution annotations without a version
+          ctx.annotations.collect {
+            case _: renamed if ctx.inheritedAnnotations.exists(_.isInstanceOf[version]) => // Allow @renamed if parent has version
+            case e: Evolved => throwEvolutionNotAllowed(e, s"$clazz without version")
+          }
+          ctx.parameters.foreach { p =>
+            p.annotations.collect { case e: Evolved => throwEvolutionNotAllowed(e, s"$p of $clazz without version") }
+          }
+        else // version > 0
+          // Iterate over case class annotations to register evolutions on current source code
+          ctx.annotations.collect {
+            case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
+            case d: deletedMembers     => d.names.map(Delete(d.since, clazz, _)).foreach(evolution.addFieldEvolution)
+            case p: postDeserialize[_] => evolution.addPostDeserialize(p.mapper)
+            case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
+          }
+          // Iterate over case class fields annotations to register evolutions from current source code
+          ctx.parameters.foreach { p =>
+            p.annotations.collect {
+              case a: added             => evolution.addFieldEvolution(Add(a.since, clazz, p.label, p.default))
+              case r: renamed           => evolution.addFieldEvolution(Rename(r.since, clazz, p.label, r.from))
+              case t: transformed[_, _] => evolution.addFieldEvolution(Transform(t.since, clazz, p.label, t.mapper))
+              case e: version           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
+              case e: Evolved           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
+            }
+          }
+
         val ti = new CaseClassTypeInfo[T & Product](
           clazz = clazz,
           fieldTypes = ctx.params.map(_.typeclass),
-          fieldNames = ctx.params.map(_.label),
+          fieldNames = fieldNames,
           ser = serializer
         ).asInstanceOf[TypeInformation[T]]
         if useCache then cache.put(cacheKey, ti)
@@ -77,18 +117,46 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         cached.asInstanceOf[TypeInformation[T]]
 
       case None =>
+        val clazz      = classTag.runtimeClass.asInstanceOf[Class[T]]
+        val version    = ctx.annotations.collectFirst { case v: version => v.current }.getOrElse(0)
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
+              clazz = clazz.asInstanceOf[Class[T & Product]],
               enumValueNames = ctx.subtypes.map(_.typeInfo.short).toArray,
               enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             ).asInstanceOf[TypeSerializer[T]]
           else
             new CoproductSerializer[T](
+              clazz = clazz,
               subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray,
               subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             )
-        val clazz = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val ti    = new CoproductTypeInformation[T](clazz, serializer)
+
+        if version == 0 then
+          // Do not allow Evolution annotations without a version
+          ctx.annotations.collect { case e: Evolved => throwEvolutionNotAllowed(e, s"$clazz without version") }
+          ctx.subtypes.foreach { p =>
+            p.annotations.collect { case e: Evolved => throwEvolutionNotAllowed(e, s"$p of $clazz without version") }
+          }
+        else // version > 0
+          val evolution = Evolutions.get(clazz)
+          // Iterate over coproduct annotations to register evolutions from current source code
+          ctx.annotations.collect {
+            case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
+            case d: deletedMembers     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case p: postDeserialize[_] => evolution.addPostDeserialize(p.mapper)
+            case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
+          }
+          // Iterate over subtypes annotations to register evolutions from current source code
+          ctx.subtypes.foreach { p =>
+            p.annotations.collect {
+              case r: renamed        => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
+              case _: deletedMembers => // allowed on subtype
+              case e: Evolved        => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
+            }
+          }
+
+        val ti = new CoproductTypeInformation[T](clazz, serializer)
         if useCache then cache.put(cacheKey, ti)
         ti
