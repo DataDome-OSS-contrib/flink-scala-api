@@ -3,6 +3,7 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.util.InstantiationUtil
+import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.serializer.CollectionSerializerSnapshot.CurrentVersion
 
 /** Generic serializer snapshot for collection.
@@ -33,7 +34,7 @@ class CollectionSerializerSnapshot[F[_], T, S <: TypeSerializer[F[T]]](
 
   override def readSnapshot(readVersion: Int, in: DataInputView, userCodeClassLoader: ClassLoader): Unit = {
     clazz = InstantiationUtil.resolveClassByName[S](in, userCodeClassLoader)
-    vclazz = InstantiationUtil.resolveClassByName[T](in, userCodeClassLoader)
+    vclazz = Evolutions.resolveFormerClass(in.readUTF(), userCodeClassLoader)
     nestedSerializer = TypeSerializerSnapshot.readVersionedSnapshot[T](in, userCodeClassLoader).restoreSerializer()
   }
 
