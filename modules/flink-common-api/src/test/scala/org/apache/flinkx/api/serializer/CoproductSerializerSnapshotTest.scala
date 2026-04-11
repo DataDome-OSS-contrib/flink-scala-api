@@ -18,7 +18,15 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     )
     val serializerSnapshot: CoproductSerializer.CoproductSerializerSnapshot[ADT] =
       new CoproductSerializer.CoproductSerializerSnapshot(
-        Some(new CoproductSerializer[ADT](subtypeClasses, subtypeSerializers))
+        Some(
+          new CoproductSerializer[ADT](
+            classOf[ADT],
+            0,
+            subtypeClasses,
+            subtypeClasses.map(_.getName),
+            subtypeSerializers
+          )
+        )
       )
 
     val expectedSerializer = serializerSnapshot.restoreSerializer()
@@ -57,9 +65,17 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val oldSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT]()
     oldSnapshot.readSnapshot(2, new DataInputDeserializer(out.getSharedBuffer), getClass.getClassLoader)
 
-    // Current (v3) snapshot for the same schema
+    // Current snapshot for the same schema
     val newSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT](
-      Some(new CoproductSerializer[ADT](subtypeClasses, subtypeSerializers))
+      Some(
+        new CoproductSerializer[ADT](
+          classOf[ADT],
+          0,
+          subtypeClasses,
+          subtypeClasses.map(_.getName),
+          subtypeSerializers
+        )
+      )
     )
 
     val compatibility = newSnapshot.resolveSchemaCompatibility(oldSnapshot)
