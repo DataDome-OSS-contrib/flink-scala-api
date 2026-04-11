@@ -6,6 +6,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
+import org.apache.flinkx.api.evolution.dsl.EvolvedMerger
 import org.apache.flinkx.api.evolution.{EvolutionBuilder, EvolutionNotAllowedException, Evolutions}
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer, nullable}
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation, MarkerTypeInfo}
@@ -33,9 +34,14 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         cache.put(cacheKey, MarkerTypeInfo)
-        val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
-        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
-        val fieldNames = ctx.parameters.map(_.label).toArray
+        val clazz       = classTag[T].runtimeClass.asInstanceOf[Class[T]]
+        val dslEvolved  = Evolutions.getEvolved(clazz)
+        // Annotation @version takes precedence; otherwise fall back to DSL-declared current version.
+        val version     = {
+          val fromAnnot = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+          if (fromAnnot > 0) fromAnnot else dslEvolved.map(_.currentVersion).getOrElse(0)
+        }
+        val fieldNames  = ctx.parameters.map(_.label).toArray
         val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
           new ScalaCaseObjectSerializer[T](clazz)
         } else {
@@ -89,6 +95,15 @@ private[api] trait TypeInformationDerivation {
               case _                    => // Ignore other annotations
             }
           }
+          // Merge DSL-supplied evolutions (defaults sourced from Magnolia's `Param.default`).
+          dslEvolved.foreach { ev =>
+            EvolvedMerger.merge[T](
+              ev,
+              builder,
+              clazz,
+              name => ctx.parameters.find(_.label == name).flatMap(_.default)
+            )
+          }
         }
         Evolutions.register(builder)
 
@@ -109,7 +124,11 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version        = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        val dslEvolved     = Evolutions.getEvolved(clazz)
+        val version        = {
+          val fromAnnot = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+          if (fromAnnot > 0) fromAnnot else dslEvolved.map(_.currentVersion).getOrElse(0)
+        }
         val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
         val serializer     = new CoproductSerializer[T](
           clazz = clazz,
@@ -152,6 +171,11 @@ private[api] trait TypeInformationDerivation {
               case e: Evolved => throw EvolutionNotAllowedException(e, p.typeclass.getTypeClass.toString)
               case _          => // Ignore other annotations
             }
+          }
+          // Merge DSL-supplied evolutions for the sealed trait (no `Add` deltas expected, but field-level deltas are
+          // a no-op for traits anyway — only class-level renames and deletions apply).
+          dslEvolved.foreach { ev =>
+            EvolvedMerger.merge[T](ev, builder, clazz, _ => None)
           }
           Evolutions.register(builder)
         }

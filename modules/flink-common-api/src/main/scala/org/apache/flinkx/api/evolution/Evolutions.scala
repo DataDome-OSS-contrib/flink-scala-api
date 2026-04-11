@@ -38,10 +38,23 @@ object Evolutions {
   private val currentClassToEvolutions: concurrent.Map[Class[_], Evolution[_]] = concurrent.TrieMap(initEvolutions: _*)
   private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]]  = concurrent.TrieMap.empty
   private val deletedFormerClassThrowOnInstance: concurrent.Map[String, Unit]  = concurrent.TrieMap.empty
+  // DSL registry, populated by `dsl.EvolutionDslAt.build` and consumed by `TypeInformationDerivation` to merge DSL data
+  // with annotation-driven evolutions. Keyed by the ADT's current class.
+  private val dslEvolved: concurrent.Map[Class[_], dsl.Evolved[_]] = concurrent.TrieMap.empty
 
   /** Build the [[Evolution]] from the given builder and register it for the deserialization phase. */
   def register[T](builder: EvolutionBuilder[T]): Unit =
     currentClassToEvolutions.put(builder.currentClass, builder.build())
+
+  /** Register an [[dsl.Evolved]] descriptor produced by the typed DSL. Called by `EvolutionDslAt.build` at companion
+    * object initialization time, so the descriptor is available when [[TypeInformationDerivation]] later runs.
+    */
+  private[api] def registerEvolved[T](clazz: Class[T], evolved: dsl.Evolved[T]): Unit =
+    dslEvolved.put(clazz, evolved)
+
+  /** Look up the DSL-driven [[dsl.Evolved]] descriptor for `clazz`, or `None` if the ADT only uses annotations. */
+  private[api] def getEvolved[T](clazz: Class[T]): Option[dsl.Evolved[T]] =
+    dslEvolved.get(clazz).asInstanceOf[Option[dsl.Evolved[T]]]
 
   /** Return the [[Evolution]] associated with the given ADT class, or [[Evolution.NoEvolution]] otherwise. */
   def get[T](clazz: Class[T]): Evolution[T] =
@@ -123,6 +136,7 @@ object Evolutions {
     currentClassToEvolutions.addAll(initEvolutions)
     formerClassNameToCurrentClass.clear()
     deletedFormerClassThrowOnInstance.clear()
+    dslEvolved.clear()
   }
 
 }

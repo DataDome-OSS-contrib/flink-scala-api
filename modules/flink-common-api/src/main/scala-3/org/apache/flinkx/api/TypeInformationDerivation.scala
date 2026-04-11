@@ -6,6 +6,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
+import org.apache.flinkx.api.evolution.dsl.EvolvedMerger
 import org.apache.flinkx.api.evolution.{EvolutionBuilder, EvolutionNotAllowedException, Evolutions}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
@@ -37,7 +38,11 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
-        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        val dslEvolved = Evolutions.getEvolved(clazz)
+        val version    = {
+          val fromAnnot = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+          if fromAnnot > 0 then fromAnnot else dslEvolved.map(_.currentVersion).getOrElse(0)
+        }
         val fieldNames = ctx.parameters.map(_.label).toArray
         val serializer =
           if typeTag.isEnum then new Scala3EnumValueSerializer[T & Product](clazz, ctx.typeInfo.short)
@@ -92,6 +97,15 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               case _                    => // Ignore other annotations
             }
           }
+          // Merge DSL-supplied evolutions (defaults sourced from Magnolia's `Param.default`).
+          dslEvolved.foreach { ev =>
+            EvolvedMerger.merge[T & Product](
+              ev,
+              builder,
+              clazz,
+              name => ctx.parameters.find(_.label == name).flatMap(_.default)
+            )
+          }
         Evolutions.register(builder)
 
         val ti = new CaseClassTypeInfo[T & Product](
@@ -115,7 +129,11 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        val dslEvolved = Evolutions.getEvolved(clazz)
+        val version    = {
+          val fromAnnot = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+          if fromAnnot > 0 then fromAnnot else dslEvolved.map(_.currentVersion).getOrElse(0)
+        }
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
@@ -172,6 +190,10 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               case e: Evolved => throw EvolutionNotAllowedException(e, p.typeclass.getTypeClass.toString)
               case _          => // Ignore other annotations
             }
+          }
+          // Merge DSL-supplied evolutions for the sealed trait / enum.
+          dslEvolved.foreach { ev =>
+            EvolvedMerger.merge[T](ev, builder, clazz, _ => None)
           }
           Evolutions.register(builder)
 
