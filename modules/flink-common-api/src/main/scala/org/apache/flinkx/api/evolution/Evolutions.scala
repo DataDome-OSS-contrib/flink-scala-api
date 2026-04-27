@@ -1,18 +1,19 @@
 package org.apache.flinkx.api.evolution
 
+import org.apache.flink.annotation.VisibleForTesting
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.annotation.StaticAnnotation
-import scala.collection.mutable
+import scala.collection.concurrent
 
 object Evolutions {
 
   // Maps filled at startup time during the ADT derivation with up-to-date information from the source code and used
   // during deserialization
-  private val classToEvolutions: mutable.Map[Class[_], Evolution[_]]       = mutable.Map.empty
-  private val formerClassNameToCurrentClass: mutable.Map[String, Class[_]] = mutable.Map.empty
+  private val classToEvolutions: concurrent.Map[Class[_], Evolution[_]]       = concurrent.TrieMap.empty
+  private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]] = concurrent.TrieMap.empty
 
   /** Return the [[Evolution]] associated with given class. Create it if necessary.
     *
@@ -58,5 +59,11 @@ object Evolutions {
 
   private[api] def throwEvolutionNotAllowed[A](evolution: StaticAnnotation, target: String): A =
     throw new FlinkRuntimeException(s"@$evolution annotation is not allowed on $target")
+
+  @VisibleForTesting
+  private[api] def reset(): Unit = {
+    classToEvolutions.clear()
+    formerClassNameToCurrentClass.clear()
+  }
 
 }

@@ -4,10 +4,14 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.EvolutionTest._
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.evolution.Evolutions
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
+class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
+
+  override protected def beforeEach(): Unit = Evolutions.reset()
 
   /*
   it should "serialize Click v0" in {
@@ -72,7 +76,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongDeletedMembersOnCaseClassWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,Array(\"a\")) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnCaseClassWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedMembers(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnCaseClassWithoutVersion without version"
   }
 
   it should "throw when @version is on a case class field" in {
@@ -114,7 +118,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongDeletedMembersOnField]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,Array(\"a\")) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnField.a"
+    exception.getMessage shouldBe "@deletedMembers(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnField.a"
   }
 
   it should "throw when @added is on a sealed trait" in {
@@ -142,7 +146,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongDeletedMembersOnSealedTraitWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,Array(\"A\")) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnSealedTraitWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedMembers(1,\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnSealedTraitWithoutVersion without version"
   }
 
   it should "throw when @added is on a sealed trait subtype" in {
@@ -170,7 +174,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongDeletedMembersOnSealedTraitSubtype]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,Array(\"A\")) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnSubtype$ without version"
+    exception.getMessage shouldBe "@deletedMembers(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnSubtype$ without version"
   }
 
   it should "allow when @deletedMembers is on a sealed trait subtype being itself a sealed trait" in {
@@ -247,8 +251,8 @@ object EvolutionTest {
    */
 
   @version(3)
-  @deletedMembers(since = 1, Array("a"))
-  @deletedMembers(since = 2, Array("b"))
+  @deletedMembers(since = 1, "a")
+  @deletedMembers(since = 2, "b")
   @postDeserialize(updateClick)
   case class Click(
       @renamed(since = 2, "identifier") id: String,
@@ -275,7 +279,7 @@ object EvolutionTest {
 
   @version(1)
   @renamed(since = 1, "Event")
-  @deletedMembers(since = 1, Array("Purchase"))
+  @deletedMembers(since = 1, "Purchase")
   @postDeserialize(updateAction)
   sealed trait Action
 
@@ -313,7 +317,7 @@ object EvolutionTest {
   @transformed(since = 1, identity[Int])
   case class WrongTransformedOnCaseClass()
 
-  @deletedMembers(1, Array("a"))
+  @deletedMembers(1, "a")
   case class WrongDeletedMembersOnCaseClassWithoutVersion()
 
   @version(1)
@@ -329,7 +333,7 @@ object EvolutionTest {
   case class WrongTransformedOnFieldWithoutVersion(@transformed(1, identity[String]) a: String)
 
   @version(1)
-  case class WrongDeletedMembersOnField(@deletedMembers(1, Array("a")) a: String)
+  case class WrongDeletedMembersOnField(@deletedMembers(1, "a") a: String)
 
   @version(1)
   @added(since = 1)
@@ -345,7 +349,7 @@ object EvolutionTest {
   sealed trait WrongTransformedOnSealedTrait
   case object Subtype3 extends WrongTransformedOnSealedTrait
 
-  @deletedMembers(since = 1, Array("A"))
+  @deletedMembers(since = 1, "A")
   sealed trait WrongDeletedMembersOnSealedTraitWithoutVersion
   case object Subtype4 extends WrongDeletedMembersOnSealedTraitWithoutVersion
 
@@ -365,45 +369,45 @@ object EvolutionTest {
 
   @version(1)
   sealed trait WrongDeletedMembersOnSealedTraitSubtype
-  @deletedMembers(since = 1, Array("A"))
+  @deletedMembers(since = 1, "A")
   case object WrongDeletedMembersOnSubtype extends WrongDeletedMembersOnSealedTraitSubtype
 
   @version(1)
   sealed trait CorrectDeletedMembersOnSealedTraitSubtype
   @version(1)
-  @deletedMembers(since = 1, Array("A"))
+  @deletedMembers(since = 1, "A")
   sealed trait CorrectDeletedMembersOnSubtype extends CorrectDeletedMembersOnSealedTraitSubtype
   case object CorrectDeletedMembersCaseObject extends CorrectDeletedMembersOnSubtype
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, Array("inFileClicks", "fieldNotInFile", "identifier", "b"))
+  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongAddedField(@added(since = 2) a: String = "")
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, Array("inFileClicks", "fieldNotInFile", "identifier", "b"))
+  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, Array("inFileClicks", "fieldNotInFile", "identifier", "b"))
+  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, Array("inFileClicks", "fieldNotInFile", "identifier", "b"))
-  @deletedMembers(since = 2, Array("wrongFieldName"))
+  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedMembers(since = 2, "wrongFieldName")
   case class WrongDeletedField(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, Array("inFileClicks", "fieldNotInFile", "identifier"))
+  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
   case class WrongFieldNotUsed(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, Array("inFileClicks", "fieldNotInFile", "identifier", "b"))
+  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongMissingField(a: String, missingField: String)
 
 }

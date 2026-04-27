@@ -63,6 +63,9 @@ class CaseClassSerializer[T <: Product](
   // The underlying implementation is major version-specific (Scala 2 vs. Scala 3).
   @transient private lazy val constructor = lookupConstructor(tupleClass)
 
+  // Cache to lookup Evolution on first record only
+  @transient private lazy val evolution = Evolutions.get(tupleClass)
+
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
       this
@@ -159,7 +162,6 @@ class CaseClassSerializer[T <: Product](
         fieldMap.put(fieldNames(i), fieldSerializers(i).deserialize(source))
         i += 1
       }
-      val evolution = Evolutions.get(tupleClass)
       if (evolution.isDeleted) {
         null.asInstanceOf[T]
       } else {

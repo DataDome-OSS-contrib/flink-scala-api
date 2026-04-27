@@ -478,11 +478,11 @@ Mark your ADT with `@version` and annotate the ADT and its members (fields or su
 ```scala
 import org.apache.flinkx.api._
 
-// Version 0: initial schema in savepoint
+// Implicit version 0: initial schema in savepoint
 // case class Click(identifier: String, sessionId: Int, unused: String)
 
 @version(2)
-@deletedMembers(since = 1, Array("unused"))
+@deletedMembers(since = 1, "unused")
 @postDeserialize(updateClick)
 case class Click(
     @renamed(since = 1, "identifier") id: String,
@@ -493,14 +493,14 @@ case class Click(
 def intToString(i: Int): String = i.toString
 def updateClick(click: Click): Click = click.copy(sessionId = click.sessionId + click.id)
 
-// Version 0: initial schema in savepoint
+// Implicit version 0: initial schema in savepoint
 // sealed trait Event
 // case class View(ts: Long) extends Event
 // case class Purchase(price: Double) extends Event
 
 @version(1)
 @renamed(since = 1, "Event")
-@deletedMembers(since = 1, Array("Purchase"))
+@deletedMembers(since = 1, "Purchase")
 @postDeserialize(updateAction)
 sealed trait Action
 
@@ -516,11 +516,11 @@ An ADT without `@version` annotation is considered as version 0. You can enable 
 annotation on an ADT and recover from a checkpoint without.
 
 **Available annotations:**
-* `@version(n)` on ADT: current schema version
+* `@version(n)` on ADT: current schema version n, where n > 0
 * `@added(since = n)` on case class field: added in version n (requires default value)
 * `@renamed(since = n, "oldName")` on ADT or member: renamed from "oldName"
 * `@transformed(since = n, mapper)` on case class field: type changed with mapper function
-* `@deletedMembers(since = n, Array("a", "b"))` on ADT: multiple members deleted
+* `@deletedMembers(since = n, "a", "b")` on ADT: multiple members deleted
 * `@postDeserialize(mapper)` on ADT: apply mapper function on deserialized object
 
 Evolutions apply in sorted order by version number when deserializing from checkpoints.
