@@ -22,6 +22,9 @@ class CoproductSerializer[T](
   override val isImmutableType: Boolean = subtypeSerializers.forall(_.isImmutableType)
   val isImmutableSerializer: Boolean    = subtypeSerializers.forall(s => s.duplicate().eq(s))
 
+  // Cache to lookup Evolution on first record only
+  @transient private lazy val evolution = Evolutions.get(clazz)
+
   override def copy(from: T): T = {
     if (from == null || isImmutableType) {
       from
@@ -73,7 +76,6 @@ class CoproductSerializer[T](
   override def deserialize(source: DataInputView): T = {
     val index     = source.readByte()
     val subtype   = subtypeSerializers(index.toInt)
-    val evolution = Evolutions.get(clazz)
     evolution.applyPostDeserialize(subtype.asInstanceOf[TypeSerializer[T]].deserialize(source))
   }
 

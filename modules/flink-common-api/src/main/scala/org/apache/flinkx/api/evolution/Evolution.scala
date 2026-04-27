@@ -26,7 +26,7 @@ final class Evolution[T](
     val clazz: Class[T],
     private var fieldNames: Array[String] = Array.empty,
     private val fieldEvolutions: mutable.SortedSet[FieldEvolution] = mutable.SortedSet.empty,
-    private var postDeserialize: AnyRef => AnyRef = identity[AnyRef]
+    private var postDeserialize: T => T = identity[T] _
 ) {
 
   /** Register field names currently declared in the case class source code.
@@ -50,8 +50,8 @@ final class Evolution[T](
     * @param postDeserialize
     *   Mapper to apply on the ADT at the end of its deserialization
     */
-  def addPostDeserialize[A](postDeserialize: A => A): Unit =
-    this.postDeserialize = postDeserialize.asInstanceOf[AnyRef => AnyRef]
+  def addPostDeserialize(postDeserialize: T => T): Unit =
+    this.postDeserialize = postDeserialize
 
   /** Apply evolutions currently declared on the case class source code to field map starting from a specific version.
     *
@@ -71,8 +71,8 @@ final class Evolution[T](
     * @param toUpdate
     *   The mapper function is applied on this ADT instance
     */
-  def applyPostDeserialize[A](toUpdate: A): A =
-    postDeserialize.apply(toUpdate.asInstanceOf[AnyRef]).asInstanceOf[A]
+  def applyPostDeserialize(toUpdate: T): T =
+    postDeserialize.apply(toUpdate)
 
   /** Return a boolean indicating if the ADT class has been registered as deleted in the current source code.
     *

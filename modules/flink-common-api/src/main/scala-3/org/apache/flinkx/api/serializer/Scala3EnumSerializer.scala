@@ -17,6 +17,9 @@ class Scala3EnumSerializer[T <: Product](
   override val isImmutableType: Boolean = enumValueSerializers.forall(_.isImmutableType)
   val isImmutableSerializer: Boolean    = enumValueSerializers.forall(s => s.duplicate().eq(s))
 
+  // Cache to lookup Evolution on first record only
+  @transient private lazy val evolution = Evolutions.get(clazz)
+
   override def copy(from: T): T = {
     if (from == null || isImmutableType) {
       from
@@ -66,7 +69,6 @@ class Scala3EnumSerializer[T <: Product](
       null.asInstanceOf[T]
     } else {
       val subtype = enumValueSerializers(index.toInt)
-      val evolution = Evolutions.get(clazz)
       evolution.applyPostDeserialize(subtype.asInstanceOf[TypeSerializer[T]].deserialize(source))
     }
   }

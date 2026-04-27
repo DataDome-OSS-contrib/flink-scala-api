@@ -70,7 +70,7 @@ private[api] trait TypeInformationDerivation {
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
             case d: deletedMembers     => d.names.map(Delete(d.since, clazz, _)).foreach(evolution.addFieldEvolution)
-            case p: postDeserialize[_] => evolution.addPostDeserialize(p.mapper)
+            case p: postDeserialize[T] => evolution.addPostDeserialize(p.mapper)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over case class fields annotations to register evolutions from current source code
@@ -121,7 +121,7 @@ private[api] trait TypeInformationDerivation {
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
             case d: deletedMembers     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
-            case p: postDeserialize[_] => evolution.addPostDeserialize(p.mapper)
+            case p: postDeserialize[T] => evolution.addPostDeserialize(p.mapper)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over subtypes annotations to register evolutions from current source code

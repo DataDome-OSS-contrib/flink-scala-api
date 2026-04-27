@@ -32,7 +32,7 @@ package object api {
     * @param mapper
     *   Function transforming deserialized instance
     */
-  final case class postDeserialize[A <: AnyRef](mapper: A => A) extends Evolved {
+  final case class postDeserialize[A](mapper: A => A) extends Evolved {
     override def toString: String = s"postDeserialize(<mapper>)"
   }
 
@@ -81,8 +81,8 @@ package object api {
     * @param names
     *   Names of deleted members (fields of a case class, subtypes of a sealed trait)
     */
-  final case class deletedMembers(since: Int, names: Array[String]) extends Evolved {
-    override def toString: String = s"deletedMembers($since,${names.mkString("Array(\"", "\",\"", "\")")})"
+  final case class deletedMembers(since: Int, names: String*) extends Evolved {
+    override def toString: String = s"deletedMembers($since,${names.mkString("\"", "\",\"", "\"")})"
   }
 
   /** Basic type has an arity of 1. See [[BasicTypeInfo#getArity()]] */
