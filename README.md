@@ -516,7 +516,7 @@ An ADT without `@version` annotation is considered as version 0. You can enable 
 annotation on an ADT and recover from a checkpoint without.
 
 **Available annotations:**
-* `@version(n)` on ADT: current schema version n, where n > 0
+* `@version(n)` on ADT: current schema version n, where n is positive
 * `@added(since = n)` on case class field: added in version n (requires default value)
 * `@renamed(since = n, "oldName")` on ADT or member: renamed from "oldName"
 * `@transformed(since = n, mapper)` on case class field: type changed with mapper function
