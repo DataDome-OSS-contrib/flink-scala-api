@@ -19,9 +19,7 @@ package object api {
     * @param current
     *   Current version number
     */
-  final case class version(current: Int) extends StaticAnnotation {
-    if (current <= 0) throw new FlinkRuntimeException(s"Current version must be positive, got @version($current)")
-  }
+  final case class version(current: Int) extends StaticAnnotation
 
   /** Trait marker indicating an evolution annotation. */
   trait Evolved extends StaticAnnotation

@@ -43,7 +43,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongCurrentVersion]]
     }
-    exception.getMessage shouldBe "Current version must be positive, got @version(0)"
+    exception.getMessage shouldBe "Current version of class org.apache.flinkx.api.EvolutionTest$WrongCurrentVersion must be positive, got @version(0)"
   }
 
   it should "throw when @added is on a case class" in {

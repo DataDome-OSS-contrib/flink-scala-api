@@ -4,6 +4,7 @@ import org.apache.flink.annotation.VisibleForTesting
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 import org.apache.flinkx.api.util.ClassUtil
+import org.apache.flinkx.api.version
 
 import scala.annotation.StaticAnnotation
 import scala.collection.concurrent
@@ -14,6 +15,11 @@ object Evolutions {
   // during deserialization
   private val classToEvolutions: concurrent.Map[Class[_], Evolution[_]]       = concurrent.TrieMap.empty
   private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]] = concurrent.TrieMap.empty
+
+  def findVersion[A](clazz: Class[_]): PartialFunction[A, Int] = {
+    case version(c) if c > 0 => c
+    case version(c) => throw new FlinkRuntimeException(s"Current version of $clazz must be positive, got @version($c)")
+  }
 
   /** Return the [[Evolution]] associated with given class. Create it if necessary.
     *
