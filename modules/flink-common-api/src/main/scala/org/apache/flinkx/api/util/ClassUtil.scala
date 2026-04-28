@@ -26,14 +26,6 @@ object ClassUtil {
     )
   }
 
-  def resolveClassByName[T](className: String, cl: ClassLoader): Class[T] = {
-    try {
-      Class.forName(className, false, cl).asInstanceOf[Class[T]]
-    } catch {
-      case e: ClassNotFoundException => throw new FlinkRuntimeException(e)
-    }
-  }
-
   /** Resolve a former class name to its fully qualified internal name based on the current class.
     *
     * Interpret `from` parameter relative to the current class's package and nesting hierarchy, converting it to the JVM

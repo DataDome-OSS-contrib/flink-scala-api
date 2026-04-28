@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.Evolution.DeletedClass
+import org.apache.flinkx.api.evolution.Evolutions.DeletedClass
 import org.apache.flinkx.api.evolution.FieldEvolution.FromFieldEvolution
 
 import scala.collection.mutable
@@ -95,18 +95,11 @@ final class Evolution[T](
   }
 
   private def throwFieldNotUsed(clazz: Class[_], field: String): Unit = throw new FlinkRuntimeException(
-    s"'$field' field not used to instantiate $clazz. Use @deletedMembers(since=<version>,Array(\"$field\")) annotation to indicate it has been deleted"
+    s"'$field' field not used to instantiate $clazz. Use @deletedElements(since=<version>,\"$field\") annotation to indicate it has been deleted"
   )
 
   private def throwMissingField(clazz: Class[_], field: String): AnyRef = throw new FlinkRuntimeException(
     s"'$field' field missing to instantiate $clazz. Use @added(since=<version>) annotation to indicate it has been added"
   )
-
-}
-
-object Evolution {
-
-  private final class DeletedMarker
-  private[evolution] val DeletedClass: Class[_] = classOf[DeletedMarker]
 
 }

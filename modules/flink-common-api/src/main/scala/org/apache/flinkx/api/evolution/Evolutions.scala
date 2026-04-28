@@ -2,19 +2,23 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.VisibleForTesting
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 import org.apache.flinkx.api.util.ClassUtil
 import org.apache.flinkx.api.version
 
+import java.io.IOException
 import scala.annotation.StaticAnnotation
 import scala.collection.concurrent
+import scala.util.Try
 
 object Evolutions {
 
   // Maps filled at startup time during the ADT derivation with up-to-date information from the source code and used
   // during deserialization
-  private val classToEvolutions: concurrent.Map[Class[_], Evolution[_]]       = concurrent.TrieMap.empty
+  private val classToEvolutions: concurrent.Map[Class[_], Evolution[_]]       = concurrent.TrieMap(initEvolutions: _*)
   private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]] = concurrent.TrieMap.empty
+
+  private def initEvolutions: Seq[(Class[_], Evolution[_])] =
+    Seq((DeletedClass, new Evolution(DeletedClass)))
 
   def findVersion[A](clazz: Class[_]): PartialFunction[A, Int] = {
     case version(c) if c > 0 => c
@@ -60,11 +64,21 @@ object Evolutions {
     */
   def resolveFormerClass[T](formerClassName: String, cl: ClassLoader): Class[T] =
     formerClassNameToCurrentClass
-      .getOrElse(formerClassName, ClassUtil.resolveClassByName(formerClassName, cl))
+      .getOrElse(
+        formerClassName,
+        Try(Class.forName(formerClassName, false, cl)).recover { case e: ClassNotFoundException =>
+          throw new IOException(e) // Iso InstantiationUtil.resolveClassByName
+        }.get
+      )
       .asInstanceOf[Class[T]]
 
   private[api] def throwEvolutionNotAllowed[A](evolution: StaticAnnotation, target: String): A =
     throw new FlinkRuntimeException(s"@$evolution annotation is not allowed on $target")
+
+  private final class DeletedMarker {
+    throw new FlinkRuntimeException("This class is a replacement of a deleted class and should never be instantiated")
+  }
+  private[evolution] val DeletedClass: Class[_] = classOf[DeletedMarker]
 
   @VisibleForTesting
   private[api] def reset(): Unit = {

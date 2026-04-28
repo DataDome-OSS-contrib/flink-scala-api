@@ -69,7 +69,7 @@ private[api] trait TypeInformationDerivation {
           // Iterate over case class annotations to register evolutions from current source code
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedMembers     => d.names.map(Delete(d.since, clazz, _)).foreach(evolution.addFieldEvolution)
+            case d: deletedElements    => d.names.map(Delete(d.since, clazz, _)).foreach(evolution.addFieldEvolution)
             case p: postDeserialize[T] => evolution.addPostDeserialize(p.mapper)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
@@ -120,16 +120,16 @@ private[api] trait TypeInformationDerivation {
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedMembers     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case d: deletedElements    => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
             case p: postDeserialize[T] => evolution.addPostDeserialize(p.mapper)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over subtypes annotations to register evolutions from current source code
           ctx.subtypes.foreach { p =>
             p.annotations.collect {
-              case r: renamed        => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
-              case _: deletedMembers => // allowed on subtype
-              case e: Evolved        => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
+              case r: renamed         => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
+              case _: deletedElements => // allowed on subtype
+              case e: Evolved         => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
             }
           }
         }
