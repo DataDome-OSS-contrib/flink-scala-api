@@ -65,6 +65,8 @@ class CaseClassSerializer[T <: Product](
 
   // Cache to lookup Evolution on first record only
   @transient private lazy val evolution = Evolutions.get(tupleClass)
+  // Cache to check for fast path on first record only
+  @transient private lazy val isEvolutionAvoidable = evolution.isAvoidable(version, fieldNames)
 
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
@@ -147,14 +149,18 @@ class CaseClassSerializer[T <: Product](
     if (sourceArity < 0) {
       source.skipBytesToRead(nullPadding.length)
       null.asInstanceOf[T]
-    } else if (fieldNames.isEmpty) { // Keep compatibility with versions < 2.3.0
+    } else if (isEvolutionAvoidable || fieldNames.isEmpty) { // Keep compatibility with versions < 2.3.0
       val fields = new Array[AnyRef](sourceArity)
       var i      = 0
       while (i < sourceArity) {
         fields(i) = fieldSerializers(i).deserialize(source)
         i += 1
       }
-      createInstance(fields)
+      if (evolution.isDeleted) {
+        null.asInstanceOf[T]
+      } else {
+        evolution.applyPostDeserialize(createInstance(fields))
+      }
     } else {
       val fieldMap = mutable.Map.empty[String, AnyRef]
       var i        = 0

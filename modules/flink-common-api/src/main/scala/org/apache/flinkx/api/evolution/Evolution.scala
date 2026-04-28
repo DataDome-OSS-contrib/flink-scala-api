@@ -26,7 +26,7 @@ final class Evolution[T](
     val clazz: Class[T],
     private var fieldNames: Array[String] = Array.empty,
     private val fieldEvolutions: mutable.SortedSet[FieldEvolution] = mutable.SortedSet.empty,
-    private var postDeserialize: T => T = identity[T] _
+    private var postDeserialize: T => T = Evolution.IdentityFunction.asInstanceOf[T => T]
 ) {
 
   /** Register field names currently declared in the case class source code.
@@ -53,6 +53,17 @@ final class Evolution[T](
   def addPostDeserialize(postDeserialize: T => T): Unit =
     this.postDeserialize = postDeserialize
 
+  /** Is evolution can be skipped? Return `true` if no evolution is required from given version and if fields haven't
+    * been reordered, `false` otherwise.
+    *
+    * @param since
+    *   Schema version of serialized data
+    * @param previousFieldNames
+    *   Array of field names of serialized data in declaration order
+    */
+  def isAvoidable(since: Int, previousFieldNames: Array[String]): Boolean =
+    fieldEvolutions.rangeFrom(FromFieldEvolution(since)).isEmpty && previousFieldNames.sameElements(fieldNames)
+
   /** Apply evolutions currently declared on the case class source code to field map starting from a specific version.
     *
     * @param since
@@ -72,7 +83,7 @@ final class Evolution[T](
     *   The mapper function is applied on this ADT instance
     */
   def applyPostDeserialize(toUpdate: T): T =
-    postDeserialize.apply(toUpdate)
+    if ((postDeserialize: AnyRef) eq Evolution.IdentityFunction) toUpdate else postDeserialize.apply(toUpdate)
 
   /** Return a boolean indicating if the ADT class has been registered as deleted in the current source code.
     *
@@ -102,4 +113,9 @@ final class Evolution[T](
     s"'$field' field missing to instantiate $clazz. Use @added(since=<version>) annotation to indicate it has been added"
   )
 
+}
+
+object Evolution {
+  // Sentinel used to fast-path applyPostDeserialize when no @postDeserialize mapper has been registered
+  private val IdentityFunction: Any => Any = identity
 }
