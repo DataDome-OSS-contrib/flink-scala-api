@@ -72,11 +72,18 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnCaseClass"
   }
 
-  it should "throw when @deletedElements is on a case class without version" in {
+  it should "throw when @deletedFields is on a case class without version" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedElementsOnCaseClassWithoutVersion]]
+      implicitly[TypeInformation[WrongDeletedFieldsOnCaseClassWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedElements(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnCaseClassWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedFields(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedFieldsOnCaseClassWithoutVersion without version"
+  }
+
+  it should "throw when @deletedClasses is on a case class without version" in {
+    val exception = intercept[FlinkRuntimeException] {
+      implicitly[TypeInformation[WrongDeletedClassesOnCaseClassWithoutVersion]]
+    }
+    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnCaseClassWithoutVersion without version"
   }
 
   it should "throw when @version is on a case class field" in {
@@ -114,11 +121,18 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnFieldWithoutVersion without version"
   }
 
-  it should "throw when @deletedElements is on a case class field" in {
+  it should "throw when @deletedFields is on a case class field" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedElementsOnField]]
+      implicitly[TypeInformation[WrongDeletedFieldsOnField]]
     }
-    exception.getMessage shouldBe "@deletedElements(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnField.a"
+    exception.getMessage shouldBe "@deletedFields(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedFieldsOnField.a"
+  }
+
+  it should "throw when @deletedClasses is on a case class field" in {
+    val exception = intercept[FlinkRuntimeException] {
+      implicitly[TypeInformation[WrongDeletedClassesOnField]]
+    }
+    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnField.a"
   }
 
   it should "throw when @added is on a sealed trait" in {
@@ -142,11 +156,11 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSealedTrait"
   }
 
-  it should "throw when @deletedElements is on a sealed trait without version" in {
+  it should "throw when @deletedClasses is on a sealed trait without version" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedElementsOnSealedTraitWithoutVersion]]
+      implicitly[TypeInformation[WrongDeletedClassesOnSealedTraitWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedElements(1,\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnSealedTraitWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnSealedTraitWithoutVersion without version"
   }
 
   it should "throw when @added is on a sealed trait subtype" in {
@@ -170,15 +184,15 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSubtype$ without version"
   }
 
-  it should "throw when @deletedElements is on a sealed trait subtype" in {
+  it should "throw when @deletedClasses is on a sealed trait subtype" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedElementsOnSealedTraitSubtype]]
+      implicitly[TypeInformation[WrongDeletedClassesOnSealedTraitSubtype]]
     }
-    exception.getMessage shouldBe "@deletedElements(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnSubtype$ without version"
+    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnSubtype$ without version"
   }
 
-  it should "allow when @deletedElements is on a sealed trait subtype being itself a sealed trait" in {
-    implicitly[TypeInformation[CorrectDeletedElementsOnSealedTraitSubtype]]
+  it should "allow when @deletedClasses is on a sealed trait subtype being itself a sealed trait" in {
+    implicitly[TypeInformation[CorrectDeletedClassesOnSealedTraitSubtype]]
   }
 
   it should "throw field not found when deserializing Click v0 with wrong added field" in {
@@ -218,7 +232,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     val exception = intercept[FlinkRuntimeException] {
       testDeserializeFromFile("Click-v0", expected)
     }
-    exception.getMessage shouldBe "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongFieldNotUsed. Use @deletedElements(since=<version>,\"b\") annotation to indicate it has been deleted"
+    exception.getMessage shouldBe "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongFieldNotUsed. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
   }
 
   it should "throw missing field when deserializing Click v0 with missing field to instantiate" in {
@@ -251,8 +265,8 @@ object EvolutionTest {
    */
 
   @version(3)
-  @deletedElements(since = 1, "a")
-  @deletedElements(since = 2, "b")
+  @deletedFields(since = 1, "a")
+  @deletedFields(since = 2, "b")
   @postDeserialize(updateClick)
   case class Click(
       @renamed(since = 2, "identifier") id: String,
@@ -279,7 +293,7 @@ object EvolutionTest {
 
   @version(1)
   @renamed(since = 1, "Event")
-  @deletedElements(since = 1, "Purchase")
+  @deletedClasses("Purchase")
   @postDeserialize(updateAction)
   sealed trait Action
 
@@ -317,8 +331,11 @@ object EvolutionTest {
   @transformed(since = 1, identity[Int])
   case class WrongTransformedOnCaseClass()
 
-  @deletedElements(1, "a")
-  case class WrongDeletedElementsOnCaseClassWithoutVersion()
+  @deletedFields(1, "a")
+  case class WrongDeletedFieldsOnCaseClassWithoutVersion()
+
+  @deletedClasses("A")
+  case class WrongDeletedClassesOnCaseClassWithoutVersion()
 
   @version(1)
   case class WrongVersionOnField(@version(1) a: String)
@@ -333,7 +350,10 @@ object EvolutionTest {
   case class WrongTransformedOnFieldWithoutVersion(@transformed(1, identity[String]) a: String)
 
   @version(1)
-  case class WrongDeletedElementsOnField(@deletedElements(1, "a") a: String)
+  case class WrongDeletedFieldsOnField(@deletedFields(1, "a") a: String)
+
+  @version(1)
+  case class WrongDeletedClassesOnField(@deletedClasses("A") a: String)
 
   @version(1)
   @added(since = 1)
@@ -349,9 +369,9 @@ object EvolutionTest {
   sealed trait WrongTransformedOnSealedTrait
   case object Subtype3 extends WrongTransformedOnSealedTrait
 
-  @deletedElements(since = 1, "A")
-  sealed trait WrongDeletedElementsOnSealedTraitWithoutVersion
-  case object Subtype4 extends WrongDeletedElementsOnSealedTraitWithoutVersion
+  @deletedClasses("A")
+  sealed trait WrongDeletedClassesOnSealedTraitWithoutVersion
+  case object Subtype4 extends WrongDeletedClassesOnSealedTraitWithoutVersion
 
   @version(1)
   sealed trait WrongAddedOnSealedTraitSubtype
@@ -368,46 +388,52 @@ object EvolutionTest {
   case object WrongTransformedOnSubtype extends WrongTransformedOnSealedTraitSubtype
 
   @version(1)
-  sealed trait WrongDeletedElementsOnSealedTraitSubtype
-  @deletedElements(since = 1, "A")
-  case object WrongDeletedElementsOnSubtype extends WrongDeletedElementsOnSealedTraitSubtype
+  sealed trait WrongDeletedClassesOnSealedTraitSubtype
+  @deletedClasses("A")
+  case object WrongDeletedClassesOnSubtype extends WrongDeletedClassesOnSealedTraitSubtype
 
   @version(1)
-  sealed trait CorrectDeletedElementsOnSealedTraitSubtype
+  sealed trait CorrectDeletedClassesOnSealedTraitSubtype
   @version(1)
-  @deletedElements(since = 1, "A")
-  sealed trait CorrectDeletedElementsOnSubtype extends CorrectDeletedElementsOnSealedTraitSubtype
-  case object CorrectDeletedElementsCaseObject extends CorrectDeletedElementsOnSubtype
+  @deletedClasses("A")
+  sealed trait CorrectDeletedClassesOnSubtype extends CorrectDeletedClassesOnSealedTraitSubtype
+  case object CorrectDeletedClassesCaseObject extends CorrectDeletedClassesOnSubtype
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedClasses("ClickEvent")
   case class WrongAddedField(@added(since = 2) a: String = "")
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedClasses("ClickEvent")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedClasses("ClickEvent")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedElements(since = 2, "wrongFieldName")
+  @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedFields(since = 2, "wrongFieldName")
+  @deletedClasses("ClickEvent")
   case class WrongDeletedField(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
-  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
+  @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
+  @deletedClasses("ClickEvent")
   case class WrongFieldNotUsed(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
-  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedClasses("ClickEvent")
   case class WrongMissingField(a: String, missingField: String)
 
 }
