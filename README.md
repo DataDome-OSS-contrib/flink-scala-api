@@ -466,14 +466,14 @@ For case classes, starting from version 2.3.0:
 * if you want richer evolutions, use annotation-based schema evolution (see below)
 
 For sealed traits, the following compatibility rules apply:
-* you can reorder trait members
-* you can add new members
+* you can reorder trait subtypes
+* you can add new subtypes
 * if you want richer evolutions, use annotation-based schema evolution
 
 #### Annotation-Based Schema Evolution
 
 Make ADT (case class and sealed trait) evolutions while maintaining checkpoint state compatibility using annotations.
-Mark your ADT with `@version` and annotate the ADT and its members (fields or subtypes) with evolution operations:
+Mark your ADT with `@version` and annotate the ADT and its elements (fields or subtypes) with evolution operations:
 
 ```scala
 import org.apache.flinkx.api._
@@ -482,7 +482,7 @@ import org.apache.flinkx.api._
 // case class Click(identifier: String, sessionId: Int, unused: String)
 
 @version(2)
-@deletedMembers(since = 1, "unused")
+@deletedElements(since = 1, "unused")
 @postDeserialize(updateClick)
 case class Click(
     @renamed(since = 1, "identifier") id: String,
@@ -500,7 +500,7 @@ def updateClick(click: Click): Click = click.copy(sessionId = click.sessionId + 
 
 @version(1)
 @renamed(since = 1, "Event")
-@deletedMembers(since = 1, "Purchase")
+@deletedElements(since = 1, "Purchase")
 @postDeserialize(updateAction)
 sealed trait Action
 
@@ -518,9 +518,9 @@ annotation on an ADT and recover from a checkpoint without.
 **Available annotations:**
 * `@version(n)` on ADT: current schema version n, where n is positive
 * `@added(since = n)` on case class field: added in version n (requires default value)
-* `@renamed(since = n, "oldName")` on ADT or member: renamed from "oldName"
+* `@renamed(since = n, "oldName")` on ADT or element: renamed from "oldName"
 * `@transformed(since = n, mapper)` on case class field: type changed with mapper function
-* `@deletedMembers(since = n, "a", "b")` on ADT: multiple members deleted
+* `@deletedElements(since = n, "a", "b")` on ADT: multiple elements deleted
 * `@postDeserialize(mapper)` on ADT: apply mapper function on deserialized object
 
 Evolutions apply in sorted order by version number when deserializing from checkpoints.

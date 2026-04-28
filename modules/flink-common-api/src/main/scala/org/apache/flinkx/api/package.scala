@@ -3,7 +3,6 @@ package org.apache.flinkx
 import org.apache.flink.api.common.typeinfo.{BasicTypeInfo, TypeInformation}
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flink.util.FlinkRuntimeException
 
 import scala.annotation.StaticAnnotation
 
@@ -71,16 +70,16 @@ package object api {
     override def toString: String = s"transformed($since,<mapper>)"
   }
 
-  /** Marks deleted members (fields of a case class, subtypes of a sealed trait) not present in current schema.
+  /** Marks deleted elements (fields of a case class, subtypes of a sealed trait) not present in current schema.
     *
     * Annotation of ADT (case class or sealed trait).
     * @param since
     *   Version when deletions occurred
     * @param names
-    *   Names of deleted members (fields of a case class, subtypes of a sealed trait)
+    *   Names of deleted elements (fields of a case class, subtypes of a sealed trait)
     */
-  final case class deletedMembers(since: Int, names: String*) extends Evolved {
-    override def toString: String = s"deletedMembers($since,${names.mkString("\"", "\",\"", "\"")})"
+  final case class deletedElements(since: Int, names: String*) extends Evolved {
+    override def toString: String = s"deletedElements($since,${names.mkString("\"", "\",\"", "\"")})"
   }
 
   /** Basic type has an arity of 1. See [[BasicTypeInfo#getArity()]] */

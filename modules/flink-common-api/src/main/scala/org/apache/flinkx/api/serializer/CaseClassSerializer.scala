@@ -204,15 +204,15 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
-  private var serializedClass: Option[Class[T]] = None
-  private var isCaseClassImmutable: Boolean     = false
-  private var caseClassVersion: Int             = 0
-  private var fieldNames: Array[String]         = Array.empty
+  private var serializedClass: Class[T]     = _
+  private var isCaseClassImmutable: Boolean = false
+  private var caseClassVersion: Int         = 0
+  private var fieldNames: Array[String]     = Array.empty
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
     setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
-    serializedClass = Some(s.getTupleClass)
+    serializedClass = s.getTupleClass
     isCaseClassImmutable = s.isCaseClassImmutable
     caseClassVersion = s.version
     fieldNames = s.fieldNames
@@ -225,23 +225,18 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
 
   override protected def createOuterSerializerWithNestedSerializers(
       nestedSerializers: Array[TypeSerializer[_]]
-  ): CaseClassSerializer[T] = serializedClass match {
-    case Some(clazz) =>
-      new CaseClassSerializer[T](clazz, isCaseClassImmutable, caseClassVersion, fieldNames, nestedSerializers)
-    case None => throw new IllegalStateException("type can not be NULL")
-  }
+  ): CaseClassSerializer[T] =
+    new CaseClassSerializer[T](serializedClass, isCaseClassImmutable, caseClassVersion, fieldNames, nestedSerializers)
 
-  override protected def writeOuterSnapshot(out: DataOutputView): Unit = serializedClass match {
-    case Some(clazz) =>
-      out.writeUTF(clazz.getName)
-      out.writeBoolean(isCaseClassImmutable)
-      out.writeInt(caseClassVersion)
-      StringArraySerializer.INSTANCE.serialize(fieldNames, out)
-    case None => throw new IllegalStateException("type can not be NULL")
+  override protected def writeOuterSnapshot(out: DataOutputView): Unit = {
+    out.writeUTF(serializedClass.getName)
+    out.writeBoolean(isCaseClassImmutable)
+    out.writeInt(caseClassVersion)
+    StringArraySerializer.INSTANCE.serialize(fieldNames, out)
   }
 
   override protected def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-    serializedClass = Some(Evolutions.resolveFormerClass(in.readUTF(), cl))
+    serializedClass = Evolutions.resolveFormerClass(in.readUTF(), cl)
     // If reading a version of 2 or below, don't read the boolean and set isCaseClassImmutable to false
     isCaseClassImmutable = readOuterSnapshotVersion > 2 && in.readBoolean
     caseClassVersion = if (readOuterSnapshotVersion > 3) in.readInt else 0
@@ -255,8 +250,8 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
       return OuterSchemaCompatibility.INCOMPATIBLE
     }
     val caseClassSerializerSnapshot = oldSerializerSnapshot.asInstanceOf[ScalaCaseClassSerializerSnapshot[T]]
-    val currentTypeName             = serializedClass.map(_.getName)
-    val newTypeName                 = caseClassSerializerSnapshot.serializedClass.map(_.getName)
+    val currentTypeName             = serializedClass.getName
+    val newTypeName                 = caseClassSerializerSnapshot.serializedClass.getName
     if (currentTypeName == newTypeName) {
       OuterSchemaCompatibility.COMPATIBLE_AS_IS
     } else {

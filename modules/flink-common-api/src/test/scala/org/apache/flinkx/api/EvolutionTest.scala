@@ -72,11 +72,11 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnCaseClass"
   }
 
-  it should "throw when @deletedMembers is on a case class without version" in {
+  it should "throw when @deletedElements is on a case class without version" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedMembersOnCaseClassWithoutVersion]]
+      implicitly[TypeInformation[WrongDeletedElementsOnCaseClassWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnCaseClassWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedElements(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnCaseClassWithoutVersion without version"
   }
 
   it should "throw when @version is on a case class field" in {
@@ -114,11 +114,11 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnFieldWithoutVersion without version"
   }
 
-  it should "throw when @deletedMembers is on a case class field" in {
+  it should "throw when @deletedElements is on a case class field" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedMembersOnField]]
+      implicitly[TypeInformation[WrongDeletedElementsOnField]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnField.a"
+    exception.getMessage shouldBe "@deletedElements(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnField.a"
   }
 
   it should "throw when @added is on a sealed trait" in {
@@ -142,11 +142,11 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSealedTrait"
   }
 
-  it should "throw when @deletedMembers is on a sealed trait without version" in {
+  it should "throw when @deletedElements is on a sealed trait without version" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedMembersOnSealedTraitWithoutVersion]]
+      implicitly[TypeInformation[WrongDeletedElementsOnSealedTraitWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnSealedTraitWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedElements(1,\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnSealedTraitWithoutVersion without version"
   }
 
   it should "throw when @added is on a sealed trait subtype" in {
@@ -170,15 +170,15 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSubtype$ without version"
   }
 
-  it should "throw when @deletedMembers is on a sealed trait subtype" in {
+  it should "throw when @deletedElements is on a sealed trait subtype" in {
     val exception = intercept[FlinkRuntimeException] {
-      implicitly[TypeInformation[WrongDeletedMembersOnSealedTraitSubtype]]
+      implicitly[TypeInformation[WrongDeletedElementsOnSealedTraitSubtype]]
     }
-    exception.getMessage shouldBe "@deletedMembers(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedMembersOnSubtype$ without version"
+    exception.getMessage shouldBe "@deletedElements(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedElementsOnSubtype$ without version"
   }
 
-  it should "allow when @deletedMembers is on a sealed trait subtype being itself a sealed trait" in {
-    implicitly[TypeInformation[CorrectDeletedMembersOnSealedTraitSubtype]]
+  it should "allow when @deletedElements is on a sealed trait subtype being itself a sealed trait" in {
+    implicitly[TypeInformation[CorrectDeletedElementsOnSealedTraitSubtype]]
   }
 
   it should "throw field not found when deserializing Click v0 with wrong added field" in {
@@ -218,7 +218,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     val exception = intercept[FlinkRuntimeException] {
       testDeserializeFromFile("Click-v0", expected)
     }
-    exception.getMessage shouldBe "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongFieldNotUsed. Use @deletedMembers(since=<version>,Array(\"b\")) annotation to indicate it has been deleted"
+    exception.getMessage shouldBe "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongFieldNotUsed. Use @deletedElements(since=<version>,\"b\") annotation to indicate it has been deleted"
   }
 
   it should "throw missing field when deserializing Click v0 with missing field to instantiate" in {
@@ -251,8 +251,8 @@ object EvolutionTest {
    */
 
   @version(3)
-  @deletedMembers(since = 1, "a")
-  @deletedMembers(since = 2, "b")
+  @deletedElements(since = 1, "a")
+  @deletedElements(since = 2, "b")
   @postDeserialize(updateClick)
   case class Click(
       @renamed(since = 2, "identifier") id: String,
@@ -279,7 +279,7 @@ object EvolutionTest {
 
   @version(1)
   @renamed(since = 1, "Event")
-  @deletedMembers(since = 1, "Purchase")
+  @deletedElements(since = 1, "Purchase")
   @postDeserialize(updateAction)
   sealed trait Action
 
@@ -317,8 +317,8 @@ object EvolutionTest {
   @transformed(since = 1, identity[Int])
   case class WrongTransformedOnCaseClass()
 
-  @deletedMembers(1, "a")
-  case class WrongDeletedMembersOnCaseClassWithoutVersion()
+  @deletedElements(1, "a")
+  case class WrongDeletedElementsOnCaseClassWithoutVersion()
 
   @version(1)
   case class WrongVersionOnField(@version(1) a: String)
@@ -333,7 +333,7 @@ object EvolutionTest {
   case class WrongTransformedOnFieldWithoutVersion(@transformed(1, identity[String]) a: String)
 
   @version(1)
-  case class WrongDeletedMembersOnField(@deletedMembers(1, "a") a: String)
+  case class WrongDeletedElementsOnField(@deletedElements(1, "a") a: String)
 
   @version(1)
   @added(since = 1)
@@ -349,9 +349,9 @@ object EvolutionTest {
   sealed trait WrongTransformedOnSealedTrait
   case object Subtype3 extends WrongTransformedOnSealedTrait
 
-  @deletedMembers(since = 1, "A")
-  sealed trait WrongDeletedMembersOnSealedTraitWithoutVersion
-  case object Subtype4 extends WrongDeletedMembersOnSealedTraitWithoutVersion
+  @deletedElements(since = 1, "A")
+  sealed trait WrongDeletedElementsOnSealedTraitWithoutVersion
+  case object Subtype4 extends WrongDeletedElementsOnSealedTraitWithoutVersion
 
   @version(1)
   sealed trait WrongAddedOnSealedTraitSubtype
@@ -368,46 +368,46 @@ object EvolutionTest {
   case object WrongTransformedOnSubtype extends WrongTransformedOnSealedTraitSubtype
 
   @version(1)
-  sealed trait WrongDeletedMembersOnSealedTraitSubtype
-  @deletedMembers(since = 1, "A")
-  case object WrongDeletedMembersOnSubtype extends WrongDeletedMembersOnSealedTraitSubtype
+  sealed trait WrongDeletedElementsOnSealedTraitSubtype
+  @deletedElements(since = 1, "A")
+  case object WrongDeletedElementsOnSubtype extends WrongDeletedElementsOnSealedTraitSubtype
 
   @version(1)
-  sealed trait CorrectDeletedMembersOnSealedTraitSubtype
+  sealed trait CorrectDeletedElementsOnSealedTraitSubtype
   @version(1)
-  @deletedMembers(since = 1, "A")
-  sealed trait CorrectDeletedMembersOnSubtype extends CorrectDeletedMembersOnSealedTraitSubtype
-  case object CorrectDeletedMembersCaseObject extends CorrectDeletedMembersOnSubtype
+  @deletedElements(since = 1, "A")
+  sealed trait CorrectDeletedElementsOnSubtype extends CorrectDeletedElementsOnSealedTraitSubtype
+  case object CorrectDeletedElementsCaseObject extends CorrectDeletedElementsOnSubtype
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongAddedField(@added(since = 2) a: String = "")
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
 
   @version(2)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedMembers(since = 2, "wrongFieldName")
+  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedElements(since = 2, "wrongFieldName")
   case class WrongDeletedField(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
+  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
   case class WrongFieldNotUsed(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
-  @deletedMembers(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
+  @deletedElements(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongMissingField(a: String, missingField: String)
 
 }
