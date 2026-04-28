@@ -82,7 +82,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           // Iterate over case class annotations to register evolutions on current source code
           ctx.annotations.collect {
             case r: renamed         => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedElements => d.names.map(Delete(d.since, clazz, _)).foreach(evolution.addFieldEvolution)
+            case d: deletedFields   => d.names.map(Delete(d.since, clazz, _)).foreach(evolution.addFieldEvolution)
+            case d: deletedClasses  => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
             case p: postDeserialize[T & Product] => evolution.addPostDeserialize(p.mapper)
             case e: Evolved                      => throwEvolutionNotAllowed(e, clazz.toString)
           }
@@ -144,16 +145,16 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedElements    => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case d: deletedClasses     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
             case p: postDeserialize[T] => evolution.addPostDeserialize(p.mapper)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over subtypes annotations to register evolutions from current source code
           ctx.subtypes.foreach { p =>
             p.annotations.collect {
-              case r: renamed         => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
-              case _: deletedElements => // allowed on subtype
-              case e: Evolved         => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
+              case r: renamed        => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
+              case _: deletedClasses => // allowed on subtype
+              case e: Evolved        => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
             }
           }
 

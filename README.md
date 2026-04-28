@@ -479,10 +479,12 @@ Mark your ADT with `@version` and annotate the ADT and its elements (fields or s
 import org.apache.flinkx.api._
 
 // Implicit version 0: initial schema in savepoint
-// case class Click(identifier: String, sessionId: Int, unused: String)
+// case class Click(identifier: String, sessionId: Int, unused: String, history: List[ClickEvent])
+// case class ClickEvent(date: String)
 
 @version(2)
-@deletedElements(since = 1, "unused")
+@deletedFields(since = 1, "unused", "history")
+@deletedClasses("ClickEvent")
 @postDeserialize(updateClick)
 case class Click(
     @renamed(since = 1, "identifier") id: String,
@@ -500,7 +502,7 @@ def updateClick(click: Click): Click = click.copy(sessionId = click.sessionId + 
 
 @version(1)
 @renamed(since = 1, "Event")
-@deletedElements(since = 1, "Purchase")
+@deletedClasses("Purchase")
 @postDeserialize(updateAction)
 sealed trait Action
 
@@ -520,7 +522,8 @@ annotation on an ADT and recover from a checkpoint without.
 * `@added(since = n)` on case class field: added in version n (requires default value)
 * `@renamed(since = n, "oldName")` on ADT or element: renamed from "oldName"
 * `@transformed(since = n, mapper)` on case class field: type changed with mapper function
-* `@deletedElements(since = n, "a", "b")` on ADT: multiple elements deleted
+* `@deletedFields(since = n, "a", "b")` on case class: fields deleted in version n
+* `@deletedClasses("OldClass1", "OldClass2")` on ADT: deleted subtypes on sealed trait and case class field types that no longer exist in source code
 * `@postDeserialize(mapper)` on ADT: apply mapper function on deserialized object
 
 Evolutions apply in sorted order by version number when deserializing from checkpoints.

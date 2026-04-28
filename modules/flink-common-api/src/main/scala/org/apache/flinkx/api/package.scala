@@ -70,16 +70,32 @@ package object api {
     override def toString: String = s"transformed($since,<mapper>)"
   }
 
-  /** Marks deleted elements (fields of a case class, subtypes of a sealed trait) not present in current schema.
+  /** Marks deleted fields of a case class not present in current schema.
     *
-    * Annotation of ADT (case class or sealed trait).
+    * Annotation of case class.
     * @param since
     *   Version when deletions occurred
     * @param names
-    *   Names of deleted elements (fields of a case class, subtypes of a sealed trait)
+    *   Names of deleted fields
     */
-  final case class deletedElements(since: Int, names: String*) extends Evolved {
-    override def toString: String = s"deletedElements($since,${names.mkString("\"", "\",\"", "\"")})"
+  final case class deletedFields(since: Int, names: String*) extends Evolved {
+    override def toString: String = s"deletedFields($since,${names.mkString("\"", "\",\"", "\"")})"
+  }
+
+  /** Marks deleted classes removed in current schema and no longer exist in source code:
+    *   - On a sealed trait: subtype classes that have been removed
+    *   - On a case class: classes that were referenced by a now-deleted field (declared with `@deletedFields`)
+    *
+    * Annotation of ADT (case class or sealed trait).
+    *
+    * @param names
+    *   Relative or fully qualified names of deleted classes, which can be:
+    *   - A simple name: `"OldName"`
+    *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
+    *   - An absolute path: `"org.example.OldName"`
+    */
+  final case class deletedClasses(names: String*) extends Evolved {
+    override def toString: String = s"deletedClasses(${names.mkString("\"", "\",\"", "\"")})"
   }
 
   /** Basic type has an arity of 1. See [[BasicTypeInfo#getArity()]] */

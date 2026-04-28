@@ -7,6 +7,8 @@ import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.EvolutionTest.{Action, Web}
 import org.apache.flinkx.api.auto.*
 
+import java.io.IOException
+
 class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import Scala3EnumTest.*
@@ -58,7 +60,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     val expected: FailureCategory = FailureCategory.PARSING
     // ClassNotFoundException is thrown because magnolia doesn't get annotations on enum values
     // see https://github.com/softwaremill/magnolia/issues/491
-    an[FlinkRuntimeException] shouldBe thrownBy {
+    an[IOException] shouldBe thrownBy {
       testDeserializeFromFile("Failure-Type-v0", expected)
     }
   }

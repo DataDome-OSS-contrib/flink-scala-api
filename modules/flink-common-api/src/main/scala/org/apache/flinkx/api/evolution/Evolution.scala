@@ -95,7 +95,7 @@ final class Evolution[T](
   }
 
   private def throwFieldNotUsed(clazz: Class[_], field: String): Unit = throw new FlinkRuntimeException(
-    s"'$field' field not used to instantiate $clazz. Use @deletedElements(since=<version>,\"$field\") annotation to indicate it has been deleted"
+    s"'$field' field not used to instantiate $clazz. Use @deletedFields(since=<version>,\"$field\") annotation to indicate it has been deleted"
   )
 
   private def throwMissingField(clazz: Class[_], field: String): AnyRef = throw new FlinkRuntimeException(
