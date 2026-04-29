@@ -14,24 +14,25 @@ object Evolutions {
 
   // Maps filled at startup time during the ADT derivation with up-to-date information from the source code and used
   // during deserialization
-  private val classToEvolutions: concurrent.Map[Class[_], Evolution[_]]       = concurrent.TrieMap(initEvolutions: _*)
+  private val classToEvolutions: concurrent.Map[Class[_], Evolution[_]]       = concurrent.TrieMap.empty
   private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]] = concurrent.TrieMap.empty
-
-  private def initEvolutions: Seq[(Class[_], Evolution[_])] =
-    Seq((DeletedClass, new Evolution(DeletedClass)))
 
   def findVersion[A](clazz: Class[_]): PartialFunction[A, Int] = {
     case version(c) if c > 0 => c
     case version(c) => throw new FlinkRuntimeException(s"Current version of $clazz must be positive, got @version($c)")
   }
 
-  /** Return the [[Evolution]] associated with given class. Create it if necessary.
+  /** Build the [[Evolution]] from the given builder and register it for the deserialization phase. */
+  def register[T](builder: EvolutionBuilder[T]): Unit =
+    classToEvolutions.put(builder.clazz, builder.build())
+
+  /** Return the [[Evolution]] associated with given class, or an empty default if none was registered.
     *
     * @param clazz
     *   ADT class to deserialize and evolve
     */
   def get[T](clazz: Class[T]): Evolution[T] =
-    classToEvolutions.getOrElseUpdate(clazz, new Evolution[T](clazz)).asInstanceOf[Evolution[T]]
+    classToEvolutions.getOrElseUpdate(clazz, Evolution.empty(clazz)).asInstanceOf[Evolution[T]]
 
   /** Register the mapping between the former ADT class name and the ADT class currently declared on the source code.
     *
