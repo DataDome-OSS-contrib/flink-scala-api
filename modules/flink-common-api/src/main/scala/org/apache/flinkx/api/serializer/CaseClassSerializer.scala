@@ -149,30 +149,28 @@ class CaseClassSerializer[T <: Product](
     if (sourceArity < 0) {
       source.skipBytesToRead(nullPadding.length)
       null.asInstanceOf[T]
-    } else if (isEvolutionAvoidable || fieldNames.isEmpty) { // Keep compatibility with versions < 2.3.0
-      val fields = new Array[AnyRef](sourceArity)
-      var i      = 0
-      while (i < sourceArity) {
-        fields(i) = fieldSerializers(i).deserialize(source)
-        i += 1
-      }
-      if (evolution.isDeleted) {
-        null.asInstanceOf[T]
-      } else {
-        evolution.applyPostDeserialize(createInstance(fields))
-      }
     } else {
-      val fieldMap = mutable.Map.empty[String, AnyRef]
-      var i        = 0
-      while (i < fieldNames.length) {
-        fieldMap.put(fieldNames(i), fieldSerializers(i).deserialize(source))
-        i += 1
+      val fieldValues = if (isEvolutionAvoidable || fieldNames.isEmpty) { // Keep compatibility with versions < 2.3.0
+        val fields = new Array[AnyRef](sourceArity)
+        var i      = 0
+        while (i < sourceArity) {
+          fields(i) = fieldSerializers(i).deserialize(source)
+          i += 1
+        }
+        fields
+      } else {
+        val fieldMap = mutable.Map.empty[String, AnyRef]
+        var i        = 0
+        while (i < fieldNames.length) {
+          fieldMap.put(fieldNames(i), fieldSerializers(i).deserialize(source))
+          i += 1
+        }
+        evolution.applyFieldEvolutions(version, fieldMap)
+        evolution.toFieldValues(fieldMap)
       }
       if (evolution.isDeleted) {
         null.asInstanceOf[T]
       } else {
-        evolution.applyFieldEvolutions(version, fieldMap)
-        val fieldValues = evolution.toFieldValues(fieldMap)
         evolution.applyPostDeserialize(createInstance(fieldValues))
       }
     }
