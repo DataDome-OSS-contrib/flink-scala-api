@@ -26,7 +26,8 @@ trait CommonTaggedDerivation[TypeClass[_]]:
         paramAnns[A].to(Map),
         inheritedParamAnns[A].to(Map),
         paramTypeAnns[A].to(Map),
-        repeated[A].to(Map)
+        repeated[A].to(Map),
+        defaultValue[A].to(Map)
       )*
     )
 
@@ -86,6 +87,7 @@ trait CommonTaggedDerivation[TypeClass[_]]:
       inheritedAnnotations: Map[String, List[Any]],
       typeAnnotations: Map[String, List[Any]],
       repeated: Map[String, Boolean],
+      defaults: Map[String, Option[() => Any]],
       idx: Int = 0
   ): List[CaseClass.Param[Typeclass, T]] =
     inline erasedValue[(Labels, Params)] match
@@ -94,13 +96,22 @@ trait CommonTaggedDerivation[TypeClass[_]]:
       case _: ((l *: ltail), (p *: ptail)) =>
         val label     = constValue[l].asInstanceOf[String]
         val typeclass = CallByNeed(summonInline[Typeclass[p]])
+        val defaultVal = defaults.get(label).flatten match {
+          case Some(evaluator) =>
+            CallByNeed.withValueEvaluator {
+              val v = evaluator()
+              if ((v: @unchecked).isInstanceOf[p]) Some(v.asInstanceOf[p]) else None
+            }
+          case None =>
+            CallByNeed(None)
+        }
 
         CaseClass.Param[Typeclass, T, p](
           label,
           idx,
           repeated.getOrElse(label, false),
           typeclass,
-          CallByNeed(None),
+          defaultVal,
           IArray.from(annotations.getOrElse(label, List())),
           IArray.from(inheritedAnnotations.getOrElse(label, List())),
           IArray.from(typeAnnotations.getOrElse(label, List()))
@@ -110,6 +121,7 @@ trait CommonTaggedDerivation[TypeClass[_]]:
             inheritedAnnotations,
             typeAnnotations,
             repeated,
+            defaults,
             idx + 1
           )
 
@@ -120,7 +132,7 @@ trait CommonTaggedDerivation[TypeClass[_]]:
       repeated: Map[String, Boolean],
       idx: Int = 0
   ): List[CaseClass.Param[Typeclass, T]] =
-    getParams_(annotations, Map.empty, typeAnnotations, repeated, idx)
+    getParams_(annotations, Map.empty, typeAnnotations, repeated, Map.empty, idx)
 
 trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
   def split[T](ctx: SealedTrait[Typeclass, T])(using

@@ -460,31 +460,76 @@ object Foo {
 ### Schema evolution
 
 #### ADT
-For the child case classes being part of ADT, the serializers use a Flink's `CaseClassSerializer`, so all the compatibility rules
-are the same as for normal case classes.
 
-For the sealed trait membership itself, this library uses own serialization format with the following rules:
-* you cannot reorder trait members, as wire format depends on the compile-time index of each member
-* you can add new members at the end of the list
-* you cannot remove ADT members
-* you cannot replace ADT members
+For case classes, starting from version 2.3.0:
+* you can reorder fields
+* if you want richer evolutions, use annotation-based schema evolution (see below)
 
-#### Case Class Changes
+For sealed traits, the following compatibility rules apply:
+* you can reorder trait subtypes
+* you can add new subtypes
+* if you want richer evolutions, use annotation-based schema evolution
 
-On a case class level, this library supports new field addition(s) with default value(s). This allows to restore a Flink job from a savepoint created using previous case class schema.
-For example:
+#### Annotation-Based Schema Evolution
 
-1. A Flink job was stopped with a savepoint using below case class schema:
+Make ADT (case class and sealed trait) evolutions while maintaining checkpoint state compatibility using annotations.
+Mark your ADT with `@version` and annotate the ADT and its elements (fields or subtypes) with evolution operations:
+
 ```scala
-case class Click(id: String, inFileClicks: List[ClickEvent])
+import org.apache.flinkx.api._
+
+// Implicit version 0: initial schema in savepoint
+// case class Click(identifier: String, sessionId: Int, unused: String, history: List[ClickEvent])
+// case class ClickEvent(date: String)
+
+@version(2)
+@deletedFields(since = 1, "unused", "history")
+@deletedClasses("ClickEvent")
+@postDeserialize(updateClick)
+case class Click(
+    @renamed(since = 1, "identifier") id: String,
+    @added(since = 2) ts: Long = System.currentTimeMillis(),
+    @transformed(since = 1, intToString) sessionId: String
+)
+
+def intToString(i: Int): String = i.toString
+def updateClick(click: Click): Click = click.copy(sessionId = click.sessionId + click.id)
+
+// Implicit version 0: initial schema in savepoint
+// sealed trait Event
+// case class View(ts: Long) extends Event
+// case class Purchase(price: Double) extends Event
+
+@version(1)
+@renamed(since = 1, "Event")
+@deletedClasses("Purchase")
+@postDeserialize(updateAction)
+sealed trait Action
+
+@renamed(since = 1, "View")
+case class Web(ts: Long) extends Action
+
+def updateAction(action: Action): Action = action match {
+  case Web(ts) => Web(ts + 1)
+}
 ```
-2. Now the Click case class is changed to:
-```scala
-case class Click(id: String, inFileClicks: List[ClickEvent], 
-    fieldInFile: String = "test1",
-    fieldNotInFile: String = "test2")   
-```
-3. Launch the same job with new case class schema version from the last savepoint. Job restore should work successfully.
+
+An ADT without `@version` annotation is considered as version 0. You can enable evolution by adding `@version`
+annotation on an ADT and recover from a checkpoint without.
+
+**Available annotations:**
+* `@version(n)` on ADT: current schema version n, where n is positive
+* `@added(since = n)` on case class field: added in version n (requires default value)
+* `@renamed(since = n, "oldName")` on ADT or element: renamed from "oldName"
+* `@transformed(since = n, mapper)` on case class field: type changed with mapper function
+* `@deletedFields(since = n, "a", "b")` on case class: fields deleted in version n
+* `@deletedClasses("OldClass1", "OldClass2")` on ADT: deleted subtypes on sealed trait and case class field types that no longer exist in source code
+* `@postDeserialize(mapper)` on ADT: apply mapper function on deserialized object
+
+Evolutions apply in sorted order by version number when deserializing from checkpoints.
+Evolutions can be combined, for example:
+* a field can be renamed and transformed
+* a field can be deleted (its state ignored) and re-added with the same name
 
 ### Compatibility
 
