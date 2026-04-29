@@ -19,10 +19,10 @@ import scala.collection.mutable
   * @tparam T
   *   the type on which the [[Evolution]] applies
   */
-final case class EvolutionBuilder[T](
-    clazz: Class[T],
-    fieldNames: Array[String] = Array.empty,
-    fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
+final class EvolutionBuilder[T](
+    val clazz: Class[T],
+    val fieldNames: Array[String] = Array.empty,
+    val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
     var postDeserialize: T => T = Evolution.IdentityFunction.asInstanceOf[T => T]
 ) {
 

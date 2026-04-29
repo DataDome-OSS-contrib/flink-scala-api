@@ -67,7 +67,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               }.toArray
             )
 
-        val builder = EvolutionBuilder[T & Product](clazz, fieldNames) // Field names required even with version 0
+        val builder = new EvolutionBuilder[T & Product](clazz, fieldNames) // Field names required even with version 0
         if version == 0 then
           // Do not allow Evolution annotations without a version
           ctx.annotations.collect {
@@ -141,7 +141,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             p.annotations.collect { case e: Evolved => throwEvolutionNotAllowed(e, s"$p of $clazz without version") }
           }
         else // version > 0
-          val builder = EvolutionBuilder[T](clazz)
+          val builder = new EvolutionBuilder[T](clazz)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
