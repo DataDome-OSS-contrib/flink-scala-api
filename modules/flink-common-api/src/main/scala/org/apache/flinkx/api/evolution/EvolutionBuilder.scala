@@ -28,6 +28,6 @@ final class EvolutionBuilder[T](
 
   /** Build the immutable [[Evolution]] from accumulated registrations. */
   def build(): Evolution[T] =
-    new Evolution[T](clazz, fieldNames, fieldEvolutions.sortInPlace().toArray, postDeserialize)
+    new Evolution[T](clazz, fieldNames.clone(), fieldEvolutions.sortInPlace().toArray, postDeserialize)
 
 }

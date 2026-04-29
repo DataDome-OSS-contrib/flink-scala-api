@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.Evolutions.DeletedClass
+import org.apache.flinkx.api.evolution.Evolution.{DeletedClass, IdentityFunction}
 
 import scala.collection.mutable
 
@@ -22,11 +22,11 @@ import scala.collection.mutable
   * @tparam T
   *   the type on which the Evolution applies
   */
-final class Evolution[T] private[evolution] (
-    val clazz: Class[T],
-    private val fieldNames: Array[String],
-    private val fieldEvolutions: Array[FieldEvolution],
-    private val postDeserialize: T => T
+sealed class Evolution[T] private[evolution] (
+    private val clazz: Class[T],
+    private val fieldNames: Array[String] = Array.empty,
+    private val fieldEvolutions: Array[FieldEvolution] = Array.empty,
+    private val postDeserialize: T => T = IdentityFunction.asInstanceOf[T => T]
 ) {
 
   /** Is evolution can be skipped? Return `true` if no evolution is required from given version and if fields haven't
@@ -99,7 +99,19 @@ object Evolution {
   // Sentinel used to fast-path applyPostDeserialize when no @postDeserialize mapper has been registered
   private[evolution] val IdentityFunction: Any => Any = identity
 
-  /** Default empty [[Evolution]] as fallback for a class with no registered evolutions. */
-  private[evolution] def empty[T](clazz: Class[T]): Evolution[T] =
-    new Evolution[T](clazz, Array.empty, Array.empty, IdentityFunction.asInstanceOf[T => T])
+  private[evolution] final class DeletedMarker {
+    throw new FlinkRuntimeException("This class is a replacement of a deleted class and should never be instantiated")
+  }
+  private[evolution] val DeletedClass: Class[DeletedMarker] = classOf[DeletedMarker]
+
+  /** Singleton [[Evolution]] of a class marked as deleted. */
+  private[evolution] val DeletedClassEvolution: Evolution[DeletedMarker] = new Evolution(DeletedClass) {
+    override def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean = true
+  }
+
+  /** Singleton default empty [[Evolution]] as fallback for a class with no registered evolutions. */
+  private[evolution] val NoEvolution: Evolution[_] = new Evolution(null) {
+    override def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean = true
+  }
+
 }
