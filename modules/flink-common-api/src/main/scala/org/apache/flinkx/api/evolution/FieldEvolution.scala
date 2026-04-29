@@ -1,40 +1,48 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flinkx.api.evolution.FieldEvolution.Phase
 
 import scala.collection.mutable
 import scala.math.Ordered.orderingToOrdered
 
 /** Schema evolution operation applied to deserialized case class fields.
   *
-  * Evolutions execute in sorted order by `since` then `order`. Operations at the same version are ordered by type:
-  * Delete → Rename → Transform → Add.
-  *
-  * For example:
+  * Evolutions execute in sorted order by `since` then `phase`. The phases form a canonical pipeline within a version:
+  * Delete → Rename → Transform → Add. This ordering enables compositions such as:
   *   - a field can be renamed then transformed
   *   - a field can be deleted (its state ignored) then re-added with the same name
   *
   * @param since
   *   Version number when this evolution was introduced
-  * @param order
-  *   Operation type ordering within a version
+  * @param phase
+  *   Operation phase, defining the order within a version
   */
-abstract class FieldEvolution(val since: Int, val order: Int) extends Ordered[FieldEvolution] {
+abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] {
 
   def apply(fields: mutable.Map[String, AnyRef]): Unit
 
-  override def compare(that: FieldEvolution): Int = (since, order, ##).compare((that.since, that.order, that.##))
+  override def compare(that: FieldEvolution): Int = (since, phase.rank).compare((that.since, that.phase.rank))
 
 }
 
 object FieldEvolution {
+
+  /** Phase of an evolution operation. The rank is the canonical sort order applied within a version. */
+  sealed abstract class Phase(val rank: Int)
+  object Phase {
+    case object Delete    extends Phase(0)
+    case object Rename    extends Phase(1)
+    case object Transform extends Phase(2)
+    case object Add       extends Phase(3)
+  }
 
   /** Remove a field from field map. */
   final case class Delete(
       override val since: Int,
       clazz: Class[_],
       name: String
-  ) extends FieldEvolution(since, 10) {
+  ) extends FieldEvolution(since, Phase.Delete) {
 
     override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
       fields.remove(name) match {
@@ -51,7 +59,7 @@ object FieldEvolution {
       clazz: Class[_],
       name: String,
       fromName: String
-  ) extends FieldEvolution(since, 20) {
+  ) extends FieldEvolution(since, Phase.Rename) {
 
     override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
       fields.remove(fromName) match {
@@ -68,7 +76,7 @@ object FieldEvolution {
       clazz: Class[_],
       name: String,
       mapper: A => B
-  ) extends FieldEvolution(since, 30) {
+  ) extends FieldEvolution(since, Phase.Transform) {
 
     override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
       fields.get(name) match {
@@ -85,7 +93,7 @@ object FieldEvolution {
       clazz: Class[_],
       name: String,
       default: Option[T]
-  ) extends FieldEvolution(since, 40) {
+  ) extends FieldEvolution(since, Phase.Add) {
 
     if (default.isEmpty) throw new FlinkRuntimeException(s"'$name' added field in $clazz must have a default value")
 
@@ -96,10 +104,6 @@ object FieldEvolution {
       }
     }
 
-  }
-
-  private[evolution] final case class FromFieldEvolution(override val since: Int) extends FieldEvolution(since, 100) {
-    override def apply(fields: mutable.Map[String, AnyRef]): Unit = ()
   }
 
   private def throwFieldNotFound(clazz: Class[_], field: String, operation: String, fields: Iterable[String]): Unit =

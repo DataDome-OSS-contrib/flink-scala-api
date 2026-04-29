@@ -2,14 +2,15 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolutions.DeletedClass
-import org.apache.flinkx.api.evolution.FieldEvolution.FromFieldEvolution
 
 import scala.collection.mutable
 
 /** Hold all evolutions to apply on an ADT to deserialize.
   *
   * Data are collected at startup time during the ADT derivation with up-to-date information from current source code
-  * and used during deserialization.
+  * and used during deserialization. All `add*` registrations must complete before any `apply*` or `isAvoidable` call:
+  * the registered field evolutions are sorted into a stable snapshot on first use, and any subsequent registration
+  * would not be reflected.
   *
   * @param clazz
   *   ADT class to deserialize and evolve
@@ -25,9 +26,12 @@ import scala.collection.mutable
 final class Evolution[T](
     val clazz: Class[T],
     private var fieldNames: Array[String] = Array.empty,
-    private val fieldEvolutions: mutable.SortedSet[FieldEvolution] = mutable.SortedSet.empty,
+    private val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
     private var postDeserialize: T => T = Evolution.IdentityFunction.asInstanceOf[T => T]
 ) {
+
+  // Sorted snapshot of fieldEvolutions, materialized on first read. Registration must complete before
+  private lazy val sortedFieldEvolutions: Array[FieldEvolution] = fieldEvolutions.sortInPlace().toArray
 
   /** Register field names currently declared in the case class source code.
     *
@@ -56,25 +60,29 @@ final class Evolution[T](
   /** Is evolution can be skipped? Return `true` if no evolution is required from given version and if fields haven't
     * been reordered, `false` otherwise.
     *
-    * @param since
+    * @param dataVersion
     *   Schema version of serialized data
     * @param previousFieldNames
     *   Array of field names of serialized data in declaration order
     */
-  def isAvoidable(since: Int, previousFieldNames: Array[String]): Boolean =
-    fieldEvolutions.rangeFrom(FromFieldEvolution(since)).isEmpty && previousFieldNames.sameElements(fieldNames)
+  def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean =
+    !sortedFieldEvolutions.exists(_.since > dataVersion) && previousFieldNames.sameElements(fieldNames)
 
   /** Apply evolutions currently declared on the case class source code to field map starting from a specific version.
     *
-    * @param since
+    * @param dataVersion
     *   Schema version of serialized data
     * @param fieldMap
     *   Mutable field name to field value map to transform
     */
-  def applyFieldEvolutions(since: Int, fieldMap: mutable.Map[String, AnyRef]): Unit =
-    fieldEvolutions
-      .rangeFrom(FromFieldEvolution(since))
-      .foreach(_.apply(fieldMap))
+  def applyFieldEvolutions(dataVersion: Int, fieldMap: mutable.Map[String, AnyRef]): Unit = {
+    var i = 0
+    while (i < sortedFieldEvolutions.length) {
+      val fieldEvolution = sortedFieldEvolutions(i)
+      if (fieldEvolution.since > dataVersion) fieldEvolution.apply(fieldMap)
+      i += 1
+    }
+  }
 
   /** Apply @postDeserialize mapper function currently declared on the ADT source code to the ADT instance at the end of
     * its deserialization.
