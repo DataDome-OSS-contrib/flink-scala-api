@@ -5,57 +5,29 @@ import org.apache.flinkx.api.evolution.Evolutions.DeletedClass
 
 import scala.collection.mutable
 
-/** Hold all evolutions to apply on an ADT to deserialize.
+/** Immutable view of all evolutions to apply on an ADT during deserialization.
   *
-  * Data are collected at startup time during the ADT derivation with up-to-date information from current source code
-  * and used during deserialization. All `add*` registrations must complete before any `apply*` or `isAvoidable` call:
-  * the registered field evolutions are sorted into a stable snapshot on first use, and any subsequent registration
-  * would not be reflected.
+  * Built from an [[EvolutionBuilder]] at the end of the registration phase.
+  *
+  * Thread-safe to read concurrently.
   *
   * @param clazz
   *   ADT class to deserialize and evolve
   * @param fieldNames
   *   The array of field names currently declared on the case class source code, in declaration order
   * @param fieldEvolutions
-  *   Evolution to apply on case class fields
+  *   Field evolutions to apply during deserialization
   * @param postDeserialize
   *   Mapper to apply on the ADT at the end of its deserialization
   * @tparam T
   *   the type on which the Evolution applies
   */
-final class Evolution[T](
+final class Evolution[T] private[evolution] (
     val clazz: Class[T],
-    private var fieldNames: Array[String] = Array.empty,
-    private val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
-    private var postDeserialize: T => T = Evolution.IdentityFunction.asInstanceOf[T => T]
+    private val fieldNames: Array[String],
+    private val fieldEvolutions: Array[FieldEvolution],
+    private val postDeserialize: T => T
 ) {
-
-  // Sorted snapshot of fieldEvolutions, materialized on first read. Registration must complete before
-  private lazy val sortedFieldEvolutions: Array[FieldEvolution] = fieldEvolutions.sortInPlace().toArray
-
-  /** Register field names currently declared in the case class source code.
-    *
-    * @param fieldNames
-    *   Array of field names in declaration order
-    */
-  def addFieldNames(fieldNames: Array[String]): Unit =
-    this.fieldNames = fieldNames
-
-  /** Register a field evolution currently declared on the case class source code.
-    *
-    * @param fieldEvolution
-    *   Evolution to apply on a case class field
-    */
-  def addFieldEvolution(fieldEvolution: FieldEvolution): Unit =
-    fieldEvolutions += fieldEvolution
-
-  /** Register a @postDeserialize annotation currently declared on the ADT source code.
-    *
-    * @param postDeserialize
-    *   Mapper to apply on the ADT at the end of its deserialization
-    */
-  def addPostDeserialize(postDeserialize: T => T): Unit =
-    this.postDeserialize = postDeserialize
 
   /** Is evolution can be skipped? Return `true` if no evolution is required from given version and if fields haven't
     * been reordered, `false` otherwise.
@@ -66,7 +38,7 @@ final class Evolution[T](
     *   Array of field names of serialized data in declaration order
     */
   def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean =
-    !sortedFieldEvolutions.exists(_.since > dataVersion) && previousFieldNames.sameElements(fieldNames)
+    !fieldEvolutions.exists(_.since > dataVersion) && previousFieldNames.sameElements(fieldNames)
 
   /** Apply evolutions currently declared on the case class source code to field map starting from a specific version.
     *
@@ -77,15 +49,15 @@ final class Evolution[T](
     */
   def applyFieldEvolutions(dataVersion: Int, fieldMap: mutable.Map[String, AnyRef]): Unit = {
     var i = 0
-    while (i < sortedFieldEvolutions.length) {
-      val fieldEvolution = sortedFieldEvolutions(i)
+    while (i < fieldEvolutions.length) {
+      val fieldEvolution = fieldEvolutions(i)
       if (fieldEvolution.since > dataVersion) fieldEvolution.apply(fieldMap)
       i += 1
     }
   }
 
-  /** Apply @postDeserialize mapper function currently declared on the ADT source code to the ADT instance at the end of
-    * its deserialization.
+  /** Apply `@postDeserialize` mapper function currently declared on the ADT source code to the ADT instance at the end
+    * of its deserialization.
     *
     * @param toUpdate
     *   The mapper function is applied on this ADT instance
@@ -125,5 +97,9 @@ final class Evolution[T](
 
 object Evolution {
   // Sentinel used to fast-path applyPostDeserialize when no @postDeserialize mapper has been registered
-  private val IdentityFunction: Any => Any = identity
+  private[evolution] val IdentityFunction: Any => Any = identity
+
+  /** Default empty [[Evolution]] as fallback for a class with no registered evolutions. */
+  private[evolution] def empty[T](clazz: Class[T]): Evolution[T] =
+    new Evolution[T](clazz, Array.empty, Array.empty, IdentityFunction.asInstanceOf[T => T])
 }

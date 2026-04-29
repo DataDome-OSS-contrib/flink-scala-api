@@ -5,9 +5,9 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.evolution.Evolutions.throwEvolutionNotAllowed
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
+import org.apache.flinkx.api.evolution.{EvolutionBuilder, Evolutions}
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer, nullable}
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation, MarkerTypeInfo}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -54,8 +54,7 @@ private[api] trait TypeInformationDerivation {
           )
         }
 
-        val evolution = Evolutions.get(clazz)
-        evolution.addFieldNames(fieldNames) // Need field names even with version 0
+        val builder = EvolutionBuilder(clazz, fieldNames) // Field names required even with version 0
         if (version == 0) {
           // Do not allow Evolution annotations without a version
           ctx.annotations.collect {
@@ -69,22 +68,23 @@ private[api] trait TypeInformationDerivation {
           // Iterate over case class annotations to register evolutions from current source code
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedFields      => d.names.map(Delete(d.since, clazz, _)).foreach(evolution.addFieldEvolution)
+            case d: deletedFields      => d.names.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
             case d: deletedClasses     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
-            case p: postDeserialize[T] => evolution.addPostDeserialize(p.mapper)
+            case p: postDeserialize[T] => builder.postDeserialize = p.mapper
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over case class fields annotations to register evolutions from current source code
           ctx.parameters.foreach { p =>
             p.annotations.collect {
-              case a: added             => evolution.addFieldEvolution(Add(a.since, clazz, p.label, p.default))
-              case r: renamed           => evolution.addFieldEvolution(Rename(r.since, clazz, p.label, r.from))
-              case t: transformed[_, _] => evolution.addFieldEvolution(Transform(t.since, clazz, p.label, t.mapper))
+              case a: added             => builder.fieldEvolutions += Add(a.since, clazz, p.label, p.default)
+              case r: renamed           => builder.fieldEvolutions += Rename(r.since, clazz, p.label, r.from)
+              case t: transformed[_, _] => builder.fieldEvolutions += Transform(t.since, clazz, p.label, t.mapper)
               case e: version           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
               case e: Evolved           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
             }
           }
         }
+        Evolutions.register(builder)
 
         val ti = new CaseClassTypeInfo[T](
           clazz = clazz,
@@ -117,12 +117,12 @@ private[api] trait TypeInformationDerivation {
             p.annotations.collect { case e: Evolved => throwEvolutionNotAllowed(e, s"$p of $clazz without version") }
           }
         } else { // version > 0
-          val evolution = Evolutions.get(clazz)
+          val builder = EvolutionBuilder(clazz)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
             case d: deletedClasses     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
-            case p: postDeserialize[T] => evolution.addPostDeserialize(p.mapper)
+            case p: postDeserialize[T] => builder.postDeserialize = p.mapper
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over subtypes annotations to register evolutions from current source code
@@ -133,6 +133,7 @@ private[api] trait TypeInformationDerivation {
               case e: Evolved        => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
             }
           }
+          Evolutions.register(builder)
         }
 
         val ti = new CoproductTypeInformation[T](clazz, serializer)
