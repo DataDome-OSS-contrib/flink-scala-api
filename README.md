@@ -459,29 +459,34 @@ object Foo {
 
 ### Schema evolution
 
-#### ADT
+This library supports two complementary mechanisms for evolving the schema of state stored in checkpoints and
+savepoints: built-in compatibility rules that come "for free", and an opt-in annotation-based system for richer
+changes.
 
-For case classes, starting from version 2.3.0:
-* you can reorder fields
-* if you want richer evolutions, use annotation-based schema evolution (see below)
+#### Built-in compatibility
 
-For sealed traits, the following compatibility rules apply:
-* you can reorder trait subtypes
-* you can add new subtypes
-* if you want richer evolutions, use annotation-based schema evolution
+Without any annotation, the following changes are safe between checkpoint write and restore (starting from version 2.3.0):
+* Case classes: you can reorder fields. New fields in last position with a default value are also accepted and populated from the default on restore.
+* Sealed traits: you can reorder subtypes and add new subtypes.
+* For everything else (renames, deletions, type changes, cross-field migrations), use the annotation-based schema evolution below.
 
-#### Annotation-Based Schema Evolution
+#### Annotation-based schema evolution
 
-Make ADT (case class and sealed trait) evolutions while maintaining checkpoint state compatibility using annotations.
-Mark your ADT with `@version` and annotate the ADT and its elements (fields or subtypes) with evolution operations:
+Annotate an ADT (case class, sealed trait or Scala 3 enum) with `@version(n)` to opt it in, then describe each
+change with one of the evolution annotations on the ADT or on its fields/subtypes. On restore, the library
+applies these operations against the data read from the checkpoint so it matches the current source code.
+
+An ADT without `@version` is treated as version 0 — so you can enable the feature
+on an existing ADT just by adding `@version(1)` and restore it from a checkpoint produced by the unversioned code.
 
 ```scala
 import org.apache.flinkx.api._
 
-// Implicit version 0: initial schema in savepoint
+// Schema previously committed to the savepoint (version 0 — implicit, no annotations):
 // case class Click(identifier: String, sessionId: Int, unused: String, history: List[ClickEvent])
 // case class ClickEvent(date: String)
 
+// Current source code:
 @version(2)
 @deletedFields(since = 1, "unused", "history")
 @deletedClasses("ClickEvent")
@@ -492,14 +497,15 @@ case class Click(
     @transformed(since = 1, intToString) sessionId: String
 )
 
-def intToString(i: Int): String = i.toString
+def intToString(i: Int): String      = i.toString
 def updateClick(click: Click): Click = click.copy(sessionId = click.sessionId + click.id)
 
-// Implicit version 0: initial schema in savepoint
+// Schema previously committed (version 0):
 // sealed trait Event
 // case class View(ts: Long) extends Event
 // case class Purchase(price: Double) extends Event
 
+// Current source code:
 @version(1)
 @renamed(since = 1, "Event")
 @deletedClasses("Purchase")
@@ -514,22 +520,39 @@ def updateAction(action: Action): Action = action match {
 }
 ```
 
-An ADT without `@version` annotation is considered as version 0. You can enable evolution by adding `@version`
-annotation on an ADT and recover from a checkpoint without.
-
 **Available annotations:**
-* `@version(n)` on ADT: current schema version n, where n is positive
-* `@added(since = n)` on case class field: added in version n (requires default value)
-* `@renamed(since = n, "oldName")` on ADT or element: renamed from "oldName"
-* `@transformed(since = n, mapper)` on case class field: type changed with mapper function
-* `@deletedFields(since = n, "a", "b")` on case class: fields deleted in version n
-* `@deletedClasses("OldClass1", "OldClass2")` on ADT: deleted subtypes on sealed trait and case class field types that no longer exist in source code
-* `@postDeserialize(mapper)` on ADT: apply mapper function on deserialized object
 
-Evolutions apply in sorted order by version number when deserializing from checkpoints.
-Evolutions can be combined, for example:
-* a field can be renamed and transformed
-* a field can be deleted (its state ignored) and re-added with the same name
+| Annotation | Where                          | Effect                                                                                                                                                                          |
+| --- |--------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@version(n)` | ADT                            | Declares the current schema version (`n > 0`); opt in the ADT to evolution.                                                                                                     |
+| `@added(since = n)` | case class field               | Field was added in version `n`; requires a default value                                                                                                                        |
+| `@renamed(since = n, "oldName")` | case class field, ADT, subtype | Field or class was previously known under `"oldName"`, or lived at another location  (see [class name resolution](#former-class-name-resolution))                               |
+| `@transformed(since = n, mapper)` | case class field               | Field's type changed in version `n`; `mapper` converts the previously serialized value to the current type                                                                      |
+| `@deletedFields(since = n, "a", "b")` | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                                |
+| `@deletedClasses("OldClass1", …)` | ADT                            | Subtypes that have been removed (records become `null`), or field types that were referenced by a now-deleted field (see [class name resolution](#former-class-name-resolution)) |
+| `@postDeserialize(mapper)` | ADT                            | Apply `mapper` to the whole instance after its deserialization                                                                                                                  |
+
+Field evolutions are applied in ascending `since` order. Within a single version, evolutions are applied in this canonical pipeline:
+Delete → Rename → Transform → Add. This ordering enables annotation combinations such as:
+* Rename a field and transform its value.
+* Delete a field (its serialized state is dropped) and re-add a field with the same name from a default value.
+
+> [!NOTE]
+> You can clean up old evolution annotations as long as you don't restore a snapshot of that version. For example with `Click`:
+> * if you didn't keep any v0 snapshot, you can retain only `@version(2)` and `@added(since = 2)` annotations.
+> * if you only have v2 snapshots, you can remove all annotations, even `@version(2)`. Current `Click` will then be treated as a version 0.
+
+##### Former class name resolution
+
+Class names in `@renamed` and `@deletedClasses` accept any of:
+* a simple name (relative to annotated class): `"OldName"`
+* a relative path (relative to annotated class): `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
+* an absolute path: `"org.example.OldName"`
+
+> [!WARNING]
+> Caveat on former class resolution: due to the limitation of String manipulation without the possibility to load a class that doesn't exist anymore in the classpath, we have to rely on naming conventions on few cases:
+> * absolute path to a different first package relies on a lowercase first letter (e.g., `org` not `Org`)
+> * in relative path, the first class name must have a capital letter. If it's not the case, a `$` has to be used as separator between inner classes
 
 ### Compatibility
 

@@ -31,9 +31,11 @@ object ClassUtil {
     * Interpret `from` parameter relative to the current class's package and nesting hierarchy, converting it to the JVM
     * internal format where nested classes are separated by `$` instead of dots.
     *
-    * Note, 'from' relies on the conventions to name:
-    *  - first package with a lowercase first letter (e.g., `org` not `Org`)
-    *  - classes with a capital letter. If it's not the case, a `$` has to be used as separator between inner classes
+    * Warn: due to the limitation of String manipulation without the possibility to load a class that doesn't exist
+    * anymore in the classpath, we have to rely on naming conventions on few cases:
+    *   - absolute path to a different first package relies on a lowercase first letter (e.g., `org` not `Org`)
+    *   - in relative path, the first class name must have a capital letter. If it's not the case, a `$` has to be used
+    *     as separator between inner classes
     *
     * @param from
     *   The former class name, which can be:

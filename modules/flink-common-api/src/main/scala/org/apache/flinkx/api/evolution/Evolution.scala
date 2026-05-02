@@ -5,20 +5,20 @@ import org.apache.flinkx.api.evolution.Evolution.{DeletedClass, IdentityFunction
 
 import scala.collection.mutable
 
-/** Immutable view of all evolutions to apply on an ADT during deserialization.
+/** Immutable bundle of evolutions to apply on an ADT during deserialization.
   *
-  * Built from an [[EvolutionBuilder]] at the end of the registration phase.
+  * Produced by [[EvolutionBuilder.build]] and stored in [[Evolutions]] at derivation time.
   *
   * Thread-safe to read concurrently.
   *
   * @param clazz
-  *   ADT class to deserialize and evolve
+  *   ADT class this evolution applies to
   * @param fieldNames
-  *   The array of field names currently declared on the case class source code, in declaration order
+  *   Field names currently declared in the case class source code, in declaration order
   * @param fieldEvolutions
-  *   Field evolutions to apply during deserialization
+  *   Sorted field-level evolutions to apply during deserialization
   * @param postDeserialize
-  *   Mapper to apply on the ADT at the end of its deserialization
+  *   Mapper to apply on the ADT instance after the deserialization
   * @tparam T
   *   the type on which the Evolution applies
   */
@@ -29,23 +29,24 @@ sealed class Evolution[T] private[evolution] (
     private val postDeserialize: T => T = IdentityFunction.asInstanceOf[T => T]
 ) {
 
-  /** Is evolution can be skipped? Return `true` if no evolution is required from given version and if fields haven't
-    * been reordered, `false` otherwise.
+  /** Whether the evolution can be skipped for data written at `dataVersion`. Returns `true` (fast path) when:
+    *   - no field evolution is required from given `dataVersion`, and
+    *   - the field names of the serialized data match the current constructor order.
     *
     * @param dataVersion
-    *   Schema version of serialized data
+    *   Schema version of the serialized data
     * @param previousFieldNames
-    *   Array of field names of serialized data in declaration order
+    *   Field names of the serialized data, in declaration order
     */
   def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean =
     !fieldEvolutions.exists(_.since > dataVersion) && previousFieldNames.sameElements(fieldNames)
 
-  /** Apply evolutions currently declared on the case class source code to field map starting from a specific version.
+  /** Apply every field evolution to the given mutable field map starting from the given version.
     *
     * @param dataVersion
-    *   Schema version of serialized data
+    *   Schema version of the serialized data
     * @param fieldMap
-    *   Mutable field name to field value map to transform
+    *   Mutable field-name to field-value map to evolve, mutated in place
     */
   def applyFieldEvolutions(dataVersion: Int, fieldMap: mutable.Map[String, AnyRef]): Unit = {
     var i = 0
@@ -56,8 +57,7 @@ sealed class Evolution[T] private[evolution] (
     }
   }
 
-  /** Apply `@postDeserialize` mapper function currently declared on the ADT source code to the ADT instance at the end
-    * of its deserialization.
+  /** Apply the `@postDeserialize` mapper function to a freshly deserialized instance.
     *
     * @param toUpdate
     *   The mapper function is applied on this ADT instance
@@ -65,20 +65,19 @@ sealed class Evolution[T] private[evolution] (
   def applyPostDeserialize(toUpdate: T): T =
     if ((postDeserialize: AnyRef) eq Evolution.IdentityFunction) toUpdate else postDeserialize.apply(toUpdate)
 
-  /** Return a boolean indicating if the ADT class has been registered as deleted in the current source code.
-    *
-    * @return
-    *   `true` if the ADT class has been registered as deleted, `false` otherwise
-    */
+  /** `true` if the ADT class was registered as deleted via `@deletedClasses`, `false` otherwise. */
   def isDeleted: Boolean = clazz == DeletedClass
 
   /** Convert field map to field values array using registered field names currently declared in the case class source
     * code.
     *
     * @param fieldMap
-    *   Field name to field value map
+    *   Field-name to field-value map
     * @return
     *   Array of field values in declaration order
+    * @throws FlinkRuntimeException
+    *   if the map contains a field unknown to the current source code (forgot `@deletedFields`) or is missing a field
+    *   declared in the current source code (forgot `@added`)
     */
   def toFieldValues(fieldMap: mutable.Map[String, AnyRef]): Array[AnyRef] = {
     fieldMap.keys.foreach(n => if (!fieldNames.contains(n)) throwFieldNotUsed(clazz, n))
@@ -96,20 +95,23 @@ sealed class Evolution[T] private[evolution] (
 }
 
 object Evolution {
+
   // Sentinel used to fast-path applyPostDeserialize when no @postDeserialize mapper has been registered
   private[evolution] val IdentityFunction: Any => Any = identity
 
   private[evolution] final class DeletedMarker {
     throw new FlinkRuntimeException("This class is a replacement of a deleted class and should never be instantiated")
   }
+
+  /** Marker class returned by [[Evolutions.resolveFormerClass]] for class names registered as deleted. */
   private[evolution] val DeletedClass: Class[DeletedMarker] = classOf[DeletedMarker]
 
-  /** Singleton [[Evolution]] of a class marked as deleted. */
+  /** Singleton [[Evolution]] for a class marked as deleted. */
   private[evolution] val DeletedClassEvolution: Evolution[DeletedMarker] = new Evolution(DeletedClass) {
     override def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean = true
   }
 
-  /** Singleton default empty [[Evolution]] as fallback for a class with no registered evolutions. */
+  /** Singleton no-op [[Evolution]] returned by [[Evolutions.get]] when the queried class has no registration */
   private[evolution] val NoEvolution: Evolution[_] = new Evolution(null) {
     override def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean = true
   }

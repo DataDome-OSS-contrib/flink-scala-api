@@ -2,20 +2,20 @@ package org.apache.flinkx.api.evolution
 
 import scala.collection.mutable
 
-/** Mutable builder used during the ADT derivation phase to register schema evolutions from current source code.
+/** Mutable builder filled during the ADT derivation phase from the annotations on the current source code.
   *
   * Once all registrations are made, [[build]] produces an immutable [[Evolution]] for the deserialization phase.
   *
-  * Not thread-safe: builder intended to be used by a single derivation pass.
+  * Not thread-safe: a builder belongs to a single derivation pass.
   *
   * @param clazz
   *   ADT class being derived
   * @param fieldNames
-  *   The array of field names currently declared on the case class source code, in declaration order
+  *   Field names currently declared on the case class source, in declaration order; empty for sealed traits
   * @param fieldEvolutions
-  *   Evolution to apply on case class fields
+  *   Field-level evolutions to apply on case class fields; empty for sealed traits
   * @param postDeserialize
-  *   Mapper to apply on the ADT at the end of its deserialization
+  *   Mapper to apply on the ADT after deserialization
   * @tparam T
   *   the type on which the [[Evolution]] applies
   */
@@ -26,7 +26,7 @@ final class EvolutionBuilder[T](
     var postDeserialize: T => T = Evolution.IdentityFunction.asInstanceOf[T => T]
 ) {
 
-  /** Build the immutable [[Evolution]] from accumulated registrations. */
+  /** Build an immutable [[Evolution]] from accumulated registrations. */
   def build(): Evolution[T] =
     new Evolution[T](clazz, fieldNames.clone(), fieldEvolutions.sortInPlace().toArray, postDeserialize)
 

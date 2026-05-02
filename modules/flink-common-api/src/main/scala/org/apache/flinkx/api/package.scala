@@ -8,48 +8,51 @@ import scala.annotation.StaticAnnotation
 
 package object api {
 
-  /** Marks current schema version of an ADT (case class or sealed trait). Enables ADT evolutions while keeping
-    * checkpoint state compatibility.
+  /** Declares the current schema version of an ADT (case class, sealed trait or Scala 3 enum) and opts it in to the
+    * annotation-based schema evolution feature.
     *
-    * An ADT without `@version` annotation is considered to have version 0. You can enable evolution by adding `version`
-    * annotation from a checkpoint without.
+    * An ADT without this annotation is considered to have version 0 which makes it safe to add `@version(1)` to an
+    * existing ADT and restore it from a checkpoint produced by the unversioned code.
     *
-    * Annotation of ADT (case class or sealed trait).
+    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param current
-    *   Current version number
+    *   Current schema version, must be strictly positive
     */
   final case class version(current: Int) extends StaticAnnotation
 
-  /** Trait marker indicating an evolution annotation. */
+  /** Marker trait for every evolution annotation. */
   trait Evolved extends StaticAnnotation
 
-  /** Applies transformation to whole instance after deserialization.
+  /** Applies a mapper to the whole instance after its deserialization.
     *
-    * Annotation of ADT (case class or sealed trait).
+    * Useful for cross-field migrations that don't fit a single `@transformed`, or selecting a different sealed trait
+    * subtype based on the input.
+    *
+    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param mapper
-    *   Function transforming deserialized instance
+    *   Function applied on the deserialized instance.
     */
   final case class postDeserialize[A](mapper: A => A) extends Evolved {
     override def toString: String = s"postDeserialize(<mapper>)"
   }
 
-  /** Marks field added in a specific version. Requires default value.
+  /** Marks a case class field added in a specific version. The annotated field must have a default value.
     *
     * Annotation of case class parameter.
     * @param since
-    *   Version when addition occurred
+    *   Version in which the field was added.
     */
   final case class added(since: Int) extends Evolved
 
   /** On case class parameter, marks field renamed from previous name.
     *
-    * On sealed trait subtype, marks subtype renamed from previous name or moved from another location.
+    * On ADT or subtype, marks class renamed from previous name or moved from another location.
     *
-    * Annotation of case class parameter or sealed trait subtype.
+    * Annotation of case class parameter, ADT or sealed trait subtype.
     * @param since
-    *   Version when rename occurred
+    *   Version in which the rename occurred
     * @param from
-    *   Previous field name or subtype name, which can be:
+    *   Previous field or class name. Class names can be:
     *   - A simple name: `"OldName"`
     *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
     *   - An absolute path: `"org.example.OldName"`
@@ -58,38 +61,41 @@ package object api {
     override def toString: String = s"renamed($since,\"$from\")"
   }
 
-  /** Marks field with type transformation. Mapper function converts old type to new type.
+  /** Marks a case class field whose type has changed: `mapper` function converts from the old type to the current type.
     *
     * Annotation of case class parameter.
     * @param since
-    *   Version when transformation occurred
+    *   Version in which the type-change occurred
     * @param mapper
-    *   Function converting old type A to new type B
+    *   Function converting the previously serialized value to the current type
     */
   final case class transformed[A, B](since: Int, mapper: A => B) extends Evolved {
     override def toString: String = s"transformed($since,<mapper>)"
   }
 
-  /** Marks deleted fields of a case class not present in current schema.
+  /** Marks fields that used to exist on a case class but no longer appear in current schema.
+    *
+    * Multiple annotations can coexist on the same class to record deletions made in different versions.
     *
     * Annotation of case class.
     * @param since
-    *   Version when deletions occurred
+    *   Version in which the listed fields were deleted.
     * @param names
-    *   Names of deleted fields
+    *   Names of the deleted fields, as they appeared in the previous schema.
     */
   final case class deletedFields(since: Int, names: String*) extends Evolved {
     override def toString: String = s"deletedFields($since,${names.mkString("\"", "\",\"", "\"")})"
   }
 
-  /** Marks deleted classes removed in current schema and no longer exist in source code:
-    *   - On a sealed trait: subtype classes that have been removed
-    *   - On a case class: classes that were referenced by a now-deleted field (declared with `@deletedFields`)
+  /** Marks deleted classes removed from current schema and no longer exist in source code:
+    *   - On a sealed trait or a Scala 3 enum: subtype classes that have been removed. Records of these subtypes are
+    *     deserialized as `null`.
+    *   - On a case class: classes that were referenced by a now-deleted field (declared via `@deletedFields`).
     *
-    * Annotation of ADT (case class or sealed trait).
+    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     *
     * @param names
-    *   Relative or fully qualified names of deleted classes, which can be:
+    *   Names of the deleted classes, which can be:
     *   - A simple name: `"OldName"`
     *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
     *   - An absolute path: `"org.example.OldName"`

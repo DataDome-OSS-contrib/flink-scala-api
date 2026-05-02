@@ -6,20 +6,21 @@ import org.apache.flinkx.api.evolution.FieldEvolution.Phase
 import scala.collection.mutable
 import scala.math.Ordered.orderingToOrdered
 
-/** Schema evolution operation applied to deserialized case class fields.
+/** A single field-level evolution step, applied to the in-flight field map during deserialization.
   *
   * Evolutions execute in sorted order by `since` then `phase`. The phases form a canonical pipeline within a version:
   * Delete → Rename → Transform → Add. This ordering enables compositions such as:
-  *   - a field can be renamed then transformed
-  *   - a field can be deleted (its state ignored) then re-added with the same name
+  *   - rename a field, then transform its value
+  *   - delete a field (its serialized state is dropped), then re-add a field with the same name from a default
   *
   * @param since
-  *   Version number when this evolution was introduced
+  *   Version in which the evolution was introduced
   * @param phase
-  *   Operation phase, defining the order within a version
+  *   Operation phase, defining sort order within a single version
   */
 abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] {
 
+  /** Mutate `fields` in place to apply this evolution step. */
   def apply(fields: mutable.Map[String, AnyRef]): Unit
 
   override def compare(that: FieldEvolution): Int = (since, phase.rank).compare((that.since, that.phase.rank))
@@ -28,7 +29,7 @@ abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[
 
 object FieldEvolution {
 
-  /** Phase of an evolution operation. The rank is the canonical sort order applied within a version. */
+  /** Operation phase used to order evolutions within a single version (lower rank applied first). */
   sealed abstract class Phase(val rank: Int)
   object Phase {
     case object Delete    extends Phase(0)
@@ -37,7 +38,11 @@ object FieldEvolution {
     case object Add       extends Phase(3)
   }
 
-  /** Remove a field from field map. */
+  /** Remove a field from the field map. Backs the `@deletedFields` annotation.
+    *
+    * @throws FlinkRuntimeException
+    *   if `name` is not present in the field map.
+    */
   final case class Delete(
       override val since: Int,
       clazz: Class[_],
@@ -53,7 +58,11 @@ object FieldEvolution {
 
   }
 
-  /** Rename a field from old name to new name. */
+  /** Move the entry under `fromName` to the new key `name`. Backs the `@renamed` annotation on a field.
+    *
+    * @throws FlinkRuntimeException
+    *   if `fromName` is not present in the field map.
+    */
   final case class Rename(
       override val since: Int,
       clazz: Class[_],
@@ -70,7 +79,11 @@ object FieldEvolution {
 
   }
 
-  /** Transform a field value using mapper function. */
+  /** Replace the value at `name` with `mapper(value)`. Backs the `@transformed` annotation.
+    *
+    * @throws FlinkRuntimeException
+    *   if `name` is not present in the field map.
+    */
   final case class Transform[A, B](
       override val since: Int,
       clazz: Class[_],
@@ -87,7 +100,12 @@ object FieldEvolution {
 
   }
 
-  /** Add a field with default value. */
+  /** Insert field `name` with the case class default value. Backs the `@added` annotation.
+    *
+    * @throws FlinkRuntimeException
+    *   - at construction if `default` is empty;
+    *   - at apply time if `name` is already present.
+    */
   final case class Add[T](
       override val since: Int,
       clazz: Class[_],
