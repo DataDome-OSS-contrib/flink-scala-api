@@ -10,6 +10,7 @@ import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 /** Serializer for Scala 3 enum. Handle nullable value. */
 class Scala3EnumSerializer[T <: Product](
     val clazz: Class[T],
+    val version: Int,
     val enumValueNames: Array[String],
     val enumValueSerializers: Array[TypeSerializer[_]]
 ) extends MutableSerializer[T] {
@@ -33,7 +34,7 @@ class Scala3EnumSerializer[T <: Product](
     if (isImmutableSerializer) {
       this
     } else {
-      new Scala3EnumSerializer[T](clazz, enumValueNames, enumValueSerializers.map(_.duplicate()))
+      new Scala3EnumSerializer[T](clazz, version, enumValueNames, enumValueSerializers.map(_.duplicate()))
     }
   }
 
@@ -69,7 +70,7 @@ class Scala3EnumSerializer[T <: Product](
       null.asInstanceOf[T]
     } else {
       val subtype = enumValueSerializers(index.toInt)
-      evolution.applyPostDeserialize(subtype.asInstanceOf[TypeSerializer[T]].deserialize(source))
+      evolution.postDeserialize.apply(version, subtype.asInstanceOf[TypeSerializer[T]].deserialize(source))
     }
   }
 
@@ -94,13 +95,15 @@ class Scala3EnumSerializerSnapshot[T <: Product](
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
-  private var clazz: Class[T] = _
+  private var clazz: Class[T]               = _
+  private var enumVersion: Int              = 0
   private var enumValueNames: Array[String] = Array.empty
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
     setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
     clazz = s.clazz
+    enumVersion = s.version
     enumValueNames = s.enumValueNames
   }
 
@@ -112,15 +115,17 @@ class Scala3EnumSerializerSnapshot[T <: Product](
   override protected def createOuterSerializerWithNestedSerializers(
       nestedSerializers: Array[TypeSerializer[_]]
   ): Scala3EnumSerializer[T] =
-    new Scala3EnumSerializer(clazz, enumValueNames, nestedSerializers)
+    new Scala3EnumSerializer(clazz, enumVersion, enumValueNames, nestedSerializers)
 
   override def writeOuterSnapshot(out: DataOutputView): Unit = {
     out.writeUTF(clazz.getName)
+    out.writeInt(enumVersion)
     StringArraySerializer.INSTANCE.serialize(enumValueNames, out)
   }
 
   override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
     clazz = if (readOuterSnapshotVersion > 1) Evolutions.resolveFormerClass(in.readUTF(), cl) else null
+    enumVersion = if (readOuterSnapshotVersion > 1) in.readInt() else 0
     enumValueNames = StringArraySerializer.INSTANCE.deserialize(in)
   }
 

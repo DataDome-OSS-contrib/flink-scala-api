@@ -23,16 +23,19 @@ package object api {
   /** Marker trait for every evolution annotation. */
   trait Evolved extends StaticAnnotation
 
-  /** Applies a mapper to the whole instance after its deserialization.
+  /** Applies a mapper to the whole ADT instance after its deserialization. Parameters:
+    *   - the version of the deserialized ADT;
+    *   - the ADT instance after its deserialization.
+    *   - Return value: a potentially modified ADT instance.
     *
     * Useful for cross-field migrations that don't fit a single `@transformed`, or selecting a different sealed trait
     * subtype based on the input.
     *
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param mapper
-    *   Function applied on the deserialized instance.
+    *   A mapper function taking the `data version` and the `ADT instance` after its deserialization as parameters
     */
-  final case class postDeserialize[A](mapper: A => A) extends Evolved {
+  final case class postDeserialize[A](mapper: (Int, A) => A) extends Evolved {
     override def toString: String = s"postDeserialize(<mapper>)"
   }
 

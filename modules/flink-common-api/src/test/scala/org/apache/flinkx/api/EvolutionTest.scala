@@ -86,6 +86,13 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnCaseClassWithoutVersion without version"
   }
 
+  it should "throw when @postDeserialize is on a case class twice" in {
+    val exception = intercept[FlinkRuntimeException] {
+      implicitly[TypeInformation[WrongPostDeserializeTwiceOnCaseClass]]
+    }
+    exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeTwiceOnCaseClass twice"
+  }
+
   it should "throw when @version is on a case class field" in {
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongVersionOnField]]
@@ -135,6 +142,13 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnField.a"
   }
 
+  it should "throw when @postDeserialize is on a case class field" in {
+    val exception = intercept[FlinkRuntimeException] {
+      implicitly[TypeInformation[WrongPostDeserializeOnField]]
+    }
+    exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeOnField.a"
+  }
+
   it should "throw when @added is on a sealed trait" in {
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongAddedOnSealedTrait]]
@@ -154,6 +168,13 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
       implicitly[TypeInformation[WrongTransformedOnSealedTrait]]
     }
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSealedTrait"
+  }
+
+  it should "throw when @postDeserialize is on a sealed trait twice" in {
+    val exception = intercept[FlinkRuntimeException] {
+      implicitly[TypeInformation[WrongPostDeserializeTwiceOnSealedTrait]]
+    }
+    exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeTwiceOnSealedTrait twice"
   }
 
   it should "throw when @deletedClasses is on a sealed trait without version" in {
@@ -193,6 +214,17 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   it should "allow when @deletedClasses is on a sealed trait subtype being itself a sealed trait" in {
     implicitly[TypeInformation[CorrectDeletedClassesOnSealedTraitSubtype]]
+  }
+
+  it should "throw when @postDeserialize is on a sealed trait subtype without version" in {
+    val exception = intercept[FlinkRuntimeException] {
+      implicitly[TypeInformation[WrongPostDeserializeOnSealedTraitSubtype]]
+    }
+    exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeOnSubtype$ without version"
+  }
+
+  it should "allow when @postDeserialize is on a versioned sealed trait subtype" in {
+    implicitly[TypeInformation[CorrectPostDeserializeOnSealedTraitSubtype]]
   }
 
   it should "throw field not found when deserializing Click v0 with wrong added field" in {
@@ -282,8 +314,9 @@ object EvolutionTest {
       date: String
   )
 
-  def mapIntToString(a: Int): String   = a.toString
-  def updateClick(click: Click): Click = click.copy(fieldInFile = click.fieldNotInFile.toInt * 5)
+  def mapIntToString(a: Int): String                 = a.toString
+  def updateClick(version: Int, click: Click): Click =
+    click.copy(fieldInFile = click.fieldNotInFile.toInt * 5 + version)
 
   /* event-v0
   sealed trait Event
@@ -304,8 +337,8 @@ object EvolutionTest {
 
   case class Cart(items: Int) extends Action
 
-  def updateAction(action: Action): Action = action match {
-    case Web(ts) => Web(ts + 1)
+  def updateAction(version: Int, action: Action): Action = action match {
+    case Web(ts) => Web(if (version == 0) ts + 1 else ts)
     case Cart(_) => Login
     case e @ _   => e
   }
@@ -338,6 +371,11 @@ object EvolutionTest {
   case class WrongDeletedClassesOnCaseClassWithoutVersion()
 
   @version(1)
+  @postDeserialize(updateClick)
+  @postDeserialize(updateAction)
+  case class WrongPostDeserializeTwiceOnCaseClass()
+
+  @version(1)
   case class WrongVersionOnField(@version(1) a: String)
 
   case class WrongAddedOnFieldWithoutVersion(@added(1) a: String)
@@ -356,6 +394,9 @@ object EvolutionTest {
   case class WrongDeletedClassesOnField(@deletedClasses("A") a: String)
 
   @version(1)
+  case class WrongPostDeserializeOnField(@postDeserialize(updateClick) a: String)
+
+  @version(1)
   @added(since = 1)
   sealed trait WrongAddedOnSealedTrait
   case object Subtype1 extends WrongAddedOnSealedTrait
@@ -369,9 +410,15 @@ object EvolutionTest {
   sealed trait WrongTransformedOnSealedTrait
   case object Subtype3 extends WrongTransformedOnSealedTrait
 
+  @version(1)
+  @postDeserialize(updateClick)
+  @postDeserialize(updateAction)
+  sealed trait WrongPostDeserializeTwiceOnSealedTrait
+  case object Subtype4 extends WrongPostDeserializeTwiceOnSealedTrait
+
   @deletedClasses("A")
   sealed trait WrongDeletedClassesOnSealedTraitWithoutVersion
-  case object Subtype4 extends WrongDeletedClassesOnSealedTraitWithoutVersion
+  case object Subtype5 extends WrongDeletedClassesOnSealedTraitWithoutVersion
 
   @version(1)
   sealed trait WrongAddedOnSealedTraitSubtype
@@ -398,6 +445,17 @@ object EvolutionTest {
   @deletedClasses("A")
   sealed trait CorrectDeletedClassesOnSubtype extends CorrectDeletedClassesOnSealedTraitSubtype
   case object CorrectDeletedClassesCaseObject extends CorrectDeletedClassesOnSubtype
+
+  @version(1)
+  sealed trait WrongPostDeserializeOnSealedTraitSubtype
+  @postDeserialize(updateAction)
+  case object WrongPostDeserializeOnSubtype extends WrongPostDeserializeOnSealedTraitSubtype
+
+  @version(1)
+  sealed trait CorrectPostDeserializeOnSealedTraitSubtype
+  @version(1)
+  @postDeserialize(updateAction)
+  case class CorrectPostDeserializeOnSubtype() extends CorrectPostDeserializeOnSealedTraitSubtype
 
   @version(2)
   @renamed(since = 1, "Click")

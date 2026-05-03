@@ -498,7 +498,7 @@ case class Click(
 )
 
 def intToString(i: Int): String      = i.toString
-def updateClick(click: Click): Click = click.copy(sessionId = click.sessionId + click.id)
+def updateClick(version: Int, click: Click): Click = click.copy(sessionId = click.sessionId + click.id)
 
 // Schema previously committed (version 0):
 // sealed trait Event
@@ -515,22 +515,22 @@ sealed trait Action
 @renamed(since = 1, "View")
 case class Web(ts: Long) extends Action
 
-def updateAction(action: Action): Action = action match {
-  case Web(ts) => Web(ts + 1)
+def updateAction(version: Int, action: Action): Action = action match {
+  case Web(ts) => Web(ts + version)
 }
 ```
 
 **Available annotations:**
 
-| Annotation | Where                          | Effect                                                                                                                                                                          |
-| --- |--------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `@version(n)` | ADT                            | Declares the current schema version (`n > 0`); opt in the ADT to evolution.                                                                                                     |
-| `@added(since = n)` | case class field               | Field was added in version `n`; requires a default value                                                                                                                        |
-| `@renamed(since = n, "oldName")` | case class field, ADT, subtype | Field or class was previously known under `"oldName"`, or lived at another location  (see [class name resolution](#former-class-name-resolution))                               |
-| `@transformed(since = n, mapper)` | case class field               | Field's type changed in version `n`; `mapper` converts the previously serialized value to the current type                                                                      |
-| `@deletedFields(since = n, "a", "b")` | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                                |
+| Annotation | Where                          | Effect                                                                                                                                                                        |
+| --- |--------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@version(n)` | ADT                            | Declares the current schema version (`n > 0`); opt in the ADT to evolution.                                                                                                   |
+| `@added(since = n)` | case class field               | Field was added in version `n`; requires a default value                                                                                                                      |
+| `@renamed(since = n, "oldName")` | case class field, ADT, subtype | Field or class was previously known under `"oldName"`, or lived at another location  (see [class name resolution](#former-class-name-resolution))                             |
+| `@transformed(since = n, mapper)` | case class field               | Field's type changed in version `n`; `mapper` converts the previously serialized value to the current type                                                                    |
+| `@deletedFields(since = n, "a", "b")` | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                              |
 | `@deletedClasses("OldClass1", …)` | ADT                            | Subtypes that have been removed (records become `null`), or field types that were referenced by a now-deleted field (see [class name resolution](#former-class-name-resolution)) |
-| `@postDeserialize(mapper)` | ADT                            | Apply `mapper` to the whole instance after its deserialization                                                                                                                  |
+| `@postDeserialize(mapper)` | ADT                            | Applies the mapper function taking the `data version` and the `ADT instance` after its deserialization as parameters |
 
 Field evolutions are applied in ascending `since` order. Within a single version, evolutions are applied in this canonical pipeline:
 Delete → Rename → Transform → Add. This ordering enables annotation combinations such as:

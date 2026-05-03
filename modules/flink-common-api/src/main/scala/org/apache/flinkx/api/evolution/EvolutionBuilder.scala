@@ -1,5 +1,7 @@
 package org.apache.flinkx.api.evolution
 
+import org.apache.flinkx.api.postDeserialize
+
 import scala.collection.mutable
 
 /** Mutable builder filled during the ADT derivation phase from the annotations on the current source code.
@@ -15,19 +17,30 @@ import scala.collection.mutable
   * @param fieldEvolutions
   *   Field-level evolutions to apply on case class fields; empty for sealed traits
   * @param postDeserialize
-  *   Mapper to apply on the ADT after deserialization
+ *   A mapper function taking the `data version` and the `ADT instance` after its deserialization as parameters
   * @tparam T
-  *   the type on which the [[Evolution]] applies
+  *   The type on which the [[Evolution]] applies
   */
 final class EvolutionBuilder[T](
     val clazz: Class[T],
     val fieldNames: Array[String] = Array.empty,
     val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
-    var postDeserialize: T => T = Evolution.IdentityFunction.asInstanceOf[T => T]
+    private var postDeserialize: Option[(Int, T) => T] = None
 ) {
+
+  def addPostDeserialize(p: postDeserialize[T]): Unit = if (postDeserialize.isEmpty) {
+    postDeserialize = Some(p.mapper)
+  } else {
+    Evolutions.throwEvolutionNotAllowed(p, s"$clazz twice")
+  }
 
   /** Build an immutable [[Evolution]] from accumulated registrations. */
   def build(): Evolution[T] =
-    new Evolution[T](clazz, fieldNames.clone(), fieldEvolutions.sortInPlace().toArray, postDeserialize)
+    new Evolution[T](
+      clazz,
+      fieldNames.clone(),
+      fieldEvolutions.sortInPlace().toArray,
+      postDeserialize.getOrElse((_, i) => i)
+    )
 
 }

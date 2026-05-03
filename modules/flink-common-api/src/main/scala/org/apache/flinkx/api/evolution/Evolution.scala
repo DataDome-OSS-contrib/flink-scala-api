@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.Evolution.{DeletedClass, IdentityFunction}
+import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 
 import scala.collection.mutable
 
@@ -18,7 +18,7 @@ import scala.collection.mutable
   * @param fieldEvolutions
   *   Sorted field-level evolutions to apply during deserialization
   * @param postDeserialize
-  *   Mapper to apply on the ADT instance after the deserialization
+  *   A mapper function taking the `data version` and the `ADT instance` after its deserialization as parameters
   * @tparam T
   *   the type on which the Evolution applies
   */
@@ -26,7 +26,7 @@ sealed class Evolution[T] private[evolution] (
     private val clazz: Class[T],
     private val fieldNames: Array[String] = Array.empty,
     private val fieldEvolutions: Array[FieldEvolution] = Array.empty,
-    private val postDeserialize: T => T = IdentityFunction.asInstanceOf[T => T]
+    val postDeserialize: (Int, T) => T = (_: Int, adtInstance: T) => adtInstance
 ) {
 
   /** Whether the evolution can be skipped for data written at `dataVersion`. Returns `true` (fast path) when:
@@ -49,21 +49,14 @@ sealed class Evolution[T] private[evolution] (
     *   Mutable field-name to field-value map to evolve, mutated in place
     */
   def applyFieldEvolutions(dataVersion: Int, fieldMap: mutable.Map[String, AnyRef]): Unit = {
-    var i = 0
-    while (i < fieldEvolutions.length) {
-      val fieldEvolution = fieldEvolutions(i)
-      if (fieldEvolution.since > dataVersion) fieldEvolution.apply(fieldMap)
-      i += 1
+    var i = fieldEvolutions.indexWhere(_.since > dataVersion)
+    if (i >= 0) {
+      while (i < fieldEvolutions.length) {
+        fieldEvolutions(i).apply(fieldMap)
+        i += 1
+      }
     }
   }
-
-  /** Apply the `@postDeserialize` mapper function to a freshly deserialized instance.
-    *
-    * @param toUpdate
-    *   The mapper function is applied on this ADT instance
-    */
-  def applyPostDeserialize(toUpdate: T): T =
-    if ((postDeserialize: AnyRef) eq Evolution.IdentityFunction) toUpdate else postDeserialize.apply(toUpdate)
 
   /** `true` if the ADT class was registered as deleted via `@deletedClasses`, `false` otherwise. */
   def isDeleted: Boolean = clazz == DeletedClass
@@ -95,9 +88,6 @@ sealed class Evolution[T] private[evolution] (
 }
 
 object Evolution {
-
-  // Sentinel used to fast-path applyPostDeserialize when no @postDeserialize mapper has been registered
-  private[evolution] val IdentityFunction: Any => Any = identity
 
   private[evolution] final class DeletedMarker {
     throw new FlinkRuntimeException("This class is a replacement of a deleted class and should never be instantiated")

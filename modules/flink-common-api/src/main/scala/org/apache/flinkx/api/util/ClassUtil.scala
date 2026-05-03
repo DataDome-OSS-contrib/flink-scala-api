@@ -50,7 +50,7 @@ object ClassUtil {
     *   If `from` is empty, contains leading/consecutive/trailing dots
     */
   def resolveFormerClassName(from: String, currentClass: Class[_]): String = {
-    if (from.isEmpty || from.matches("^\\..*|.*\\.\\..*|.*\\.$")) {
+    if (from.isEmpty || from.matches("^[.].*|.*[.][.].*|.*[.]$")) {
       throw new FlinkRuntimeException(s"Class name '$from' in from parameter is malformed.")
     }
 

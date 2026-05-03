@@ -80,10 +80,10 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         else // version > 0
           // Iterate over case class annotations to register evolutions on current source code
           ctx.annotations.collect {
-            case r: renamed         => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedFields   => d.names.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
-            case d: deletedClasses  => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
-            case p: postDeserialize[T & Product] => builder.postDeserialize = p.mapper
+            case r: renamed        => Evolutions.registerFormerClass(r.from, clazz)
+            case d: deletedFields  => d.names.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
+            case d: deletedClasses => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case p: postDeserialize[T & Product] => builder.addPostDeserialize(p)
             case e: Evolved                      => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over case class fields annotations to register evolutions from current source code
@@ -124,12 +124,14 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
               clazz = clazz.asInstanceOf[Class[T & Product]],
+              version = version,
               enumValueNames = ctx.subtypes.map(_.typeInfo.short).toArray,
               enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             ).asInstanceOf[TypeSerializer[T]]
           else
             new CoproductSerializer[T](
               clazz = clazz,
+              version = version,
               subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray,
               subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             )
@@ -146,15 +148,17 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           ctx.annotations.collect {
             case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
             case d: deletedClasses     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
-            case p: postDeserialize[T] => builder.postDeserialize = p.mapper
+            case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
           }
           // Iterate over subtypes annotations to register evolutions from current source code
           ctx.subtypes.foreach { p =>
             p.annotations.collect {
-              case r: renamed        => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
-              case _: deletedClasses => // allowed on subtype
-              case e: Evolved        => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
+              case r: renamed => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
+              case _: deletedFields if p.annotations.exists(_.isInstanceOf[version])  => // allowed on versioned subtype
+              case _: deletedClasses if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
+              case _: postDeserialize[T] if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
+              case e: Evolved => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
             }
           }
           Evolutions.register(builder)

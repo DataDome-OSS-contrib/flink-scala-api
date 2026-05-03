@@ -171,7 +171,7 @@ class CaseClassSerializer[T <: Product](
       if (evolution.isDeleted) {
         null.asInstanceOf[T]
       } else {
-        evolution.applyPostDeserialize(createInstance(fieldValues))
+        evolution.postDeserialize(version, createInstance(fieldValues))
       }
     }
   }
