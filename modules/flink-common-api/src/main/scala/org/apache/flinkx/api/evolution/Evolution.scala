@@ -39,7 +39,7 @@ sealed class Evolution[T] private[evolution] (
     *   Field names of the serialized data, in declaration order
     */
   def isAvoidable(dataVersion: Int, previousFieldNames: Array[String]): Boolean =
-    !fieldEvolutions.exists(_.since > dataVersion) && previousFieldNames.sameElements(fieldNames)
+    fieldEvolutions.forall(_.since <= dataVersion) && previousFieldNames.sameElements(fieldNames)
 
   /** Apply every field evolution to the given mutable field map starting from the given version.
     *
@@ -89,9 +89,7 @@ sealed class Evolution[T] private[evolution] (
 
 object Evolution {
 
-  private[evolution] final class DeletedMarker {
-    throw new FlinkRuntimeException("This class is a replacement of a deleted class and should never be instantiated")
-  }
+  private[evolution] final class DeletedMarker private {}
 
   /** Marker class returned by [[Evolutions.resolveFormerClass]] for class names registered as deleted. */
   private[evolution] val DeletedClass: Class[DeletedMarker] = classOf[DeletedMarker]

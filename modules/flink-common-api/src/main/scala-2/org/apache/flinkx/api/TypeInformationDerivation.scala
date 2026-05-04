@@ -35,7 +35,7 @@ private[api] trait TypeInformationDerivation {
       case None         =>
         cache.put(cacheKey, MarkerTypeInfo)
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
-        val version    = ctx.annotations.collectFirst(Evolutions.findVersion(clazz)).getOrElse(0)
+        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val fieldNames = ctx.parameters.map(_.label).toArray
         val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
           new ScalaCaseObjectSerializer[T](clazz)
@@ -109,7 +109,7 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version    = ctx.annotations.collectFirst(Evolutions.findVersion(clazz)).getOrElse(0)
+        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val serializer = new CoproductSerializer[T](
           clazz = clazz,
           version = version,

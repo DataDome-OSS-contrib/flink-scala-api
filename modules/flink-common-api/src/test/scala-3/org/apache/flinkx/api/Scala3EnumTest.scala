@@ -49,7 +49,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     testTypeInfoAndSerializer(FooEvent("a", Example.Foo("a", 2)))
   }
 
-  /*
+  /* Test to serialize FailureType v0 code into Failure-Type-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize FailureType v0" in {
     val failureType: FailureType = FailureType.PARSING_TYPE
     serializeToFile("Failure-Type-v0", failureType)

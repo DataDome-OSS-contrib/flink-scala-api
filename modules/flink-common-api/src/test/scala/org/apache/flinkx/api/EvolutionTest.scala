@@ -13,7 +13,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   override protected def beforeEach(): Unit = Evolutions.reset()
 
-  /*
+  /* Test to serialize Click v0 code into Click-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize Click v0" in {
     val event: Click = Click("a", List(ClickEvent("2021-01-01", 1), ClickEvent("2022-02-02", 2)), 5, "id1", "b")
     serializeToFile("Click-v0", event)
@@ -25,7 +25,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     testDeserializeFromFile("Click-v0", expected)
   }
 
-  /*
+  /* Test to serialize Event v0 code into Event-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize Event v0" in {
     val event: Event = View(123456789)
     serializeToFile("Event-v0", event)
@@ -43,7 +43,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     val exception = intercept[FlinkRuntimeException] {
       implicitly[TypeInformation[WrongCurrentVersion]]
     }
-    exception.getMessage shouldBe "Current version of class org.apache.flinkx.api.EvolutionTest$WrongCurrentVersion must be positive, got @version(0)"
+    exception.getMessage shouldBe "Current version of class org.apache.flinkx.api.EvolutionTest$WrongCurrentVersion must be positive or 0, got @version(-1)"
   }
 
   it should "throw when @added is on a case class" in {
@@ -330,6 +330,7 @@ object EvolutionTest {
   @postDeserialize(updateAction)
   sealed trait Action
 
+  @version(0)
   case object Login extends Action
 
   @renamed(since = 1, "View")
@@ -345,7 +346,7 @@ object EvolutionTest {
 
   // Error handling
 
-  @version(0)
+  @version(-1)
   case class WrongCurrentVersion()
 
   @version(1)

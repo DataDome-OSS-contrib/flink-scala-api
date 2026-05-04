@@ -47,7 +47,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
-        val version    = ctx.annotations.collectFirst(Evolutions.findVersion(clazz)).getOrElse(0)
+        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val fieldNames = ctx.parameters.map(_.label).toArray
         val serializer =
           if typeTag.isEnum then
@@ -125,7 +125,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version    = ctx.annotations.collectFirst(Evolutions.findVersion(clazz)).getOrElse(0)
+        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](

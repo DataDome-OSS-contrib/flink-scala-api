@@ -9,7 +9,6 @@ import org.apache.flinkx.api.version
 import java.io.IOException
 import scala.annotation.StaticAnnotation
 import scala.collection.concurrent
-import scala.util.Try
 
 /** Global registry and entry point for the annotation-based schema evolution feature.
   *
@@ -27,7 +26,8 @@ import scala.util.Try
   * that exist in the current source code (or a deletion marker).
   *
   * Concurrency: registration runs at startup during derivation (single-threaded per ADT); [[get]] and
-  * [[resolveFormerClass]] are safe to call concurrently from multiple Flink tasks afterward. */
+  * [[resolveFormerClass]] are safe to call concurrently from multiple Flink tasks afterward.
+  */
 object Evolutions {
 
   private val initEvolutions: Seq[(Class[_], Evolution[_])] = Seq((DeletedClass, Evolution.DeletedClassEvolution))
@@ -41,11 +41,7 @@ object Evolutions {
   def register[T](builder: EvolutionBuilder[T]): Unit =
     classToEvolutions.put(builder.clazz, builder.build())
 
-  /** Return the [[Evolution]] associated with the given class, or [[Evolution.NoEvolution]] otherwise.
-    *
-    * @param clazz
-    *   ADT class to deserialize and evolve
-    */
+  /** Return the [[Evolution]] associated with the given ADT class, or [[Evolution.NoEvolution]] otherwise. */
   def get[T](clazz: Class[T]): Evolution[T] =
     classToEvolutions.getOrElse(clazz, Evolution.NoEvolution).asInstanceOf[Evolution[T]]
 
@@ -85,16 +81,21 @@ object Evolutions {
     formerClassNameToCurrentClass
       .getOrElse(
         formerClassName,
-        Try(Class.forName(formerClassName, false, cl)).recover { case e: ClassNotFoundException =>
-          throw new IOException(e) // Iso InstantiationUtil.resolveClassByName
-        }.get
+        try Class.forName(formerClassName, false, cl)
+        catch { // Same behavior as org.apache.flink.util.InstantiationUtil.resolveClassByName
+          case e: ClassNotFoundException =>
+            throw new IOException(s"Could not find class '$formerClassName' in classpath.", e)
+        }
       )
       .asInstanceOf[Class[T]]
 
-  private[api] def findVersion[A](clazz: Class[_]): PartialFunction[A, Int] = {
-    case version(c) if c > 0 => c
-    case version(c) => throw new FlinkRuntimeException(s"Current version of $clazz must be positive, got @version($c)")
-  }
+  private[api] def findVersionInAnnotations[A](clazz: Class[_], annotations: Seq[Any]): Int = annotations
+    .collectFirst {
+      case version(c) if c >= 0 => c
+      case version(c)           =>
+        throw new FlinkRuntimeException(s"Current version of $clazz must be positive or 0, got @version($c)")
+    }
+    .getOrElse(0)
 
   private[api] def throwEvolutionNotAllowed[A](evolution: StaticAnnotation, target: String): A =
     throw new FlinkRuntimeException(s"@$evolution annotation is not allowed on $target")
