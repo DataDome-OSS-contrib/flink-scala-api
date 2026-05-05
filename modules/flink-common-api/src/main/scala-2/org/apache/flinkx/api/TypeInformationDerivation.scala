@@ -71,9 +71,9 @@ private[api] trait TypeInformationDerivation {
         } else { // version > 0
           // Iterate over case class annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedFields      => d.names.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
-            case d: deletedClasses     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case r: renamed            => Evolutions.registerFormerClass(r.formerName, clazz)
+            case d: deletedFields      => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
+            case d: deletedClasses     => d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
             case _                     => // Ignore other annotations
@@ -82,7 +82,7 @@ private[api] trait TypeInformationDerivation {
           ctx.parameters.foreach { p =>
             p.annotations.foreach {
               case a: added             => builder.fieldEvolutions += Add(a.since, clazz, p.label, p.default)
-              case r: renamed           => builder.fieldEvolutions += Rename(r.since, clazz, p.label, r.from)
+              case r: renamed           => builder.fieldEvolutions += Rename(r.since, clazz, r.formerName, p.label)
               case t: transformed[_, _] => builder.fieldEvolutions += Transform(t.since, clazz, p.label, t.mapper)
               case e: version           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
               case e: Evolved           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
@@ -133,8 +133,8 @@ private[api] trait TypeInformationDerivation {
           val builder = new EvolutionBuilder(clazz)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed            => Evolutions.registerFormerClass(r.from, clazz)
-            case d: deletedClasses     => d.names.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case r: renamed            => Evolutions.registerFormerClass(r.formerName, clazz)
+            case d: deletedClasses     => d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
             case _                     => // Ignore other annotations
@@ -142,7 +142,7 @@ private[api] trait TypeInformationDerivation {
           // Iterate over subtypes annotations to register evolutions from current source code
           ctx.subtypes.foreach { p =>
             p.annotations.collect {
-              case r: renamed => Evolutions.registerFormerClass(r.from, p.typeclass.getTypeClass)
+              case r: renamed => Evolutions.registerFormerClass(r.formerName, p.typeclass.getTypeClass)
               case _: deletedFields if p.annotations.exists(_.isInstanceOf[version])  => // allowed on versioned subtype
               case _: deletedClasses if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
               case _: postDeserialize[T] if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype

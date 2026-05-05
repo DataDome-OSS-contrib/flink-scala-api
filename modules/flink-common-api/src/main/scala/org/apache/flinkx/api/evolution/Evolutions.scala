@@ -12,18 +12,22 @@ import scala.collection.concurrent
 
 /** Global registry and entry point for the annotation-based schema evolution feature.
   *
-  * Schema evolution lets a Flink job restore from a checkpoint whose ADT (case class, sealed trait or Scala 3 enum)
-  * schema differs from the one currently declared in source code. Users opt in per ADT by adding [[version @version]]
+  * Schema evolution lets a Flink job restore from a former checkpoint whose ADT (case class, sealed trait or Scala 3
+  * enum) schema differs from the one currently declared in source code. Users opt in per ADT by adding [[version]]
   * annotation and describe each change with [[Evolved]] annotations.
   *
+  * This schema evolution feature commonly employs the following vocabulary to qualify version, class, field, etc.:
+  *   - `Former` describes the serialization time when the checkpoint was done.
+  *   - `Current` describes the deserialization time with the current source code.
+  *
   * Lifecycle:
-  *   - At derivation time, [[org.apache.flinkx.api.TypeInformationDerivation]] reads annotations from the current
-  *     source code and [[register]] an immutable [[Evolution]] for that ADT class.
+  *   - At derivation time, [[org.apache.flinkx.api.TypeInformationDerivation]] reads current annotations and
+  *     [[register]] an immutable [[Evolution]] for that ADT class.
   *   - At deserialization time, the ADT serializers [[get]] the evolutions and apply them in correct order.
   *
   * Class renames and deletions are resolved through [[registerFormerClass]] / [[registerDeletedFormerClass]] /
-  * [[resolveFormerClass]], which translate the fully-qualified class names recorded in the snapshot into the classes
-  * that exist in the current source code (or a deletion marker).
+  * [[resolveFormerClass]], which translate the fully-qualified class names recorded in the snapshot into the current
+  * classes (or a deletion marker).
   *
   * Concurrency: registration runs at startup during derivation (single-threaded per ADT); [[get]] and
   * [[resolveFormerClass]] are safe to call concurrently from multiple Flink tasks afterward.
@@ -32,25 +36,23 @@ object Evolutions {
 
   private val initEvolutions: Seq[(Class[_], Evolution[_])] = Seq((DeletedClass, Evolution.DeletedClassEvolution))
 
-  // Maps filled at startup time during the ADT derivation with up-to-date information from the source code and used
-  // during deserialization
-  private val classToEvolutions: concurrent.Map[Class[_], Evolution[_]]       = concurrent.TrieMap(initEvolutions: _*)
-  private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]] = concurrent.TrieMap.empty
+  private val currentClassToEvolutions: concurrent.Map[Class[_], Evolution[_]] = concurrent.TrieMap(initEvolutions: _*)
+  private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]]  = concurrent.TrieMap.empty
 
   /** Build the [[Evolution]] from the given builder and register it for the deserialization phase. */
   def register[T](builder: EvolutionBuilder[T]): Unit =
-    classToEvolutions.put(builder.clazz, builder.build())
+    currentClassToEvolutions.put(builder.currentClass, builder.build())
 
   /** Return the [[Evolution]] associated with the given ADT class, or [[Evolution.NoEvolution]] otherwise. */
   def get[T](clazz: Class[T]): Evolution[T] =
-    classToEvolutions.getOrElse(clazz, Evolution.NoEvolution).asInstanceOf[Evolution[T]]
+    currentClassToEvolutions.getOrElse(clazz, Evolution.NoEvolution).asInstanceOf[Evolution[T]]
 
-  /** Register the mapping between a former ADT class name and the ADT class currently declared on the source code.
+  /** Register the mapping between a former ADT class name and the current ADT class.
     *
     * @param formerClassName
-    *   Name of the ADT class as declared when the data was serialized (simple, relative or absolute)
+    *   Name of the former ADT class as declared when the data was serialized (simple, relative or absolute)
     * @param currentClass
-    *   ADT class being derived, used as reference to resolve `formerClassName` to its fully-qualified internal form
+    *   Current ADT class, used as reference to resolve `formerClassName` to its fully-qualified internal form
     */
   def registerFormerClass(formerClassName: String, currentClass: Class[_]): Unit =
     formerClassNameToCurrentClass(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) = currentClass
@@ -58,20 +60,20 @@ object Evolutions {
   /** Register that a former ADT subtype or field type has been deleted from the current source code.
     *
     * @param formerClassName
-    *   Name of the deleted subtype or field type (simple, relative or absolute)
+    *   Name of the deleted former subtype or field type (simple, relative or absolute)
     * @param currentClass
-    *   ADT class being derived, used as reference to resolve `formerClassName` to its fully-qualified internal form
+    *   Current ADT class, used as reference to resolve `formerClassName` to its fully-qualified internal form
     */
   def registerDeletedFormerClass(formerClassName: String, currentClass: Class[_]): Unit =
     formerClassNameToCurrentClass(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) = DeletedClass
 
-  /** Resolve a fully-qualified class name read from a snapshot to the class currently declared in source code:
+  /** Resolve a fully-qualified former class name read from a checkpoint to the current class:
     *   - Returns the class registered via [[registerFormerClass]] if it was renamed.
     *   - Returns [[Evolution.DeletedClass]] if the name was registered via [[registerDeletedFormerClass]].
     *   - Otherwise loads the class by name through the user-code class loader.
     *
     * @param formerClassName
-    *   Fully qualified class name as recorded in the snapshot
+    *   Fully qualified former class name as recorded in the checkpoint
     * @param cl
     *   The user code class loader
     * @throws IOException
@@ -89,11 +91,11 @@ object Evolutions {
       )
       .asInstanceOf[Class[T]]
 
-  private[api] def findVersionInAnnotations[A](clazz: Class[_], annotations: Seq[Any]): Int = annotations
+  private[api] def findVersionInAnnotations[A](currentClass: Class[_], annotations: Seq[Any]): Int = annotations
     .collectFirst {
       case version(c) if c >= 0 => c
       case version(c)           =>
-        throw new FlinkRuntimeException(s"Current version of $clazz must be positive or 0, got @version($c)")
+        throw new FlinkRuntimeException(s"Current version of $currentClass must be positive or 0, got @version($c)")
     }
     .getOrElse(0)
 
@@ -102,8 +104,8 @@ object Evolutions {
 
   @VisibleForTesting
   private[api] def reset(): Unit = {
-    classToEvolutions.clear()
-    classToEvolutions.addAll(initEvolutions)
+    currentClassToEvolutions.clear()
+    currentClassToEvolutions.addAll(initEvolutions)
     formerClassNameToCurrentClass.clear()
   }
 

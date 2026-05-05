@@ -11,7 +11,7 @@ import scala.math.Ordered.orderingToOrdered
   * Evolutions execute in sorted order by `since` then `phase`. The phases form a canonical pipeline within a version:
   * Delete → Rename → Transform → Add. This ordering enables compositions such as:
   *   - rename a field, then transform its value
-  *   - delete a field (its serialized state is dropped), then re-add a field with the same name from a default
+  *   - delete a field (its serialized state is dropped), then re-add a field with the same name from a default value
   *
   * @param since
   *   Version in which the evolution was introduced
@@ -41,39 +41,39 @@ object FieldEvolution {
   /** Remove a field from the field map. Backs the `@deletedFields` annotation.
     *
     * @throws FlinkRuntimeException
-    *   if `name` is not present in the field map.
+    *   if `formerFieldName` is not present in the field map.
     */
   final case class Delete(
       override val since: Int,
-      clazz: Class[_],
-      name: String
+      currentClass: Class[_],
+      formerName: String
   ) extends FieldEvolution(since, Phase.Delete) {
 
     override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
-      fields.remove(name) match {
-        case None => throwFieldNotFound(clazz, name, "delete", fields.keys)
+      fields.remove(formerName) match {
+        case None => throwFieldNotFound(currentClass, formerName, "delete", fields.keys)
         case _    =>
       }
     }
 
   }
 
-  /** Move the entry under `fromName` to the new key `name`. Backs the `@renamed` annotation on a field.
+  /** Move the entry under `formerName` to the new key `currentName`. Backs the `@renamed` annotation on a field.
     *
     * @throws FlinkRuntimeException
     *   if `fromName` is not present in the field map.
     */
   final case class Rename(
       override val since: Int,
-      clazz: Class[_],
-      name: String,
-      fromName: String
+      currentClass: Class[_],
+      formerName: String,
+      currentName: String
   ) extends FieldEvolution(since, Phase.Rename) {
 
     override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
-      fields.remove(fromName) match {
-        case Some(value) => fields.put(name, value)
-        case _           => throwFieldNotFound(clazz, fromName, "rename", fields.keys)
+      fields.remove(formerName) match {
+        case Some(value) => fields.put(currentName, value)
+        case _           => throwFieldNotFound(currentClass, formerName, "rename", fields.keys)
       }
     }
 
@@ -86,7 +86,7 @@ object FieldEvolution {
     */
   final case class Transform[A, B](
       override val since: Int,
-      clazz: Class[_],
+      currentClass: Class[_],
       name: String,
       mapper: A => B
   ) extends FieldEvolution(since, Phase.Transform) {
@@ -94,7 +94,7 @@ object FieldEvolution {
     override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
       fields.get(name) match {
         case Some(value) => fields.update(name, mapper.apply(value.asInstanceOf[A]).asInstanceOf[AnyRef])
-        case _           => throwFieldNotFound(clazz, name, "transform", fields.keys)
+        case _           => throwFieldNotFound(currentClass, name, "transform", fields.keys)
       }
     }
 
@@ -108,16 +108,17 @@ object FieldEvolution {
     */
   final case class Add[T](
       override val since: Int,
-      clazz: Class[_],
+      currentClass: Class[_],
       name: String,
       default: Option[T]
   ) extends FieldEvolution(since, Phase.Add) {
 
-    if (default.isEmpty) throw new FlinkRuntimeException(s"'$name' added field in $clazz must have a default value")
+    if (default.isEmpty)
+      throw new FlinkRuntimeException(s"'$name' added field in $currentClass must have a default value")
 
     override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
       fields.put(name, default.get.asInstanceOf[AnyRef]) match {
-        case Some(_) => throwFieldAlreadyExist(clazz, name, fields.keys)
+        case Some(_) => throwFieldAlreadyExist(currentClass, name, fields.keys)
         case _       =>
       }
     }

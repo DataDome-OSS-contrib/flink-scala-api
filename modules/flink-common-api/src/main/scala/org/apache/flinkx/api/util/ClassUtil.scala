@@ -28,30 +28,35 @@ object ClassUtil {
 
   /** Resolve a former class name to its fully qualified internal name based on the current class.
     *
-    * Interpret `from` parameter relative to the current class's package and nesting hierarchy, converting it to the JVM
-    * internal format where nested classes are separated by `$` instead of dots.
+    * The given `formerClassName` can be a simple name, a relative path or an absolute path.
+    *
+    * The first component (package or class) of `formerClassName` has to be in common with one component of the current
+    * class's package or nesting hierarchy.
+    *
+    * The resolved fully qualified internal former class name is then converted it to the JVM internal format where
+    * nested classes are separated by `$` instead of dots.
     *
     * Warn: due to the limitation of String manipulation without the possibility to load a class that doesn't exist
     * anymore in the classpath, we have to rely on naming conventions on few cases:
     *   - absolute path to a different first package relies on a lowercase first letter (e.g., `org` not `Org`)
-    *   - in relative path, the first class name must have a capital letter. If it's not the case, a `$` has to be used
-    *     as separator between inner classes
+    *   - in relative path, if its first class is not in common with a class of current class, its name must have a
+    *     capital letter. If it's not the case, a `$` has to be used as separator between inner classes
     *
-    * @param from
+    * @param formerClassName
     *   The former class name, which can be:
     *   - A simple name: `"OldName"`
     *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
     *   - An absolute path: `"org.example.OldName"`
     * @param currentClass
-    *   A class currently existing, used as context for resolving relative names
+    *   A class currently existing, used as context for resolving relative former class name
     * @return
     *   The fully qualified internal former class name (e.g., `org.example.Outer$Inner`)
     * @throws FlinkRuntimeException
-    *   If `from` is empty, contains leading/consecutive/trailing dots
+    *   If `formerClassName` is empty, contains leading/consecutive/trailing dots
     */
-  def resolveFormerClassName(from: String, currentClass: Class[_]): String = {
-    if (from.isEmpty || from.matches("^[.].*|.*[.][.].*|.*[.]$")) {
-      throw new FlinkRuntimeException(s"Class name '$from' in from parameter is malformed.")
+  def resolveFormerClassName(formerClassName: String, currentClass: Class[_]): String = {
+    if (formerClassName.isEmpty || formerClassName.matches("^[.].*|.*[.][.].*|.*[.]$")) {
+      throw new FlinkRuntimeException(s"Class name '$formerClassName' in from parameter is malformed.")
     }
 
     /** Convert dot-separated path to JVM internal class name format: `package.Outer.Inner` → `package.Outer$Inner` */
@@ -69,27 +74,27 @@ object ClassUtil {
       }
     }
 
-    /** Walks the declaring class hierarchy and returns a list of class names */
+    /** Walks the declaring class nesting hierarchy and returns a list of class names */
     def toClassNames(clazz: Class[_]): List[String] =
       if (clazz == null) List.empty else toClassNames(clazz.getDeclaringClass) :+ clazz.getSimpleName.stripSuffix("$")
 
-    val firstFormerComponent   = from.split('.').head
+    val firstFormerComponent   = formerClassName.split('.').head
     val currentClassNames      = toClassNames(currentClass)
     val currentClassComponents = currentClass.getPackageName.split('.') ++ currentClassNames
 
     // Match the first component of former class name against the current class hierarchy and resolve accordingly
-    val formerClassName = currentClassComponents.lastIndexOf(firstFormerComponent) match {
+    val fullyQualifiedFormerClassName = currentClassComponents.lastIndexOf(firstFormerComponent) match {
       case 0 => // Match at root (like "org"): treat as absolute path
-        from
+        formerClassName
       case -1 if firstFormerComponent.head.isLower => // No match & lowercase first component: treat as absolute path
-        from
+        formerClassName
       case -1 => // No match & uppercase: treat as relative to current class ("org.example.Current" → "org.example.Old")
-        s"${currentClassComponents.dropRight(1).mkString(".")}.$from"
+        s"${currentClassComponents.dropRight(1).mkString(".")}.$formerClassName"
       case i => // Relative path (like "example.Current"): prepend the matched prefix
-        s"${currentClassComponents.take(i).mkString(".")}.$from"
+        s"${currentClassComponents.take(i).mkString(".")}.$formerClassName"
     }
 
-    toInternalClassName(formerClassName, currentClassNames.head)
+    toInternalClassName(fullyQualifiedFormerClassName, currentClassNames.head)
   }
 
 }
