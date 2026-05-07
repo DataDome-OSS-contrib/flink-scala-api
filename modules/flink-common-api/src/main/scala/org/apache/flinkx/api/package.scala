@@ -96,19 +96,26 @@ package object api {
   }
 
   /** Marks deleted classes removed from current schema:
-    *   - On a sealed trait or a Scala 3 enum: subtype classes that have been removed. Records of these subtypes are
-    *     deserialized as `null`.
+    *   - On a sealed trait or a Scala 3 enum: subtype classes that have been removed. Encountering an instances of
+    *     these subtypes throw by default, or are deserialized as `null` if `throwOnInstance` is `false`.
     *   - On a case class: classes that were referenced by a now-deleted field (declared via `@deletedFields`).
     *
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     *
+    * @param since
+    *   Version in which the listed fields were deleted (informative only).
+    * @param throwOnInstance
+    *   When `true` (default), encountering an instance of a deleted subtype during deserialization throws an exception.
+    *   `false` to deserialize as `null`
     * @param formerClassNames
     *   Former class names of the deleted classes, which can be:
     *   - A simple name: `"OldName"`
     *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
     *   - An absolute path: `"org.example.OldName"`
     */
-  final case class deletedClasses(formerClassNames: String*) extends Evolved {
+  final case class deletedClasses(since: Int, throwOnInstance: Boolean, formerClassNames: String*) extends Evolved {
+    def this(since: Int, formerClassNames: String*) = this(since, true, formerClassNames: _*)
+
     override def toString: String = s"deletedClasses(${formerClassNames.mkString("\"", "\",\"", "\"")})"
   }
 

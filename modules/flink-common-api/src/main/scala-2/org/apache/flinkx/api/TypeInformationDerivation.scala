@@ -71,9 +71,10 @@ private[api] trait TypeInformationDerivation {
         } else { // version > 0
           // Iterate over case class annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed            => Evolutions.registerFormerClass(r.formerName, clazz)
-            case d: deletedFields      => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
-            case d: deletedClasses     => d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)
+            case d: deletedFields  => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
+            case d: deletedClasses =>
+              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
             case _                     => // Ignore other annotations
@@ -108,12 +109,14 @@ private[api] trait TypeInformationDerivation {
     cache.get(cacheKey) match {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
-        val clazz      = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
-        val serializer = new CoproductSerializer[T](
+        val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
+        val version        = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
+        val serializer     = new CoproductSerializer[T](
           clazz = clazz,
           version = version,
-          subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray,
+          subtypeClasses = subtypeClasses,
+          subtypeFqns = subtypeClasses.map(_.getName),
           subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
         )
 
@@ -133,8 +136,9 @@ private[api] trait TypeInformationDerivation {
           val builder = new EvolutionBuilder(clazz)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed            => Evolutions.registerFormerClass(r.formerName, clazz)
-            case d: deletedClasses     => d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)
+            case d: deletedClasses =>
+              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
             case _                     => // Ignore other annotations

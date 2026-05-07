@@ -17,6 +17,7 @@ import java.lang.reflect.{Field, Modifier}
 import java.time.{LocalDate, LocalDateTime, LocalTime}
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeSet
+import scala.reflect.ClassTag
 
 trait TestUtils extends Matchers with Inspectors {
 
@@ -38,10 +39,10 @@ trait TestUtils extends Matchers with Inspectors {
       fileName: String,
       expected: T,
       assertion: (T, T) => Assertion = (_: T) shouldBe (_: T)
-  ): Unit = {
+  )(implicit classTag: ClassTag[T]): Unit = {
     val input            = new DataInputViewStreamWrapper(new FileInputStream(snapshotPath(fileName)))
     val totalsize        = input.available()
-    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, expected.getClass.getClassLoader)
+    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, classTag.runtimeClass.getClassLoader)
     val snapSize         = totalsize - input.available()
     snapSize shouldBe input.readInt()
     val restoredSerializer = restoredSnapshot.restoreSerializer()

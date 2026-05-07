@@ -2,7 +2,7 @@ package org.apache.flinkx.api
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.EvolutionTest._
+import org.apache.flinkx.api.EvolutionTest.{WrongDeletedClassesWithSubtypeInstanceThrowSubtype, WrongDeletedClassesWithSubtypeInstanceToNullSubtype, _}
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.Evolutions
 import org.scalatest.BeforeAndAfterEach
@@ -275,6 +275,17 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "'missingField' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$WrongMissingField. Use @added(since=<version>) annotation to indicate it has been added"
   }
 
+  it should "throw when deserializing Event v0 with delete subtype instance" in {
+    val exception = intercept[FlinkRuntimeException] {
+      testDeserializeFromFile[WrongDeletedClassesWithSubtypeInstanceThrow]("Event-v0", null)
+    }
+    exception.getMessage shouldBe "Encountered an instance of deleted class 'org.apache.flinkx.api.EvolutionTest$View' during deserialization. Don't delete a class in usage or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
+  }
+
+  it should "return null when deserializing Event v0 with delete subtype instance" in {
+    testDeserializeFromFile[WrongDeletedClassesWithSubtypeInstanceToNull]("Event-v0", null)
+  }
+
 }
 
 object EvolutionTest {
@@ -326,7 +337,7 @@ object EvolutionTest {
 
   @version(1)
   @renamed(since = 1, "Event")
-  @deletedClasses("Purchase")
+  @deletedClasses(since = 1, "Purchase")
   @postDeserialize(updateAction)
   sealed trait Action
 
@@ -368,7 +379,7 @@ object EvolutionTest {
   @deletedFields(1, "a")
   case class WrongDeletedFieldsOnCaseClassWithoutVersion()
 
-  @deletedClasses("A")
+  @deletedClasses(since = 1, "A")
   case class WrongDeletedClassesOnCaseClassWithoutVersion()
 
   @version(1)
@@ -392,7 +403,7 @@ object EvolutionTest {
   case class WrongDeletedFieldsOnField(@deletedFields(1, "a") a: String)
 
   @version(1)
-  case class WrongDeletedClassesOnField(@deletedClasses("A") a: String)
+  case class WrongDeletedClassesOnField(@deletedClasses(since = 1, "A") a: String)
 
   @version(1)
   case class WrongPostDeserializeOnField(@postDeserialize(updateClick) a: String)
@@ -417,7 +428,7 @@ object EvolutionTest {
   sealed trait WrongPostDeserializeTwiceOnSealedTrait
   case object Subtype4 extends WrongPostDeserializeTwiceOnSealedTrait
 
-  @deletedClasses("A")
+  @deletedClasses(since = 1, "A")
   sealed trait WrongDeletedClassesOnSealedTraitWithoutVersion
   case object Subtype5 extends WrongDeletedClassesOnSealedTraitWithoutVersion
 
@@ -437,13 +448,13 @@ object EvolutionTest {
 
   @version(1)
   sealed trait WrongDeletedClassesOnSealedTraitSubtype
-  @deletedClasses("A")
+  @deletedClasses(since = 1, "A")
   case object WrongDeletedClassesOnSubtype extends WrongDeletedClassesOnSealedTraitSubtype
 
   @version(1)
   sealed trait CorrectDeletedClassesOnSealedTraitSubtype
   @version(1)
-  @deletedClasses("A")
+  @deletedClasses(since = 1, "A")
   sealed trait CorrectDeletedClassesOnSubtype extends CorrectDeletedClassesOnSealedTraitSubtype
   case object CorrectDeletedClassesCaseObject extends CorrectDeletedClassesOnSubtype
 
@@ -461,38 +472,56 @@ object EvolutionTest {
   @version(2)
   @renamed(since = 1, "Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses("ClickEvent")
+  @deletedClasses(since = 1, "ClickEvent")
   case class WrongAddedField(@added(since = 2) a: String = "")
 
   @version(2)
   @renamed(since = 1, "Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses("ClickEvent")
+  @deletedClasses(since = 1, "ClickEvent")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
 
   @version(2)
   @renamed(since = 1, "Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses("ClickEvent")
+  @deletedClasses(since = 1, "ClickEvent")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
 
   @version(2)
   @renamed(since = 1, "Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedFields(since = 2, "wrongFieldName")
-  @deletedClasses("ClickEvent")
+  @deletedClasses(since = 1, "ClickEvent")
   case class WrongDeletedField(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
-  @deletedClasses("ClickEvent")
+  @deletedClasses(since = 1, "ClickEvent")
   case class WrongFieldNotUsed(a: String)
 
   @version(1)
   @renamed(since = 1, "Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses("ClickEvent")
+  @deletedClasses(since = 1, "ClickEvent")
   case class WrongMissingField(a: String, missingField: String)
+
+  @version(1)
+  @renamed(since = 1, "Event")
+  @deletedClasses(since = 1, throwOnInstance = true, "View")
+  sealed trait WrongDeletedClassesWithSubtypeInstanceThrow
+
+  @version(1)
+  @renamed(since = 1, "Purchase")
+  case object WrongDeletedClassesWithSubtypeInstanceThrowSubtype extends WrongDeletedClassesWithSubtypeInstanceThrow
+
+  @version(1)
+  @renamed(since = 1, "Event")
+  @deletedClasses(since = 1, throwOnInstance = false, "View")
+  sealed trait WrongDeletedClassesWithSubtypeInstanceToNull
+
+  @version(1)
+  @renamed(since = 1, "Purchase")
+  case object WrongDeletedClassesWithSubtypeInstanceToNullSubtype extends WrongDeletedClassesWithSubtypeInstanceToNull
 
 }

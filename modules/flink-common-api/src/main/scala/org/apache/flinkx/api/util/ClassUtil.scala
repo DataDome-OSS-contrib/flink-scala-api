@@ -26,15 +26,16 @@ object ClassUtil {
     )
   }
 
-  /** Resolve a former class name to its fully qualified internal name based on the current class.
+  /** Resolve a former class name to its fully qualified binary name (see [[java.lang.ClassLoader]]) based on the
+    * current class.
     *
     * The given `formerClassName` can be a simple name, a relative path or an absolute path.
     *
     * The first component (package or class) of `formerClassName` has to be in common with one component of the current
     * class's package or nesting hierarchy.
     *
-    * The resolved fully qualified internal former class name is then converted it to the JVM internal format where
-    * nested classes are separated by `$` instead of dots.
+    * The resolved fully qualified former class name is then converted it to the JVM internal format where nested
+    * classes are separated by `$` instead of dots.
     *
     * Warn: due to the limitation of String manipulation without the possibility to load a class that doesn't exist
     * anymore in the classpath, we have to rely on naming conventions on few cases:
@@ -83,7 +84,7 @@ object ClassUtil {
     val currentClassComponents = currentClass.getPackageName.split('.') ++ currentClassNames
 
     // Match the first component of former class name against the current class hierarchy and resolve accordingly
-    val fullyQualifiedFormerClassName = currentClassComponents.lastIndexOf(firstFormerComponent) match {
+    val formerFqn = currentClassComponents.lastIndexOf(firstFormerComponent) match {
       case 0 => // Match at root (like "org"): treat as absolute path
         formerClassName
       case -1 if firstFormerComponent.head.isLower => // No match & lowercase first component: treat as absolute path
@@ -94,7 +95,7 @@ object ClassUtil {
         s"${currentClassComponents.take(i).mkString(".")}.$formerClassName"
     }
 
-    toInternalClassName(fullyQualifiedFormerClassName, currentClassNames.head)
+    toInternalClassName(formerFqn, currentClassNames.head)
   }
 
 }

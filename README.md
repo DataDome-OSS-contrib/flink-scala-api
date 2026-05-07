@@ -492,7 +492,7 @@ import org.apache.flinkx.api._
 // Current source code:
 @version(2)
 @deletedFields(since = 1, "unused", "history")
-@deletedClasses("ClickEvent")
+@deletedClasses(since = 1, "ClickEvent")
 @postDeserialize(updateClick)
 case class Click(
     @renamed(since = 1, "identifier") id: String,
@@ -511,7 +511,7 @@ def updateClick(version: Int, click: Click): Click = click.copy(sessionId = clic
 // Current source code:
 @version(1)
 @renamed(since = 1, "Event")
-@deletedClasses("Purchase")
+@deletedClasses(since = 1, throwOnInstance = false, "Purchase")
 @postDeserialize(updateAction)
 sealed trait Action
 
@@ -525,15 +525,15 @@ def updateAction(version: Int, action: Action): Action = action match {
 
 **Available annotations:**
 
-| Annotation                            | Where                          | Effect                                                                                                                                                                   |
-|---------------------------------------|--------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `@version(n)`                         | ADT                            | Declares the current schema version (`n >= 0`); opt in the ADT to evolution.                                                                                             |
-| `@added(since = n)`                   | case class field               | Field was added in version `n`; requires a default value                                                                                                                 |
-| `@renamed(since = n, "oldName")`      | case class field, ADT, subtype | Field or class was formerly known under `"oldName"` before version `n`, or lived at another location (see [former class name resolution](#former-class-name-resolution)) |
-| `@transformed(since = n, mapper)`     | case class field               | Field's type changed in version `n`; `mapper` converts the formerly serialized value to the current type                                                                 |
-| `@deletedFields(since = n, "a", "b")` | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                         |
-| `@deletedClasses("OldClass1", …)`     | ADT                            | Subtypes that have been removed, or field types that were referenced by a now-deleted field (see [former class name resolution](#former-class-name-resolution))          |
-| `@postDeserialize(mapper)`            | ADT                            | Applies the `mapper` function taking as parameters the former version and the current ADT instance after its deserialization                                             |
+| Annotation                                                           | Where                          | Effect                                                                                                                                                                                                                                                   |
+|----------------------------------------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@version(n)`                                                        | ADT                            | Declares the current schema version (`n >= 0`); opt in the ADT to evolution                                                                                                                                                                              |
+| `@added(since = n)`                                                  | case class field               | Field was added in version `n`; requires a default value                                                                                                                                                                                                 |
+| `@renamed(since = n, "oldName")`                                     | case class field, ADT, subtype | Field or class was formerly known under `"oldName"` before version `n`, or lived at another location (see [former class name resolution](#former-class-name-resolution))                                                                                 |
+| `@transformed(since = n, mapper)`                                    | case class field               | Field's type changed in version `n`; `mapper` converts the formerly serialized value to the current type                                                                                                                                                 |
+| `@deletedFields(since = n, "a", "b")`                                | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                                                                                                         |
+| `@deletedClasses(since = n, throwOnInstance = true, "OldClass1", …)` | ADT                            | Subtypes that have been removed, or field types that were referenced by a now-deleted field (see [former class name resolution](#former-class-name-resolution)). Throws by default when encountering an instance of deleted class during deserialization |
+| `@postDeserialize(mapper)`                                           | ADT                            | Applies the `mapper` function taking as parameters the former version and the current ADT instance after its deserialization                                                                                                                             |
 
 Field evolutions are applied in ascending `since` order. Within a single version, evolutions are applied in this canonical pipeline:
 Delete → Rename → Transform → Add. This ordering enables annotation combinations such as:

@@ -65,12 +65,13 @@ class Scala3EnumSerializer[T <: Product](
   }
 
   override def deserialize(source: DataInputView): T = {
-    val index = source.readByte()
+    val index = source.readByte().toInt
     if (index == NullMarkerByte) {
       null.asInstanceOf[T]
     } else {
-      val subtype = enumValueSerializers(index.toInt)
-      evolution.postDeserialize.apply(version, subtype.asInstanceOf[TypeSerializer[T]].deserialize(source))
+      val fqn      = s"${clazz.getName}$$${enumValueNames(index)}"
+      val instance = enumValueSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
+      evolution.postDeserialize.apply(version, Evolutions.checkThrowOnInstance(instance, fqn))
     }
   }
 

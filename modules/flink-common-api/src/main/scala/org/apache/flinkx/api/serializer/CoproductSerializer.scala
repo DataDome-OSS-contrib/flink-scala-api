@@ -17,6 +17,7 @@ class CoproductSerializer[T](
     val clazz: Class[T],
     val version: Int,
     val subtypeClasses: Array[Class[_]],
+    val subtypeFqns: Array[String],
     val subtypeSerializers: Array[TypeSerializer[_]]
 ) extends MutableSerializer[T] {
 
@@ -39,7 +40,7 @@ class CoproductSerializer[T](
     if (isImmutableSerializer) {
       this
     } else {
-      new CoproductSerializer[T](clazz, version, subtypeClasses, subtypeSerializers.map(_.duplicate()))
+      new CoproductSerializer[T](clazz, version, subtypeClasses, subtypeFqns, subtypeSerializers.map(_.duplicate()))
     }
   }
 
@@ -57,17 +58,9 @@ class CoproductSerializer[T](
   }
 
   override def serialize(record: T, target: DataOutputView): Unit = {
-    var subtypeIndex = 0
-    var found        = false
-    while (!found && (subtypeIndex < subtypeClasses.length)) {
-      if (subtypeClasses(subtypeIndex).isInstance(record)) {
-        found = true
-      } else {
-        subtypeIndex += 1
-      }
-    }
-    if (found) {
-      target.writeByte(subtypeIndex.toByte.toInt)
+    val subtypeIndex = subtypeClasses.indexWhere(_.isInstance(record))
+    if (subtypeIndex >= 0) {
+      target.writeByte(subtypeIndex)
       subtypeSerializers(subtypeIndex).asInstanceOf[TypeSerializer[T]].serialize(record, target)
     } else {
       throw new IllegalStateException("subtype not found in sealed trait schema")
@@ -75,16 +68,15 @@ class CoproductSerializer[T](
   }
 
   override def deserialize(source: DataInputView): T = {
-    val index   = source.readByte()
-    val subtype = subtypeSerializers(index.toInt)
-    evolution.postDeserialize.apply(version, subtype.asInstanceOf[TypeSerializer[T]].deserialize(source))
+    val index    = source.readByte().toInt
+    val instance = subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
+    evolution.postDeserialize.apply(version, Evolutions.checkThrowOnInstance(instance, subtypeFqns(index)))
   }
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {
-    val index   = source.readByte()
-    val subtype = subtypeSerializers(index.toInt)
+    val index = source.readByte().toInt
     target.writeByte(index)
-    subtype.asInstanceOf[TypeSerializer[T]].copy(source, target)
+    subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].copy(source, target)
   }
 
   override def snapshotConfiguration(): TypeSerializerSnapshot[T] =
@@ -105,6 +97,7 @@ object CoproductSerializer {
     private var clazz: Class[T]                              = _
     private var coproductVersion: Int                        = 0
     private var subtypeClasses: Array[Class[_]]              = Array.empty
+    private var subtypeFqns: Array[String]                   = Array.empty
     private var subtypeSerializers: Array[TypeSerializer[_]] = Array.empty
 
     // An adapter is mandatory to keep the compatibility during the transition to a CompositeTypeSerializerSnapshot
@@ -118,6 +111,7 @@ object CoproductSerializer {
           clazz = s.clazz
           coproductVersion = s.version
           subtypeClasses = s.subtypeClasses
+          subtypeFqns = s.subtypeFqns
         }
 
         override def getCurrentOuterSnapshotVersion: Int = CurrentVersion
@@ -128,18 +122,19 @@ object CoproductSerializer {
         override def createOuterSerializerWithNestedSerializers(
             nestedSerializers: Array[TypeSerializer[_]]
         ): CoproductSerializer[T] =
-          new CoproductSerializer[T](clazz, coproductVersion, subtypeClasses, nestedSerializers)
+          new CoproductSerializer[T](clazz, coproductVersion, subtypeClasses, subtypeFqns, nestedSerializers)
 
         override def writeOuterSnapshot(out: DataOutputView): Unit = {
           out.writeUTF(clazz.getName)
           out.writeInt(coproductVersion)
-          StringArraySerializer.INSTANCE.serialize(subtypeClasses.map(_.getName), out)
+          StringArraySerializer.INSTANCE.serialize(subtypeFqns, out)
         }
 
         override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
           clazz = if (readOuterSnapshotVersion > 3) Evolutions.resolveFormerClass(in.readUTF(), cl) else null
           coproductVersion = if (readOuterSnapshotVersion > 3) in.readInt() else 0
-          subtypeClasses = StringArraySerializer.INSTANCE.deserialize(in).map(Evolutions.resolveFormerClass(_, cl))
+          subtypeFqns = StringArraySerializer.INSTANCE.deserialize(in)
+          subtypeClasses = subtypeFqns.map(Evolutions.resolveFormerClass(_, cl))
         }
 
       }
@@ -155,9 +150,8 @@ object CoproductSerializer {
         clazz = null
         coproductVersion = 0
 
-        subtypeClasses = (0 until len)
-          .map(_ => Evolutions.resolveFormerClass(in.readUTF(), userCodeClassLoader))
-          .toArray
+        subtypeFqns = (0 until len).map(_ => in.readUTF()).toArray
+        subtypeClasses = subtypeFqns.map(Evolutions.resolveFormerClass(_, userCodeClassLoader))
 
         subtypeSerializers = (0 until len)
           .map(_ => TypeSerializerSnapshot.readVersionedSnapshot(in, userCodeClassLoader).restoreSerializer())
@@ -174,7 +168,7 @@ object CoproductSerializer {
       if (subtypeSerializers.isEmpty) { // Restore from adapter
         adapter.restoreSerializer()
       } else { // Restore from readSnapshot
-        new CoproductSerializer[T](clazz, coproductVersion, subtypeClasses, subtypeSerializers)
+        new CoproductSerializer[T](clazz, coproductVersion, subtypeClasses, subtypeFqns, subtypeSerializers)
       }
 
   }

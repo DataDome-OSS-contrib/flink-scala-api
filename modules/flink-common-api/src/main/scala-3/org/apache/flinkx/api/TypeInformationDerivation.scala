@@ -86,7 +86,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           ctx.annotations.foreach {
             case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)
             case d: deletedFields  => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
-            case d: deletedClasses => d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case d: deletedClasses =>
+              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
             case p: postDeserialize[T & Product] => builder.addPostDeserialize(p)
             case e: Evolved                      => throwEvolutionNotAllowed(e, clazz.toString)
             case _                               => // Ignore other annotations
@@ -135,10 +136,12 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             ).asInstanceOf[TypeSerializer[T]]
           else
+            val subtypeClasses: Array[Class[?]] = ctx.subtypes.map(_.typeclass.getTypeClass).toArray
             new CoproductSerializer[T](
               clazz = clazz,
               version = version,
-              subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray,
+              subtypeClasses = subtypeClasses,
+              subtypeFqns = subtypeClasses.map(_.getName),
               subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             )
 
@@ -158,8 +161,9 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           val builder = new EvolutionBuilder[T](clazz)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed            => Evolutions.registerFormerClass(r.formerName, clazz)
-            case d: deletedClasses     => d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz))
+            case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)
+            case d: deletedClasses =>
+              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
             case _                     => // Ignore other annotations

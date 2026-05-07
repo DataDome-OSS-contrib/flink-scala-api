@@ -38,6 +38,7 @@ object Evolutions {
 
   private val currentClassToEvolutions: concurrent.Map[Class[_], Evolution[_]] = concurrent.TrieMap(initEvolutions: _*)
   private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]]  = concurrent.TrieMap.empty
+  private val deletedFormerClassThrowOnInstance: concurrent.Map[String, Unit]  = concurrent.TrieMap.empty
 
   /** Build the [[Evolution]] from the given builder and register it for the deserialization phase. */
   def register[T](builder: EvolutionBuilder[T]): Unit =
@@ -63,30 +64,52 @@ object Evolutions {
     *   Name of the deleted former subtype or field type (simple, relative or absolute)
     * @param currentClass
     *   Current ADT class, used as reference to resolve `formerClassName` to its fully-qualified internal form
+    * @param throwOnInstance
+    *   If `true`, encountering an instance of this former class during deserialization throws via
+    *   [[checkThrowOnInstance]]. If `false`, the instance is deserialized as `null`.
     */
-  def registerDeletedFormerClass(formerClassName: String, currentClass: Class[_]): Unit =
-    formerClassNameToCurrentClass(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) = DeletedClass
+  def registerDeletedFormerClass(formerClassName: String, currentClass: Class[_], throwOnInstance: Boolean): Unit = {
+    val formerFqn = ClassUtil.resolveFormerClassName(formerClassName, currentClass)
+    formerClassNameToCurrentClass(formerFqn) = DeletedClass
+    if (throwOnInstance) deletedFormerClassThrowOnInstance(formerFqn) = ()
+  }
+
+  /** Throw a [[FlinkRuntimeException]] if an instance of the deleted former class identified by `formerFqn` was
+    * registered with `throwOnInstance = true`; return instance otherwise.
+    *
+    * @param instance
+    *   The ADT instance to check
+    * @param formerFqn
+    *   Fully qualified former class name
+    */
+  def checkThrowOnInstance[T](instance: T, formerFqn: String): T =
+    if (instance == null && deletedFormerClassThrowOnInstance.contains(formerFqn)) {
+      throw new FlinkRuntimeException(
+        s"Encountered an instance of deleted class '$formerFqn' during deserialization. Don't delete a class in usage" +
+          s" or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
+      )
+    } else instance
 
   /** Resolve a fully-qualified former class name read from a checkpoint to the current class:
     *   - Returns the class registered via [[registerFormerClass]] if it was renamed.
-    *   - Returns [[Evolution.DeletedClass]] if the name was registered via [[registerDeletedFormerClass]].
+    *   - Returns [[Evolution.DeletedClass]] marker if the name was registered via [[registerDeletedFormerClass]].
     *   - Otherwise loads the class by name through the user-code class loader.
     *
-    * @param formerClassName
+    * @param formerFqn
     *   Fully qualified former class name as recorded in the checkpoint
     * @param cl
     *   The user code class loader
     * @throws IOException
     *   if the class is not registered and cannot be loaded
     */
-  def resolveFormerClass[T](formerClassName: String, cl: ClassLoader): Class[T] =
+  def resolveFormerClass[T](formerFqn: String, cl: ClassLoader): Class[T] =
     formerClassNameToCurrentClass
       .getOrElse(
-        formerClassName,
-        try Class.forName(formerClassName, false, cl)
+        formerFqn,
+        try Class.forName(formerFqn, false, cl)
         catch { // Same behavior as org.apache.flink.util.InstantiationUtil.resolveClassByName
           case e: ClassNotFoundException =>
-            throw new IOException(s"Could not find class '$formerClassName' in classpath.", e)
+            throw new IOException(s"Could not find class '$formerFqn' in classpath.", e)
         }
       )
       .asInstanceOf[Class[T]]
@@ -107,6 +130,7 @@ object Evolutions {
     currentClassToEvolutions.clear()
     currentClassToEvolutions.addAll(initEvolutions)
     formerClassNameToCurrentClass.clear()
+    deletedFormerClassThrowOnInstance.clear()
   }
 
 }
