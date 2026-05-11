@@ -17,6 +17,8 @@ import scala.collection.mutable
   *   Current case class field names, in declaration order
   * @param fieldEvolutions
   *   Sorted field-level evolutions to apply during deserialization
+  * @param formerToCurrentEnumValueName
+  *   Mapping from former Scala 3 enum value name to current value name
   * @param postDeserialize
   *   A mapper function taking as parameters the former version and the current ADT instance after its deserialization
   * @tparam T
@@ -26,6 +28,7 @@ sealed class Evolution[T] private[evolution] (
     private val currentClass: Class[T],
     private val currentFieldNames: Array[String] = Array.empty,
     private val fieldEvolutions: Array[FieldEvolution] = Array.empty,
+    private val formerToCurrentEnumValueName: Map[String, String] = Map.empty,
     val postDeserialize: (Int, T) => T = (formerVersion: Int, currentAdtInstance: T) => currentAdtInstance
 ) {
 
@@ -60,6 +63,10 @@ sealed class Evolution[T] private[evolution] (
 
   /** `true` if the ADT class was registered as deleted via `@deletedClasses`, `false` otherwise. */
   def isDeleted: Boolean = currentClass == DeletedClass
+
+  /** Resolve a former Scala 3 enum value name to its current value name. */
+  def resolveFormerEnumValueName(formerName: String): String =
+    formerToCurrentEnumValueName.getOrElse(formerName, formerName)
 
   /** Convert field map to field-values array using current field-names.
     *

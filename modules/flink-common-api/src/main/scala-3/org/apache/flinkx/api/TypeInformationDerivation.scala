@@ -5,23 +5,14 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.{EvolutionBuilder, Evolutions}
 import org.apache.flinkx.api.evolution.Evolutions.throwEvolutionNotAllowed
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
-import org.apache.flinkx.api.serializer.{
-  CaseClassSerializer,
-  CoproductSerializer,
-  Scala3EnumSerializer,
-  Scala3EnumValueSerializer,
-  ScalaCaseObjectSerializer,
-  nullable
-}
+import org.apache.flinkx.api.evolution.{EvolutionBuilder, Evolutions}
+import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
 
 import scala.IArray.genericWrapArray
-import scala.collection.immutable.SortedSet
 import scala.collection.mutable
 import scala.reflect.ClassTag
 
@@ -50,8 +41,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val fieldNames = ctx.parameters.map(_.label).toArray
         val serializer =
-          if typeTag.isEnum then
-            new Scala3EnumValueSerializer[T & Product](typeTag.companion.get.runtimeClass, ctx.typeInfo.short)
+          if typeTag.isEnum then new Scala3EnumValueSerializer[T & Product](clazz, ctx.typeInfo.short)
           else if typeTag.isModule then new ScalaCaseObjectSerializer[T & Product](clazz)
           else
             new CaseClassSerializer[T & Product](
@@ -161,7 +151,11 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           val builder = new EvolutionBuilder[T](clazz)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)
+            case r: renamed                          => Evolutions.registerFormerClass(r.formerName, clazz)
+            case d: deletedClasses if typeTag.isEnum =>
+              d.formerClassNames.foreach(n =>
+                Evolutions.registerDeletedFormerClass(s"${clazz.getSimpleName}.$n", clazz, d.throwOnInstance)
+              )
             case d: deletedClasses =>
               d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
@@ -171,6 +165,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
           // Iterate over subtypes annotations to register evolutions from current source code
           ctx.subtypes.foreach { p =>
             p.annotations.foreach {
+              case r: renamed if typeTag.isEnum => builder.formerToCurrentEnumValueName(r.formerName) = p.typeInfo.short
               case r: renamed => Evolutions.registerFormerClass(r.formerName, p.typeclass.getTypeClass)
               case _: deletedFields if p.annotations.exists(_.isInstanceOf[version])  => // allowed on versioned subtype
               case _: deletedClasses if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
