@@ -69,7 +69,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception = intercept[FlinkRuntimeException] {
       testDeserializeFromFile[FailureCategory]("Failure-Type-OTHER_TYPE-v0", null)
     }
-    exception.getMessage shouldBe "Encountered an instance of deleted class 'org.apache.flinkx.api.Scala3EnumTest$FailureCategory$OTHER_TYPE' during deserialization. Don't delete a class in usage or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
+    exception.getMessage shouldBe "Encountered an instance of deleted 'org.apache.flinkx.api.Scala3EnumTest$FailureCategory$OTHER_TYPE' class during deserialization. Don't delete a class in usage or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
   }
 
 }

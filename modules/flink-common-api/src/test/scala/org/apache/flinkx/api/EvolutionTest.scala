@@ -1,15 +1,15 @@
 package org.apache.flinkx.api
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.EvolutionTest.{WrongDeletedClassesWithSubtypeInstanceThrowSubtype, WrongDeletedClassesWithSubtypeInstanceToNullSubtype, _}
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.evolution._
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
+
+  import org.apache.flinkx.api.EvolutionTest._
 
   override protected def beforeEach(): Unit = Evolutions.reset()
 
@@ -40,187 +40,201 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
   // Error handling
 
   it should "throw when @version has a wrong current version" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[VersionNotAllowedException] {
       implicitly[TypeInformation[WrongCurrentVersion]]
     }
-    exception.getMessage shouldBe "Current version of class org.apache.flinkx.api.EvolutionTest$WrongCurrentVersion must be positive or 0, got @version(-1)"
+    exception.getMessage shouldBe "Current version of class org.apache.flinkx.api.EvolutionTest$WrongCurrentVersion must be >= 0, got @version(-1)"
   }
 
   it should "throw when @added is on a case class" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongAddedOnCaseClass]]
     }
     exception.getMessage shouldBe "@added(1) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongAddedOnCaseClass"
   }
 
-  it should "throw when @renamed is on a case class without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @renamed is on a case class with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongRenamedOnCaseClassWithoutVersion]]
     }
-    exception.getMessage shouldBe "@renamed(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongRenamedOnCaseClassWithoutVersion without version"
+    exception.getMessage shouldBe "@renamed(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongRenamedOnCaseClassWithoutVersion with version 0"
   }
 
-  it should "allow when @renamed is on a sealed trait subtype without version" in {
+  it should "allow when @renamed is on a sealed trait subtype with version 0" in {
     implicitly[TypeInformation[CorrectRenamedOnSealedTraitSubtypeWithoutVersion]]
     implicitly[TypeInformation[CorrectRenamedOnCaseClassWithoutVersion]]
   }
 
   it should "throw when @transformed is on a case class" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongTransformedOnCaseClass]]
     }
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnCaseClass"
   }
 
-  it should "throw when @deletedFields is on a case class without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @deletedFields is on a case class with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongDeletedFieldsOnCaseClassWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedFields(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedFieldsOnCaseClassWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedFields(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedFieldsOnCaseClassWithoutVersion with version 0"
   }
 
-  it should "throw when @deletedClasses is on a case class without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @deletedClasses is on a case class with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongDeletedClassesOnCaseClassWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnCaseClassWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnCaseClassWithoutVersion with version 0"
   }
 
   it should "throw when @postDeserialize is on a case class twice" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongPostDeserializeTwiceOnCaseClass]]
     }
     exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeTwiceOnCaseClass twice"
   }
 
   it should "throw when @version is on a case class field" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongVersionOnField]]
     }
     exception.getMessage shouldBe "@version(1) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongVersionOnField.a"
   }
 
-  it should "throw when @added is on a case class field without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @added is on a case class field with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongAddedOnFieldWithoutVersion]]
     }
-    exception.getMessage shouldBe "@added(1) annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongAddedOnFieldWithoutVersion without version"
+    exception.getMessage shouldBe "@added(1) annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongAddedOnFieldWithoutVersion with version 0"
   }
 
   it should "throw when @added is on a case class field without default value" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[AddedFieldWithoutDefaultException] {
       implicitly[TypeInformation[WrongAddedOnFieldWithoutDefaultValue]]
     }
     exception.getMessage shouldBe "'a' added field in class org.apache.flinkx.api.EvolutionTest$WrongAddedOnFieldWithoutDefaultValue must have a default value"
   }
 
-  it should "throw when @renamed is on a case class field without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @renamed is on a case class field with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongRenamedOnFieldWithoutVersion]]
     }
-    exception.getMessage shouldBe "@renamed(1,\"a\") annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongRenamedOnFieldWithoutVersion without version"
+    exception.getMessage shouldBe "@renamed(1,\"a\") annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongRenamedOnFieldWithoutVersion with version 0"
   }
 
-  it should "throw when @transformed is on a case class field without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @transformed is on a case class field with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongTransformedOnFieldWithoutVersion]]
     }
-    exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnFieldWithoutVersion without version"
+    exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnFieldWithoutVersion with version 0"
   }
 
   it should "throw when @deletedFields is on a case class field" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongDeletedFieldsOnField]]
     }
     exception.getMessage shouldBe "@deletedFields(1,\"a\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedFieldsOnField.a"
   }
 
   it should "throw when @deletedClasses is on a case class field" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongDeletedClassesOnField]]
     }
     exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnField.a"
   }
 
   it should "throw when @postDeserialize is on a case class field" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongPostDeserializeOnField]]
     }
     exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeOnField.a"
   }
 
   it should "throw when @added is on a sealed trait" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongAddedOnSealedTrait]]
     }
     exception.getMessage shouldBe "@added(1) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongAddedOnSealedTrait"
   }
 
-  it should "throw when @renamed is on a sealed trait without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @renamed is on a sealed trait with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongRenamedOnSealedTraitWithoutVersion]]
     }
-    exception.getMessage shouldBe "@renamed(1,\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongRenamedOnSealedTraitWithoutVersion without version"
+    exception.getMessage shouldBe "@renamed(1,\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongRenamedOnSealedTraitWithoutVersion with version 0"
   }
 
   it should "throw when @transformed is on a sealed trait" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongTransformedOnSealedTrait]]
     }
     exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSealedTrait"
   }
 
   it should "throw when @postDeserialize is on a sealed trait twice" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongPostDeserializeTwiceOnSealedTrait]]
     }
     exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeTwiceOnSealedTrait twice"
   }
 
-  it should "throw when @deletedClasses is on a sealed trait without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @deletedClasses is on a sealed trait with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongDeletedClassesOnSealedTraitWithoutVersion]]
     }
-    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnSealedTraitWithoutVersion without version"
+    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on interface org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnSealedTraitWithoutVersion with version 0"
+  }
+
+  it should "throw when @added is on a sealed trait subtype with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
+      implicitly[TypeInformation[WrongAddedOnSealedTraitSubtypeWithoutVersion]]
+    }
+    exception.getMessage shouldBe "@added(1) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongAddedOnSubtypeWithoutVersion$ with version 0"
   }
 
   it should "throw when @added is on a sealed trait subtype" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongAddedOnSealedTraitSubtype]]
     }
-    exception.getMessage shouldBe "@added(1) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongAddedOnSubtype$ without version"
+    exception.getMessage shouldBe "@added(1) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongAddedOnSubtype$"
   }
 
-  it should "throw when @renamed is on a sealed trait subtype without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @renamed is on a sealed trait subtype with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongRenamedOnSealedTraitSubtypeWithoutVersion]]
     }
-    exception.getMessage shouldBe "@renamed(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongRenamedOnSubtypeWithoutVersion$ without version"
+    exception.getMessage shouldBe "@renamed(1,\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongRenamedOnSubtypeWithoutVersion$ with version 0"
+  }
+
+  it should "throw when @transformed is on a sealed trait subtype with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
+      implicitly[TypeInformation[WrongTransformedOnSealedTraitSubtypeWithoutVersion]]
+    }
+    exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSubtypeWithoutVersion$ with version 0"
   }
 
   it should "throw when @transformed is on a sealed trait subtype" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongTransformedOnSealedTraitSubtype]]
     }
-    exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSubtype$ without version"
+    exception.getMessage shouldBe "@transformed(1,<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongTransformedOnSubtype$"
   }
 
   it should "throw when @deletedClasses is on a sealed trait subtype" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongDeletedClassesOnSealedTraitSubtype]]
     }
-    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnSubtype$ without version"
+    exception.getMessage shouldBe "@deletedClasses(\"A\") annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongDeletedClassesOnSubtype$ with version 0"
   }
 
   it should "allow when @deletedClasses is on a sealed trait subtype being itself a sealed trait" in {
     implicitly[TypeInformation[CorrectDeletedClassesOnSealedTraitSubtype]]
   }
 
-  it should "throw when @postDeserialize is on a sealed trait subtype without version" in {
-    val exception = intercept[FlinkRuntimeException] {
+  it should "throw when @postDeserialize is on a sealed trait subtype with version 0" in {
+    val exception = intercept[EvolutionNotAllowedException] {
       implicitly[TypeInformation[WrongPostDeserializeOnSealedTraitSubtype]]
     }
-    exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeOnSubtype$ without version"
+    exception.getMessage shouldBe "@postDeserialize(<mapper>) annotation is not allowed on class org.apache.flinkx.api.EvolutionTest$WrongPostDeserializeOnSubtype$ with version 0"
   }
 
   it should "allow when @postDeserialize is on a versioned sealed trait subtype" in {
@@ -229,7 +243,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   it should "throw field not found when deserializing Click v0 with wrong added field" in {
     val expected  = WrongAddedField("123456789")
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[FieldAlreadyExistException] {
       testDeserializeFromFile("Click-v0", expected)
     }
     exception.getMessage shouldBe "Cannot add 'a'. Field already exists in class org.apache.flinkx.api.EvolutionTest$WrongAddedField. Existing fields: [\"a\"]"
@@ -237,7 +251,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   it should "throw field not found when deserializing Click v0 with wrong renamed field" in {
     val expected  = WrongRenamedField("123456789")
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[FieldNotFoundException] {
       testDeserializeFromFile("Click-v0", expected)
     }
     exception.getMessage shouldBe "Cannot rename 'wrongFieldName'. Field not found in class org.apache.flinkx.api.EvolutionTest$WrongRenamedField. Available fields: [\"a\"]"
@@ -245,7 +259,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   it should "throw field not found when deserializing Click v0 with wrong transformed field" in {
     val expected  = WrongTransformedField("123456789")
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[FieldNotFoundException] {
       testDeserializeFromFile("Click-v0", expected)
     }
     exception.getMessage shouldBe "Cannot transform 'wrongFieldName'. Field not found in class org.apache.flinkx.api.EvolutionTest$WrongTransformedField. Available fields: [\"a\"]"
@@ -253,7 +267,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   it should "throw field not found when deserializing Click v0 with wrong deleted field" in {
     val expected  = WrongDeletedField("123456789")
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[FieldNotFoundException] {
       testDeserializeFromFile("Click-v0", expected)
     }
     exception.getMessage shouldBe "Cannot delete 'wrongFieldName'. Field not found in class org.apache.flinkx.api.EvolutionTest$WrongDeletedField. Available fields: [\"a\"]"
@@ -261,7 +275,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   it should "throw field not used when deserializing Click v0 with extra field" in {
     val expected  = WrongFieldNotUsed("123456789")
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[FieldNotUsedException] {
       testDeserializeFromFile("Click-v0", expected)
     }
     exception.getMessage shouldBe "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongFieldNotUsed. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
@@ -269,17 +283,17 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   it should "throw missing field when deserializing Click v0 with missing field to instantiate" in {
     val expected  = WrongMissingField("123456789", "is missing")
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[MissingFieldException] {
       testDeserializeFromFile("Click-v0", expected)
     }
     exception.getMessage shouldBe "'missingField' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$WrongMissingField. Use @added(since=<version>) annotation to indicate it has been added"
   }
 
   it should "throw when deserializing Event v0 with delete subtype instance" in {
-    val exception = intercept[FlinkRuntimeException] {
+    val exception = intercept[DeletedInstanceException] {
       testDeserializeFromFile[WrongDeletedClassesWithSubtypeInstanceThrow]("Event-v0", null)
     }
-    exception.getMessage shouldBe "Encountered an instance of deleted class 'org.apache.flinkx.api.EvolutionTest$View' during deserialization. Don't delete a class in usage or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
+    exception.getMessage shouldBe "Encountered an instance of deleted 'org.apache.flinkx.api.EvolutionTest$View' class during deserialization. Don't delete a class in usage or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
   }
 
   it should "return null when deserializing Event v0 with delete subtype instance" in {
@@ -433,7 +447,13 @@ object EvolutionTest {
   case object Subtype5 extends WrongDeletedClassesOnSealedTraitWithoutVersion
 
   @version(1)
+  sealed trait WrongAddedOnSealedTraitSubtypeWithoutVersion
+  @added(since = 1)
+  case object WrongAddedOnSubtypeWithoutVersion extends WrongAddedOnSealedTraitSubtypeWithoutVersion
+
+  @version(1)
   sealed trait WrongAddedOnSealedTraitSubtype
+  @version(1)
   @added(since = 1)
   case object WrongAddedOnSubtype extends WrongAddedOnSealedTraitSubtype
 
@@ -442,7 +462,13 @@ object EvolutionTest {
   case object WrongRenamedOnSubtypeWithoutVersion extends WrongRenamedOnSealedTraitSubtypeWithoutVersion
 
   @version(1)
+  sealed trait WrongTransformedOnSealedTraitSubtypeWithoutVersion
+  @transformed(since = 1, identity[Int])
+  case object WrongTransformedOnSubtypeWithoutVersion extends WrongTransformedOnSealedTraitSubtypeWithoutVersion
+
+  @version(1)
   sealed trait WrongTransformedOnSealedTraitSubtype
+  @version(1)
   @transformed(since = 1, identity[Int])
   case object WrongTransformedOnSubtype extends WrongTransformedOnSealedTraitSubtype
 

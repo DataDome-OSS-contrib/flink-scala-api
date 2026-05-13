@@ -1,19 +1,17 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.annotation.VisibleForTesting
-import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flink.annotation.{Internal, VisibleForTesting}
 import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 import org.apache.flinkx.api.util.ClassUtil
 import org.apache.flinkx.api.version
 
 import java.io.IOException
-import scala.annotation.StaticAnnotation
 import scala.collection.concurrent
 
 /** Global registry and entry point for the annotation-based schema evolution feature.
   *
   * Schema evolution lets a Flink job restore from a former checkpoint whose ADT (case class, sealed trait or Scala 3
-  * enum) schema differs from the one currently declared in source code. Users opt in per ADT by adding [[version]]
+  * enum) schema differs from the one currently declared in source code. Users opt in per ADT by adding the [[version]]
   * annotation and describe each change with [[Evolved]] annotations.
   *
   * This schema evolution feature commonly employs the following vocabulary to qualify version, class, field, etc.:
@@ -21,7 +19,7 @@ import scala.collection.concurrent
   *   - `Current` describes the deserialization time with the current source code.
   *
   * Lifecycle:
-  *   - At derivation time, [[org.apache.flinkx.api.TypeInformationDerivation]] reads current annotations and
+  *   - At derivation time (start-up), [[org.apache.flinkx.api.TypeInformationDerivation]] reads current annotations and
   *     [[register]] an immutable [[Evolution]] for that ADT class.
   *   - At deserialization time, the ADT serializers [[get]] the evolutions and apply them in correct order.
   *
@@ -32,6 +30,7 @@ import scala.collection.concurrent
   * Concurrency: registration runs at startup during derivation (single-threaded per ADT); [[get]] and
   * [[resolveFormerClass]] are safe to call concurrently from multiple Flink tasks afterward.
   */
+@Internal
 object Evolutions {
 
   private val initEvolutions: Seq[(Class[_], Evolution[_])] = Seq((DeletedClass, Evolution.DeletedClassEvolution))
@@ -74,7 +73,7 @@ object Evolutions {
     if (throwOnInstance) deletedFormerClassThrowOnInstance(formerFqn) = ()
   }
 
-  /** Throw a [[FlinkRuntimeException]] if an instance of the deleted former class identified by `formerFqn` was
+  /** Throw a [[DeletedInstanceException]] if an instance of the deleted former class identified by `formerFqn` was
     * registered with `throwOnInstance = true`; return instance otherwise.
     *
     * @param instance
@@ -83,12 +82,9 @@ object Evolutions {
     *   Fully qualified former class name
     */
   def checkThrowOnInstance[T](instance: T, formerFqn: String): T =
-    if (instance == null && deletedFormerClassThrowOnInstance.contains(formerFqn)) {
-      throw new FlinkRuntimeException(
-        s"Encountered an instance of deleted class '$formerFqn' during deserialization. Don't delete a class in usage" +
-          s" or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
-      )
-    } else instance
+    if (instance == null && deletedFormerClassThrowOnInstance.contains(formerFqn))
+      throw DeletedInstanceException(formerFqn)
+    else instance
 
   /** Resolve a fully-qualified former class name read from a checkpoint to the current class:
     *   - Returns the class registered via [[registerFormerClass]] if it was renamed.
@@ -117,13 +113,9 @@ object Evolutions {
   private[api] def findVersionInAnnotations[A](currentClass: Class[_], annotations: Seq[Any]): Int = annotations
     .collectFirst {
       case version(c) if c >= 0 => c
-      case version(c)           =>
-        throw new FlinkRuntimeException(s"Current version of $currentClass must be positive or 0, got @version($c)")
+      case version(c)           => throw VersionNotAllowedException(currentClass, c)
     }
     .getOrElse(0)
-
-  private[api] def throwEvolutionNotAllowed[A](evolution: StaticAnnotation, target: String): A =
-    throw new FlinkRuntimeException(s"@$evolution annotation is not allowed on $target")
 
   @VisibleForTesting
   private[api] def reset(): Unit = {

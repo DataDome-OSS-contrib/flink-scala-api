@@ -1,6 +1,6 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flink.annotation.Internal
 import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 
 import scala.collection.mutable
@@ -24,6 +24,7 @@ import scala.collection.mutable
   * @tparam T
   *   the type on which the Evolution applies
   */
+@Internal
 sealed class Evolution[T] private[evolution] (
     private val currentClass: Class[T],
     private val currentFieldNames: Array[String] = Array.empty,
@@ -74,22 +75,15 @@ sealed class Evolution[T] private[evolution] (
     *   Field-name to field-value map
     * @return
     *   Array of field-values in declaration order
-    * @throws FlinkRuntimeException
-    *   if the map contains a field currently unknown (forgot `@deletedFields`) or is missing a current field (forgot
-    *   `@added`)
+    * @throws FieldNotUsedException
+    *   if the map contains a field currently unknown (forgot `@deletedFields`)
+    * @throws MissingFieldException
+    *   if the map is missing a current field (forgot `@added`)
     */
   def toFieldValues(fieldMap: mutable.Map[String, AnyRef]): Array[AnyRef] = {
-    fieldMap.keys.foreach(name => if (!currentFieldNames.contains(name)) throwFieldNotUsed(currentClass, name))
-    currentFieldNames.map(name => fieldMap.getOrElse(name, throwMissingField(currentClass, name)))
+    fieldMap.keys.foreach(n => if (!currentFieldNames.contains(n)) throw FieldNotUsedException(currentClass, n))
+    currentFieldNames.map(n => fieldMap.getOrElse(n, throw MissingFieldException(currentClass, n)))
   }
-
-  private def throwFieldNotUsed(currentClass: Class[_], formerField: String): Unit = throw new FlinkRuntimeException(
-    s"'$formerField' field not used to instantiate $currentClass. Use @deletedFields(since=<version>,\"$formerField\") annotation to indicate it has been deleted"
-  )
-
-  private def throwMissingField(currentClass: Class[_], currentField: String): AnyRef = throw new FlinkRuntimeException(
-    s"'$currentField' field missing to instantiate $currentClass. Use @added(since=<version>) annotation to indicate it has been added"
-  )
 
 }
 

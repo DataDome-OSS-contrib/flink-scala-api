@@ -5,9 +5,8 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flinkx.api.evolution.Evolutions.throwEvolutionNotAllowed
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
-import org.apache.flinkx.api.evolution.{EvolutionBuilder, Evolutions}
+import org.apache.flinkx.api.evolution.{EvolutionBuilder, EvolutionNotAllowedException, Evolutions}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -59,15 +58,15 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
         val builder = new EvolutionBuilder[T & Product](clazz, fieldNames) // Field names required even with version 0
         if version == 0 then
-          // Do not allow Evolution annotations without a version
+          // Do not allow Evolution annotations on version 0
           ctx.annotations.foreach {
             case _: renamed if ctx.inheritedAnnotations.exists(_.isInstanceOf[version]) => // Allow @renamed if parent has version
-            case e: Evolved => throwEvolutionNotAllowed(e, s"$clazz without version")
+            case e: Evolved => throw EvolutionNotAllowedException(e, s"$clazz with version 0")
             case _          => // Ignore other annotations
           }
           ctx.parameters.foreach { p =>
             p.annotations.foreach {
-              case e: Evolved => throwEvolutionNotAllowed(e, s"$p of $clazz without version")
+              case e: Evolved => throw EvolutionNotAllowedException(e, s"$p of $clazz with version 0")
               case _          => // Ignore other annotations
             }
           }
@@ -79,7 +78,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             case d: deletedClasses =>
               d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
             case p: postDeserialize[T & Product] => builder.addPostDeserialize(p)
-            case e: Evolved                      => throwEvolutionNotAllowed(e, clazz.toString)
+            case e: Evolved                      => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                               => // Ignore other annotations
           }
           // Iterate over case class fields annotations to register evolutions from current source code
@@ -88,8 +87,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               case a: added             => builder.fieldEvolutions += Add(a.since, clazz, p.label, p.default)
               case r: renamed           => builder.fieldEvolutions += Rename(r.since, clazz, r.formerName, p.label)
               case t: transformed[_, _] => builder.fieldEvolutions += Transform(t.since, clazz, p.label, t.mapper)
-              case e: version           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
-              case e: Evolved           => throwEvolutionNotAllowed(e, s"$clazz.${p.label}")
+              case e: version           => throw EvolutionNotAllowedException(e, s"$clazz.${p.label}")
+              case e: Evolved           => throw EvolutionNotAllowedException(e, s"$clazz.${p.label}")
               case _                    => // Ignore other annotations
             }
           }
@@ -136,14 +135,14 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             )
 
         if version == 0 then
-          // Do not allow Evolution annotations without a version
+          // Do not allow Evolution annotations on version 0
           ctx.annotations.foreach {
-            case e: Evolved => throwEvolutionNotAllowed(e, s"$clazz without version")
+            case e: Evolved => throw EvolutionNotAllowedException(e, s"$clazz with version 0")
             case _          => // Ignore other annotations
           }
           ctx.subtypes.foreach { p =>
             p.annotations.foreach {
-              case e: Evolved => throwEvolutionNotAllowed(e, s"$p of $clazz without version")
+              case e: Evolved => throw EvolutionNotAllowedException(e, s"$p of $clazz with version 0")
               case _          => // Ignore other annotations
             }
           }
@@ -159,7 +158,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             case d: deletedClasses =>
               d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
-            case e: Evolved            => throwEvolutionNotAllowed(e, clazz.toString)
+            case e: Evolved            => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                     => // Ignore other annotations
           }
           // Iterate over subtypes annotations to register evolutions from current source code
@@ -170,7 +169,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               case _: deletedFields if p.annotations.exists(_.isInstanceOf[version])  => // allowed on versioned subtype
               case _: deletedClasses if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
               case _: postDeserialize[T] if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
-              case e: Evolved => throwEvolutionNotAllowed(e, p.typeclass.getTypeClass.toString)
+              case e: Evolved => throw EvolutionNotAllowedException(e, p.typeclass.getTypeClass.toString)
               case _          => // Ignore other annotations
             }
           }

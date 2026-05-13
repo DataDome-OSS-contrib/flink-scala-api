@@ -560,7 +560,7 @@ object Parent {
 ```
 
 `formerName` can be:
-* a simple name: `"OldName"` is resolved to `org.example.Parent$OldName`
+* a simple name: `"OldName"` is resolved to `org.example.Parent$OldName` former class name
 * a relative path, its first component (package or class) has to be in common with one component of the annotated class: 
   * `"Parent.OldName"` → `org.example.Parent$OldName`
   * `"example.oldPackage.OldName"` → `org.example.oldPackage.OldName`
@@ -568,9 +568,10 @@ object Parent {
 * an absolute path: `"old.example.OldName"` → `old.example.OldName`
 
 > [!WARNING]
-> Caveat on former class resolution: due to the limitation of String manipulation without the possibility to load a class that doesn't exist anymore in the classpath, we have to rely on naming conventions on few cases:
-> * absolute path to a different first package relies on a lowercase first letter (e.g., `org` not `Org`)
-> * in relative path, the first class name must have a capital letter. If it's not the case, a `$` has to be used as separator between inner classes
+> Caveat on former class resolution: due to the limitation of String manipulation without the possibility to load a class that doesn't exist
+> anymore in the classpath, we have to rely on naming convention in one relative path edge case: if a former class
+> has been moved outside its top level class, this top level class must have a capital letter. If it's not the case,
+> a `$` has to be used as separator between inner classes.
 
 ### Compatibility
 

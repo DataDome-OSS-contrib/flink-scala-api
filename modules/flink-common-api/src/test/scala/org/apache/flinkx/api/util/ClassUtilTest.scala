@@ -82,13 +82,13 @@ class ClassUtilTest extends AnyFlatSpec with Matchers {
   }
 
   it should "resolve a simple renaming" in {
-    val formerClassName = ClassUtil.resolveFormerClassName("View", Simple().getClass)
-    formerClassName shouldBe "org.apache.flinkx.api.util.ClassUtilTest$View"
-  }
-
-  it should "resolve a simple renaming at root level" in {
     val formerClassName = ClassUtil.resolveFormerClassName("ClassTest", ClassUtilTest.getClass)
     formerClassName shouldBe "org.apache.flinkx.api.util.ClassTest"
+  }
+
+  it should "resolve a simple renaming of a nested class" in {
+    val formerClassName = ClassUtil.resolveFormerClassName("View", Simple().getClass)
+    formerClassName shouldBe "org.apache.flinkx.api.util.ClassUtilTest$View"
   }
 
   it should "resolve a simple renaming in nested object" in {
@@ -116,13 +116,18 @@ class ClassUtilTest extends AnyFlatSpec with Matchers {
     formerClassName shouldBe "org.flinkx.ClassUtilTest$InnerObject"
   }
 
-  it should "resolve a move to a completely different absolute package" in {
+  it should "resolve a move from a completely different absolute package" in {
     val formerClassName = ClassUtil.resolveFormerClassName("com.flinkx.ClassUtilTest.Simple", Simple().getClass)
     formerClassName shouldBe "com.flinkx.ClassUtilTest$Simple"
   }
 
+  it should "resolve a move from a completely different uppercase absolute package" in {
+    val formerClassName = ClassUtil.resolveFormerClassName("COM.flinkx.ClassUtilTest.Simple", Simple().getClass)
+    formerClassName shouldBe "COM.flinkx.ClassUtilTest$Simple"
+  }
+
   it should "resolve multiple consecutive uppercase components" in {
-    val formerClassName = ClassUtil.resolveFormerClassName("UI.DOM.Element", Simple().getClass)
+    val formerClassName = ClassUtil.resolveFormerClassName("ClassUtilTest.UI.DOM.Element", Simple().getClass)
     formerClassName shouldBe "org.apache.flinkx.api.util.ClassUtilTest$UI$DOM$Element"
   }
 
@@ -137,7 +142,7 @@ class ClassUtilTest extends AnyFlatSpec with Matchers {
   }
 
   it should "resolve single character class names" in {
-    val formerClassName = ClassUtil.resolveFormerClassName("A.B.C", Simple().getClass)
+    val formerClassName = ClassUtil.resolveFormerClassName("ClassUtilTest.A.B.C", Simple().getClass)
     formerClassName shouldBe "org.apache.flinkx.api.util.ClassUtilTest$A$B$C"
   }
 

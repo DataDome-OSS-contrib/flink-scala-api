@@ -1,10 +1,9 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flink.annotation.Internal
 import org.apache.flinkx.api.evolution.FieldEvolution.Phase
 
 import scala.collection.mutable
-import scala.math.Ordered.orderingToOrdered
 
 /** A single field-level evolution step, applied to the in-flight field map during deserialization.
   *
@@ -18,18 +17,29 @@ import scala.math.Ordered.orderingToOrdered
   * @param phase
   *   Operation phase, defining sort order within a single version
   */
+@Internal
 abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] {
 
-  /** Mutate `fields` in place to apply this evolution step. */
-  def apply(fields: mutable.Map[String, AnyRef]): Unit
+  /** Mutate field-name to field-value `fieldMap` in place to apply this evolution step.
+    *
+    * Initially, the field map contains only the former fields, including:
+    *   - fields that have been deleted since
+    *   - values with their former type
+    */
+  def apply(fieldMap: mutable.Map[String, AnyRef]): Unit
 
-  override def compare(that: FieldEvolution): Int = (since, phase.rank).compare((that.since, that.phase.rank))
+  override def compare(that: FieldEvolution): Int = {
+    val sinceComparison = since.compare(that.since)
+    if (sinceComparison != 0) sinceComparison
+    else phase.rank.compare(that.phase.rank)
+  }
 
 }
 
 object FieldEvolution {
 
   /** Operation phase used to order evolutions within a single version (lower rank applied first). */
+  @Internal
   sealed abstract class Phase(val rank: Int)
   object Phase {
     case object Delete    extends Phase(0)
@@ -40,18 +50,19 @@ object FieldEvolution {
 
   /** Remove a field from the field map. Backs the `@deletedFields` annotation.
     *
-    * @throws FlinkRuntimeException
-    *   if `formerFieldName` is not present in the field map.
+    * @throws FieldNotFoundException
+    *   if `formerName` is not present in the field map.
     */
+  @Internal
   final case class Delete(
       override val since: Int,
       currentClass: Class[_],
       formerName: String
   ) extends FieldEvolution(since, Phase.Delete) {
 
-    override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
-      fields.remove(formerName) match {
-        case None => throwFieldNotFound(currentClass, formerName, "delete", fields.keys)
+    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
+      fieldMap.remove(formerName) match {
+        case None => throw FieldNotFoundException(currentClass, formerName, "delete", fieldMap.keys)
         case _    =>
       }
     }
@@ -60,9 +71,10 @@ object FieldEvolution {
 
   /** Move the entry under `formerName` to the new key `currentName`. Backs the `@renamed` annotation on a field.
     *
-    * @throws FlinkRuntimeException
-    *   if `fromName` is not present in the field map.
+    * @throws FieldNotFoundException
+    *   if `formerName` is not present in the field map.
     */
+  @Internal
   final case class Rename(
       override val since: Int,
       currentClass: Class[_],
@@ -70,10 +82,10 @@ object FieldEvolution {
       currentName: String
   ) extends FieldEvolution(since, Phase.Rename) {
 
-    override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
-      fields.remove(formerName) match {
-        case Some(value) => fields.put(currentName, value)
-        case _           => throwFieldNotFound(currentClass, formerName, "rename", fields.keys)
+    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
+      fieldMap.remove(formerName) match {
+        case Some(value) => fieldMap.put(currentName, value)
+        case _           => throw FieldNotFoundException(currentClass, formerName, "rename", fieldMap.keys)
       }
     }
 
@@ -81,9 +93,10 @@ object FieldEvolution {
 
   /** Replace the value at `name` with `mapper(value)`. Backs the `@transformed` annotation.
     *
-    * @throws FlinkRuntimeException
+    * @throws FieldNotFoundException
     *   if `name` is not present in the field map.
     */
+  @Internal
   final case class Transform[A, B](
       override val since: Int,
       currentClass: Class[_],
@@ -91,10 +104,10 @@ object FieldEvolution {
       mapper: A => B
   ) extends FieldEvolution(since, Phase.Transform) {
 
-    override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
-      fields.get(name) match {
-        case Some(value) => fields.update(name, mapper.apply(value.asInstanceOf[A]).asInstanceOf[AnyRef])
-        case _           => throwFieldNotFound(currentClass, name, "transform", fields.keys)
+    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
+      fieldMap.get(name) match {
+        case Some(value) => fieldMap.update(name, mapper.apply(value.asInstanceOf[A]).asInstanceOf[AnyRef])
+        case _           => throw FieldNotFoundException(currentClass, name, "transform", fieldMap.keys)
       }
     }
 
@@ -102,10 +115,12 @@ object FieldEvolution {
 
   /** Insert field `name` with the case class default value. Backs the `@added` annotation.
     *
-    * @throws FlinkRuntimeException
-    *   - at construction if `default` is empty;
-    *   - at apply time if `name` is already present.
+    * @throws AddedFieldWithoutDefaultException
+    *   At construction if `default` is empty;
+    * @throws FieldAlreadyExistException
+    *   Deserialization time if `name` is already present.
     */
+  @Internal
   final case class Add[T](
       override val since: Int,
       currentClass: Class[_],
@@ -113,26 +128,15 @@ object FieldEvolution {
       default: Option[T]
   ) extends FieldEvolution(since, Phase.Add) {
 
-    if (default.isEmpty)
-      throw new FlinkRuntimeException(s"'$name' added field in $currentClass must have a default value")
+    if (default.isEmpty) throw AddedFieldWithoutDefaultException(currentClass, name)
 
-    override def apply(fields: mutable.Map[String, AnyRef]): Unit = {
-      fields.put(name, default.get.asInstanceOf[AnyRef]) match {
-        case Some(_) => throwFieldAlreadyExist(currentClass, name, fields.keys)
+    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
+      fieldMap.put(name, default.get.asInstanceOf[AnyRef]) match {
+        case Some(_) => throw FieldAlreadyExistException(currentClass, name, fieldMap.keys)
         case _       =>
       }
     }
 
   }
-
-  private def throwFieldNotFound(clazz: Class[_], field: String, operation: String, fields: Iterable[String]): Unit =
-    throw new FlinkRuntimeException(
-      s"Cannot $operation '$field'. Field not found in $clazz. Available fields: ${fields.mkString("[\"", "\",\"", "\"]")}"
-    )
-
-  private def throwFieldAlreadyExist(clazz: Class[_], field: String, fields: Iterable[String]): Unit =
-    throw new FlinkRuntimeException(
-      s"Cannot add '$field'. Field already exists in $clazz. Existing fields: ${fields.mkString("[\"", "\",\"", "\"]")}"
-    )
 
 }

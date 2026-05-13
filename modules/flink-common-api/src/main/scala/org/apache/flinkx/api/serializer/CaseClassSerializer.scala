@@ -169,7 +169,7 @@ class CaseClassSerializer[T <: Product](
         evolution.toFieldValues(fieldMap)
       }
       if (evolution.isDeleted) {
-        null.asInstanceOf[T]
+        null.asInstanceOf[T] // The check if null is allowed on this instance is done in CoproductSerializer.deserialize
       } else {
         evolution.postDeserialize(version, createInstance(fieldValues))
       }

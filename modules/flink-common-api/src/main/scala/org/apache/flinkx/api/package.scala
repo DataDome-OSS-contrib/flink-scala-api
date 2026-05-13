@@ -21,7 +21,7 @@ package object api {
     *
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param current
-    *   Current schema version, must be positive or 0
+    *   Current schema version, must be >= 0 or [[org.apache.flinkx.api.evolution.VersionNotAllowedException]] is thrown
     */
   final case class version(current: Int) extends StaticAnnotation
 
@@ -45,6 +45,9 @@ package object api {
   }
 
   /** Marks a case class field added in a specific version. The annotated field must have a default value.
+    *
+    * Adding a field in a case class without this annotation throws a
+    * [[org.apache.flinkx.api.evolution.FieldNotUsedException]] during deserialization.
     *
     * Annotation of case class parameter.
     * @param since
@@ -85,7 +88,8 @@ package object api {
     *
     * Multiple annotations can coexist on the same class to record deletions made in different versions.
     *
-    * Annotation of case class.
+    * Removing a field in a case class without this annotation throws a
+    * [[org.apache.flinkx.api.evolution.MissingFieldException]] during deserialization. Annotation of case class.
     * @param since
     *   Version in which the listed fields were deleted.
     * @param formerNames
@@ -105,8 +109,8 @@ package object api {
     * @param since
     *   Version in which the listed fields were deleted (informative only).
     * @param throwOnInstance
-    *   When `true` (default), encountering an instance of a deleted subtype during deserialization throws an exception.
-    *   `false` to deserialize as `null`
+    *   When `true` (default), encountering an instance of a deleted subtype during deserialization throws a
+    *   [[org.apache.flinkx.api.evolution.DeletedInstanceException]]. `false` to deserialize as `null`
     * @param formerClassNames
     *   Former class names of the deleted classes, which can be:
     *   - A simple name: `"OldName"`
