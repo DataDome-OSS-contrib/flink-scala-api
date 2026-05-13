@@ -4,7 +4,124 @@ import org.apache.flink.api.common.typeinfo.{BasicTypeInfo, TypeInformation}
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 
+import scala.annotation.StaticAnnotation
+
 package object api {
+
+  /** Declares the current schema version of an ADT (case class, sealed trait or Scala 3 enum) and opts it in to the
+    * annotation-based schema evolution feature allowing to restore former data read from a checkpoint to the current
+    * source code.
+    *
+    * This feature commonly employs the following vocabulary to qualify version, class, field, etc.:
+    *   - `Former` describes the serialization time when the checkpoint was done.
+    *   - `Current` describes the deserialization time with the current source code.
+    *
+    * An ADT without this annotation is considered to have version 0 which makes it safe to add `@version(1)` to an
+    * existing ADT and restore it from a checkpoint produced by the unversioned code.
+    *
+    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
+    * @param current
+    *   Current schema version, must be >= 0 or [[org.apache.flinkx.api.evolution.VersionNotAllowedException]] is thrown
+    */
+  final case class version(current: Int) extends StaticAnnotation
+
+  /** Marker trait for every evolution annotation. */
+  trait Evolved extends StaticAnnotation
+
+  /** Applies a mapper to the whole current ADT instance after its deserialization. Parameters:
+    *   - the former version of the ADT;
+    *   - the current ADT instance after its deserialization.
+    *   - Return value: a potentially modified ADT instance.
+    *
+    * Useful for cross-field migrations that don't fit a single `@transformed`, or selecting a different sealed trait
+    * subtype based on the input.
+    *
+    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
+    * @param mapper
+    *   A mapper function taking as parameters the former version and the current ADT instance after its deserialization
+    */
+  final case class postDeserialize[A](mapper: (Int, A) => A) extends Evolved {
+    override def toString: String = s"postDeserialize(<mapper>)"
+  }
+
+  /** Marks a case class field added in a specific version. The annotated field must have a default value.
+    *
+    * Adding a field in a case class without this annotation throws a
+    * [[org.apache.flinkx.api.evolution.FieldNotUsedException]] during deserialization.
+    *
+    * Annotation of case class parameter.
+    * @param since
+    *   Version in which the field was added.
+    */
+  final case class added(since: Int) extends Evolved
+
+  /** On case class parameter, marks field renamed from former name.
+    *
+    * On ADT or subtype, marks class renamed from former name or moved from another location.
+    *
+    * Annotation of case class parameter, ADT or sealed trait subtype.
+    * @param since
+    *   Version in which the rename occurred
+    * @param formerName
+    *   Former field or class name. Class names can be:
+    *   - A simple name: `"OldName"`
+    *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
+    *   - An absolute path: `"org.example.OldName"`
+    */
+  final case class renamed(since: Int, formerName: String) extends Evolved {
+    override def toString: String = s"renamed($since,\"$formerName\")"
+  }
+
+  /** Marks a case class field whose type has changed: `mapper` function converts from the former to the current type.
+    *
+    * Annotation of case class parameter.
+    * @param since
+    *   Version in which the type-change occurred
+    * @param mapper
+    *   Function converting the former value to the current type
+    */
+  final case class transformed[A, B](since: Int, mapper: A => B) extends Evolved {
+    override def toString: String = s"transformed($since,<mapper>)"
+  }
+
+  /** Marks fields that used to exist on a case class but no longer appear in current schema.
+    *
+    * Multiple annotations can coexist on the same class to record deletions made in different versions.
+    *
+    * Removing a field in a case class without this annotation throws a
+    * [[org.apache.flinkx.api.evolution.MissingFieldException]] during deserialization. Annotation of case class.
+    * @param since
+    *   Version in which the listed fields were deleted.
+    * @param formerNames
+    *   Names of the deleted fields, as they appeared in the former schema.
+    */
+  final case class deletedFields(since: Int, formerNames: String*) extends Evolved {
+    override def toString: String = s"deletedFields($since,${formerNames.mkString("\"", "\",\"", "\"")})"
+  }
+
+  /** Marks deleted classes removed from current schema:
+    *   - On a sealed trait or a Scala 3 enum: subtype classes that have been removed. Encountering an instances of
+    *     these subtypes throw by default, or are deserialized as `null` if `throwOnInstance` is `false`.
+    *   - On a case class: classes that were referenced by a now-deleted field (declared via `@deletedFields`).
+    *
+    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
+    *
+    * @param since
+    *   Version in which the listed fields were deleted (informative only).
+    * @param throwOnInstance
+    *   When `true` (default), encountering an instance of a deleted subtype during deserialization throws a
+    *   [[org.apache.flinkx.api.evolution.DeletedInstanceException]]. `false` to deserialize as `null`
+    * @param formerClassNames
+    *   Former class names of the deleted classes, which can be:
+    *   - A simple name: `"OldName"`
+    *   - A relative path: `"Parent.OldName"` or `"api.oldPackage.OldName"` or `"api.lowerClass$OldName"`
+    *   - An absolute path: `"org.example.OldName"`
+    */
+  final case class deletedClasses(since: Int, throwOnInstance: Boolean, formerClassNames: String*) extends Evolved {
+    def this(since: Int, formerClassNames: String*) = this(since, true, formerClassNames: _*)
+
+    override def toString: String = s"deletedClasses(${formerClassNames.mkString("\"", "\",\"", "\"")})"
+  }
 
   /** Basic type has an arity of 1. See [[BasicTypeInfo#getArity()]] */
   private[api] val BasicTypeArity: Int = 1
@@ -27,7 +144,7 @@ package object api {
     * If one of these conditions is not met, consider using another marker or wrap your serializer into a
     * [[NullableSerializer]].
     */
-  private[api] val NullMarker: Int = Int.MinValue
+  private[api] val NullMarker: Int      = Int.MinValue
   private[api] val NullMarkerByte: Byte = Byte.MinValue
 
 }

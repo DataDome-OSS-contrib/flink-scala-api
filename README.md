@@ -459,32 +459,119 @@ object Foo {
 
 ### Schema evolution
 
-#### ADT
-For the child case classes being part of ADT, the serializers use a Flink's `CaseClassSerializer`, so all the compatibility rules
-are the same as for normal case classes.
+This library supports two complementary mechanisms for evolving the schema of state stored in checkpoints and
+savepoints: built-in compatibility rules that come "for free", and an opt-in annotation-based system for richer changes.
 
-For the sealed trait membership itself, this library uses own serialization format with the following rules:
-* you cannot reorder trait members, as wire format depends on the compile-time index of each member
-* you can add new members at the end of the list
-* you cannot remove ADT members
-* you cannot replace ADT members
+#### Built-in compatibility
 
-#### Case Class Changes
+Without any annotation, the following changes are safe between checkpoint write and restore (starting from version 2.3.0):
+* Case classes: you can reorder fields. New fields in last position with a default value are also accepted and populated from the default on restore.
+* Sealed traits: you can reorder subtypes and add new subtypes.
+* For everything else (renames, deletions, type changes, cross-field migrations), use the annotation-based schema evolution below.
 
-On a case class level, this library supports new field addition(s) with default value(s). This allows to restore a Flink job from a savepoint created using previous case class schema.
+#### Annotation-based schema evolution
+
+Annotate an ADT (case class, sealed trait or Scala 3 enum) with `@version(n)` to opt it in, then describe each
+change with one of the evolution annotations on the ADT or on its fields/subtypes. On restore, the library
+applies these operations against the former data read from the checkpoint so it matches the current source code.
+
+This schema evolution feature commonly employs the following vocabulary to qualify version, class, field, etc.:
+* `Former` describes the serialization time when the checkpoint was done.
+* `Current` describes the deserialization time with the current source code.
+
+An ADT without `@version` annotation is considered to have version 0 which makes it safe to add `@version(1)` to an
+existing ADT and restore it from a checkpoint produced by the unversioned code.
+
+```scala
+import org.apache.flinkx.api._
+
+// Former schema serialized to the checkpoint (no annotations, version 0 is implicit):
+// case class Click(identifier: String, sessionId: Int, unused: String, history: List[ClickEvent])
+// case class ClickEvent(date: String)
+
+// Current source code:
+@version(2)
+@deletedFields(since = 1, "unused", "history")
+@deletedClasses(since = 1, "ClickEvent")
+@postDeserialize(updateClick)
+case class Click(
+    @renamed(since = 1, "identifier") id: String,
+    @added(since = 2) ts: Long = System.currentTimeMillis(),
+    @transformed(since = 1, intToString) sessionId: String
+)
+
+def intToString(i: Int): String      = i.toString
+def updateClick(version: Int, click: Click): Click = click.copy(sessionId = click.sessionId + click.id)
+
+// Former schema serialized to the checkpoint (version 0):
+// sealed trait Event
+// case class View(ts: Long) extends Event
+// case class Purchase(price: Double) extends Event
+
+// Current source code:
+@version(1)
+@renamed(since = 1, "Event")
+@deletedClasses(since = 1, throwOnInstance = false, "Purchase")
+@postDeserialize(updateAction)
+sealed trait Action
+
+@renamed(since = 1, "View")
+case class Web(ts: Long) extends Action
+
+def updateAction(version: Int, action: Action): Action = action match {
+  case Web(ts) => Web(ts + version)
+}
+```
+
+**Available annotations:**
+
+| Annotation                                                           | Where                          | Effect                                                                                                                                                                                                                                                   |
+|----------------------------------------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@version(n)`                                                        | ADT                            | Declares the current schema version (`n >= 0`); opt in the ADT to evolution                                                                                                                                                                              |
+| `@added(since = n)`                                                  | case class field               | Field was added in version `n`; requires a default value                                                                                                                                                                                                 |
+| `@renamed(since = n, "oldName")`                                     | case class field, ADT, subtype | Field or class was formerly known under `"oldName"` before version `n`, or lived at another location (see [former class name resolution](#former-class-name-resolution))                                                                                 |
+| `@transformed(since = n, mapper)`                                    | case class field               | Field's type changed in version `n`; `mapper` converts the formerly serialized value to the current type                                                                                                                                                 |
+| `@deletedFields(since = n, "a", "b")`                                | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                                                                                                         |
+| `@deletedClasses(since = n, throwOnInstance = true, "OldClass1", …)` | ADT                            | Subtypes that have been removed, or field types that were referenced by a now-deleted field (see [former class name resolution](#former-class-name-resolution)). Throws by default when encountering an instance of deleted class during deserialization |
+| `@postDeserialize(mapper)`                                           | ADT                            | Applies the `mapper` function taking as parameters the former version and the current ADT instance after its deserialization                                                                                                                             |
+
+Field evolutions are applied in ascending `since` order. Within a single version, evolutions are applied in this canonical pipeline:
+Delete → Rename → Transform → Add. This ordering enables annotation combinations such as:
+* Rename a field and transform its value.
+* Delete a field (its serialized state is dropped) and re-add a field with the same name from a default value.
+
+> [!NOTE]
+> You can clean up old evolution annotations as long as you don't restore a checkpoint of an older version. For example with `Click`:
+> * if you didn't keep any v0 checkpoint, you can retain only `@version(2)` and `@added(since = 2)` annotations.
+> * if you only have v2 checkpoints, you can remove all annotations, even `@version(2)`. Current `Click` will then be treated as a version 0.
+
+##### Former class name resolution
+
+Former class names in `@renamed` and `@deletedClasses` are resolved relatively to the parent of annotated class.
 For example:
+```scala
+package org.example
 
-1. A Flink job was stopped with a savepoint using below case class schema:
-```scala
-case class Click(id: String, inFileClicks: List[ClickEvent])
+object Parent {
+  @version(1)
+  @renamed(since = 1, formerName = "OldName")
+  case object NewName
+}
 ```
-2. Now the Click case class is changed to:
-```scala
-case class Click(id: String, inFileClicks: List[ClickEvent], 
-    fieldInFile: String = "test1",
-    fieldNotInFile: String = "test2")   
-```
-3. Launch the same job with new case class schema version from the last savepoint. Job restore should work successfully.
+
+`formerName` can be:
+* a simple name: `"OldName"` is resolved to `org.example.Parent$OldName` former class name
+* a relative path, its first component (package or class) has to be in common with one component of the annotated class: 
+  * `"Parent.OldName"` → `org.example.Parent$OldName`
+  * `"example.oldPackage.OldName"` → `org.example.oldPackage.OldName`
+  * `"example.lowerClass$OldName"` → `org.example.lowerClass$OldName`
+* an absolute path: `"old.example.OldName"` → `old.example.OldName`
+
+> [!WARNING]
+> Caveat on former class resolution: due to the limitation of String manipulation without the possibility to load a class that doesn't exist
+> anymore in the classpath, we have to rely on naming convention in one relative path edge case: if a former class
+> has been moved outside its top level class, this top level class must have a capital letter. If it's not the case,
+> a `$` has to be used as separator between inner classes.
 
 ### Compatibility
 
