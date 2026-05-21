@@ -6,7 +6,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
-import org.apache.flinkx.api.evolution.dsl.EvolvedMerger
+import org.apache.flinkx.api.evolution.dsl.{EvolvedMerger, OptionalEvolved}
 import org.apache.flinkx.api.evolution.{EvolutionBuilder, EvolutionNotAllowedException, Evolutions}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
@@ -28,7 +28,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
   // Need to mix in via `& Product`.
   override def join[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      optionalEvolved: OptionalEvolved[T]
   ): Typeclass[T] =
     val useCache = typeTag.isCachable
     val cacheKey = typeTag.toString
@@ -38,11 +39,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
-        val dslEvolved = Evolutions.getEvolved(clazz)
-        val version    = {
-          val fromAnnot = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
-          if fromAnnot > 0 then fromAnnot else dslEvolved.map(_.currentVersion).getOrElse(0)
-        }
+        val evolvedDsl = optionalEvolved.value
+        val version    = Evolutions.findVersion(clazz, ctx.annotations, evolvedDsl)
         val fieldNames = ctx.parameters.map(_.label).toArray
         val serializer =
           if typeTag.isEnum then new Scala3EnumValueSerializer[T & Product](clazz, ctx.typeInfo.short)
@@ -98,9 +96,10 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             }
           }
           // Merge DSL-supplied evolutions (defaults sourced from Magnolia's `Param.default`).
-          dslEvolved.foreach { ev =>
+          evolvedDsl.foreach { ev =>
             EvolvedMerger.merge[T & Product](
-              ev,
+              // Safe cast: the DSL was declared for `Evolved[T]`, but `T & Product` shares the same runtime class.
+              ev.asInstanceOf[org.apache.flinkx.api.evolution.dsl.Evolved[T & Product]],
               builder,
               clazz,
               name => ctx.parameters.find(_.label == name).flatMap(_.default)
@@ -119,7 +118,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
   override def split[T](ctx: SealedTrait[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      optionalEvolved: OptionalEvolved[T]
   ): Typeclass[T] =
     val useCache = typeTag.isCachable
     val cacheKey = typeTag.toString
@@ -129,11 +129,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val dslEvolved = Evolutions.getEvolved(clazz)
-        val version    = {
-          val fromAnnot = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
-          if fromAnnot > 0 then fromAnnot else dslEvolved.map(_.currentVersion).getOrElse(0)
-        }
+        val evolvedDsl = optionalEvolved.value
+        val version    = Evolutions.findVersion(clazz, ctx.annotations, evolvedDsl)
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
@@ -192,9 +189,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             }
           }
           // Merge DSL-supplied evolutions for the sealed trait / enum.
-          dslEvolved.foreach { ev =>
-            EvolvedMerger.merge[T](ev, builder, clazz, _ => None)
-          }
+          evolvedDsl.foreach { ev => EvolvedMerger.merge[T](ev, builder, clazz, _ => None) }
           Evolutions.register(builder)
 
         val ti = new CoproductTypeInformation[T](clazz, serializer)

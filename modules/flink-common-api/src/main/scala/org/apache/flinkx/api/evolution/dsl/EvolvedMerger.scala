@@ -24,8 +24,8 @@ object EvolvedMerger {
     * @param currentClass
     *   The current ADT class (used as context for class-name resolution)
     * @param defaultFor
-    *   Lookup function from field name to Magnolia-supplied default value, used to materialize
-    *   [[FieldDelta.Add]] entries. Should return `None` if the field has no default.
+    *   Lookup function from field name to Magnolia-supplied default value, used to materialize [[FieldDelta.Add]]
+    *   entries. Should return `None` if the field has no default.
     */
   def merge[T](
       evolved: Evolved[T],
@@ -34,13 +34,13 @@ object EvolvedMerger {
       defaultFor: String => Option[Any]
   ): Unit = {
     evolved.fieldDeltas.foreach {
-      case FieldDelta.Add(fieldName, since)                =>
+      case FieldDelta.Add(fieldName, since) =>
         builder.fieldEvolutions += Add(since, currentClass, fieldName, defaultFor(fieldName))
       case FieldDelta.Rename(formerName, currentName, since) =>
         builder.fieldEvolutions += Rename(since, currentClass, formerName, currentName)
-      case t: FieldDelta.Transform[a, b]                   =>
+      case t: FieldDelta.Transform[a, b] =>
         builder.fieldEvolutions += Transform[a, b](t.since, currentClass, t.fieldName, t.mapper)
-      case FieldDelta.Delete(formerName, since)            =>
+      case FieldDelta.Delete(formerName, since) =>
         builder.fieldEvolutions += Delete(since, currentClass, formerName)
     }
 

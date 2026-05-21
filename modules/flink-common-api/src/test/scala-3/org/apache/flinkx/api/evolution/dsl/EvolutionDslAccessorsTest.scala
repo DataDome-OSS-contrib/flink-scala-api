@@ -12,17 +12,17 @@ class EvolutionDslAccessorsTest extends AnyFlatSpec with Matchers with BeforeAnd
   override protected def beforeEach(): Unit = Evolutions.reset()
 
   it should "extract field name from a `_.field` lambda in `.addedField`" in {
-    val ev = Evolution.of[Sample].version(1).addedField(_.addedAtV1).build
+    val ev: Evolved[Sample] = Evolution.of[Sample].version(1).addedField(_.addedAtV1)
     ev.fieldDeltas should contain only FieldDelta.Add("addedAtV1", since = 1)
   }
 
   it should "extract current field name in `.renamedField`" in {
-    val ev = Evolution.of[Sample].version(1).renamedField(_.name, formerName = "oldName").build
+    val ev: Evolved[Sample] = Evolution.of[Sample].version(1).renamedField(_.name, formerName = "oldName")
     ev.fieldDeltas should contain only FieldDelta.Rename("oldName", "name", since = 1)
   }
 
   it should "extract current field name in `.transformedField`" in {
-    val ev = Evolution.of[Sample].version(1).transformedField(_.count, (i: Int) => i.toString).build
+    val ev: Evolved[Sample] = Evolution.of[Sample].version(1).transformedField(_.count, (i: Int) => i.toString)
     ev.fieldDeltas should have size 1
     ev.fieldDeltas.head match {
       case t: FieldDelta.Transform[_, _] =>
@@ -33,8 +33,7 @@ class EvolutionDslAccessorsTest extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "reject a non-existent field at compile time" in {
-    // This test exists purely as documentation; uncommenting the line below should fail compilation
-    // with a message like: "Field 'doesNotExist' does not exist on Sample. Available fields: [name, count, addedAtV1]".
+    // Uncommenting the next line should fail compilation.
     //   Evolution.of[Sample].version(1).addedField(_.doesNotExist)
     succeed
   }

@@ -13,18 +13,18 @@ class EvolutionDslAccessorsTest extends AnyFlatSpec with Matchers with BeforeAnd
   override protected def beforeEach(): Unit = Evolutions.reset()
 
   it should "extract field name from a `_.field` lambda in `.addedField`" in {
-    val ev = Evolution.of[Sample].version(1).addedField(_.addedAtV1).build
+    val ev: Evolved[Sample] = Evolution.of[Sample].version(1).addedField(_.addedAtV1)
     ev.fieldDeltas should contain only FieldDelta.Add("addedAtV1", since = 1)
   }
 
   it should "extract current field name in `.renamedField`" in {
     // Scala 2 macros don't support named arguments; pass formerName positionally.
-    val ev = Evolution.of[Sample].version(1).renamedField(_.name, "oldName").build
+    val ev: Evolved[Sample] = Evolution.of[Sample].version(1).renamedField(_.name, "oldName")
     ev.fieldDeltas should contain only FieldDelta.Rename("oldName", "name", since = 1)
   }
 
   it should "extract current field name in `.transformedField`" in {
-    val ev = Evolution.of[Sample].version(1).transformedField[Int, String](_.count, _.toString).build
+    val ev: Evolved[Sample] = Evolution.of[Sample].version(1).transformedField[Int, String](_.count, _.toString)
     ev.fieldDeltas should have size 1
     ev.fieldDeltas.head match {
       case t: FieldDelta.Transform[_, _] =>

@@ -3,7 +3,7 @@ package org.apache.flinkx.api.evolution.dsl
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.{Evolutions, FieldEvolution}
+import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.evolution.dsl.EvolutionDslTest._
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -15,23 +15,20 @@ class EvolutionDslTest extends AnyFlatSpec with Matchers with TestUtils with Bef
 
   // -- Core DSL: structural correctness ---------------------------------------
 
-  it should "register an Evolved descriptor on .build" in {
-    Evolution
+  it should "build an Evolved descriptor from a chain" in {
+    val ev: Evolved[Foo] = Evolution
       .of[Foo]
       .version(2)
       .added("addedAtV2")
       .version(1)
       .renamed(formerName = "oldName", currentName = "name")
-      .build
 
-    val evolved = Evolutions.getEvolved(classOf[Foo])
-    evolved should not be empty
-    evolved.get.currentVersion shouldBe 2
-    evolved.get.fieldDeltas should have size 2
+    ev.currentVersion shouldBe 2
+    ev.fieldDeltas should have size 2
   }
 
   it should "produce field deltas in the order they were declared" in {
-    val ev = Evolution
+    val ev: Evolved[Foo] = Evolution
       .of[Foo]
       .version(2)
       .added("addedAtV2")
@@ -39,7 +36,6 @@ class EvolutionDslTest extends AnyFlatSpec with Matchers with TestUtils with Bef
       .renamed("oldName", "name")
       .transformed[Int, String]("count", _.toString)
       .deletedFormerFields("dropped1", "dropped2")
-      .build
 
     // Lambdas don't compare by equality across captures; assert structure independently.
     ev.fieldDeltas should have size 5
@@ -58,7 +54,7 @@ class EvolutionDslTest extends AnyFlatSpec with Matchers with TestUtils with Bef
 
   it should "reject a non-monotonic version sequence" in {
     val ex = intercept[IllegalArgumentException] {
-      Evolution.of[Foo].version(1).version(2).build
+      Evolution.of[Foo].version(1).version(2)
     }
     ex.getMessage should include("strictly decreasing order")
   }
@@ -81,43 +77,38 @@ class EvolutionDslTest extends AnyFlatSpec with Matchers with TestUtils with Bef
     ex.getMessage should include("at most once")
   }
 
-  // -- Integration: DSL recognised by TypeInformationDerivation --------------
+  // -- Integration: DSL recognised by TypeInformationDerivation via implicit summoning -----------
 
-  it should "drive the runtime Evolution registry from DSL data" in {
-    Evolution
+  it should "drive the runtime Evolution registry from an implicit Evolved[T]" in {
+    // Per-test implicit; would normally live in Bar's companion.
+    implicit val barEvolved: Evolved[Bar] = Evolution
       .of[Bar]
       .version(2)
       .added("addedAtV2")
       .version(1)
       .renamed("oldName", "name")
-      .build
 
     implicitly[TypeInformation[Bar]] should not be null
 
-    // After derivation, the runtime Evolution for Bar should reflect the DSL.
     val runtime = Evolutions.get(classOf[Bar])
     runtime should not be null
-    runtime.toString should not be empty // smoke: not the NoEvolution placeholder
+    runtime.toString should not be empty
   }
 
   it should "round-trip a DSL-evolved case class with no actual evolution" in {
-    Evolution.of[Bar].version(2).build
-    val expected = Bar(name = "n", addedAtV2 = 7)
+    implicit val barEvolved: Evolved[Bar] = Evolution.of[Bar].version(2)
+    val expected                          = Bar(name = "n", addedAtV2 = 7)
     testTypeInfoAndSerializer[Bar](expected)
   }
 
   it should "apply the merged FieldEvolutions during deserialization" in {
-    // This exercise mirrors what the annotation-driven derivation does: build an EvolutionBuilder by hand, fold the
-    // DSL data in, then deserialize an in-memory field map at a former version. It's the smallest end-to-end test of
-    // the merger producing a working `Evolution`.
-
-    val evolved = Evolution
+    // Smallest end-to-end test of the merger producing a working `Evolution`. Constructed by hand to bypass derivation.
+    val evolved: Evolved[Bar] = Evolution
       .of[Bar]
       .version(2)
       .added("addedAtV2")
       .version(1)
       .renamed("oldName", "name")
-      .build
 
     val builder = new org.apache.flinkx.api.evolution.EvolutionBuilder[Bar](
       classOf[Bar],

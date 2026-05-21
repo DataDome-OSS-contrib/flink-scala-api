@@ -1,9 +1,5 @@
 package org.apache.flinkx.api.evolution.dsl
 
-import org.apache.flinkx.api.evolution.Evolutions
-
-import scala.reflect.ClassTag
-
 /** Entry point of the typed evolution DSL. Use [[of]] to obtain a builder for a given ADT type.
   *
   * The DSL describes evolutions in *reverse* order — most recent version first. Each `.version(N)` opens a section
@@ -11,34 +7,35 @@ import scala.reflect.ClassTag
   * `.version(N)` call declares the current schema version. Subsequent `.version(M)` calls must use strictly decreasing
   * version numbers.
   *
+  * The DSL chain has no terminal `.build` call — the final `EvolutionDslAt[T]` is implicitly converted to an
+  * [[Evolved]] descriptor by [[EvolutionDslAt.toEvolved]] (Scala 2) or the `given Conversion` in [[EvolutionDslAt]]'s
+  * companion (Scala 3). The user assigns it to an `implicit val` / `given` so the derivation can summon it.
+  *
   * Example:
   * {{{
-  * Evolution.of[Click]
-  *   .version(3)
-  *   .added("fieldInFile")
-  *   .version(2)
-  *   .renamed(formerName = "identifier", currentName = "id")
-  *   .version(1)
-  *   .transformed[Int, String]("fieldNotInFile", _.toString)
-  *   .deletedFormerFields("a")
-  *   .build
+  *   case class Click(id: String, fieldInFile: Int = 1, fieldNotInFile: String)
+  *   object Click {
+  *     // The given is summoned at TypeInformation derivation time.
+  *     implicit val evolved: Evolved[Click] = Evolution.of[Click]
+  *       .version(3)
+  *       .added("fieldInFile")
+  *       .version(2)
+  *       .renamed(formerName = "identifier", currentName = "id")
+  *       .version(1)
+  *       .transformed[Int, String]("fieldNotInFile", _.toString)
+  *       .deletedFormerFields("a")
+  *   }
   * }}}
-  *
-  * On `.build`, the DSL automatically registers the resulting [[Evolved]] descriptor in [[Evolutions]] keyed by `T`'s
-  * runtime class. Putting the call in a `val` (or directly in the companion object body) ensures the registration runs
-  * the first time the companion is loaded — typically when `TypeInformationDerivation` runs for `T`.
   */
 object Evolution {
 
-  /** Start a new DSL chain for type `T`. The [[scala.reflect.ClassTag]] is used at [[EvolutionDslAt.build]] time to
-    * register the resulting descriptor under `T`'s runtime class. */
-  def of[T](implicit ct: ClassTag[T]): EvolutionDsl[T] =
-    new EvolutionDsl[T](ct.runtimeClass.asInstanceOf[Class[T]])
+  /** Start a new DSL chain for type `T`. */
+  def of[T]: EvolutionDsl[T] = new EvolutionDsl[T]()
 
 }
 
 /** Initial DSL stage before the first `.version(N)` call. The only legal next call is `.version(N)`. */
-final class EvolutionDsl[T] private[dsl] (private[dsl] val currentClass: Class[T]) {
+final class EvolutionDsl[T] private[dsl] () {
 
   /** Declare the current schema version of this ADT and open a section for changes that occurred at version `n`.
     *
@@ -47,12 +44,7 @@ final class EvolutionDsl[T] private[dsl] (private[dsl] val currentClass: Class[T
     */
   def version(n: Int): EvolutionDslAt[T] = {
     require(n >= 0, s"Current version must be >= 0, got $n")
-    new EvolutionDslAt[T](
-      currentClass = currentClass,
-      currentVersion = n,
-      sectionSince = n,
-      evolved = Evolved[T](currentVersion = n)
-    )
+    new EvolutionDslAt[T](currentVersion = n, sectionSince = n, evolved = Evolved[T](currentVersion = n))
   }
 
 }
@@ -71,10 +63,9 @@ final class EvolutionDsl[T] private[dsl] (private[dsl] val currentClass: Class[T
   *   Accumulated evolution data so far
   */
 final class EvolutionDslAt[T] private[dsl] (
-    private val currentClass: Class[T],
     private val currentVersion: Int,
     private val sectionSince: Int,
-    private val evolved: Evolved[T]
+    private[dsl] val evolved: Evolved[T]
 ) {
 
   // -- Version section transition -----------------------------------------------------------------
@@ -91,7 +82,7 @@ final class EvolutionDslAt[T] private[dsl] (
       n < sectionSince,
       s"Versions must be described in strictly decreasing order; got .version($n) after .version($sectionSince)"
     )
-    new EvolutionDslAt[T](currentClass, currentVersion, sectionSince = n, evolved)
+    new EvolutionDslAt[T](currentVersion, sectionSince = n, evolved)
   }
 
   // -- Field-level operations (case class) --------------------------------------------------------
@@ -174,20 +165,17 @@ final class EvolutionDslAt[T] private[dsl] (
     copyWith(evolved.copy(postDeserialize = Some(mapper)))
   }
 
-  // -- Terminal -----------------------------------------------------------------------------------
-
-  /** Finalize the chain and return the [[Evolved]] descriptor. Side effect: registers the descriptor in [[Evolutions]]
-    * under `T`'s runtime class so that `TypeInformationDerivation` picks it up. Re-builds for the same type overwrite
-    * earlier registrations — useful in tests, harmless in production where each ADT companion is initialized once.
-    */
-  def build: Evolved[T] = {
-    Evolutions.registerEvolved(currentClass, evolved)
-    evolved
-  }
-
   // -- Internal -----------------------------------------------------------------------------------
 
   private def copyWith(updated: Evolved[T]): EvolutionDslAt[T] =
-    new EvolutionDslAt[T](currentClass, currentVersion, sectionSince, updated)
+    new EvolutionDslAt[T](currentVersion, sectionSince, updated)
+
+}
+
+object EvolutionDslAt {
+
+  /** Implicit conversion turning the final DSL chain into the [[Evolved]] descriptor it accumulated. Lets the user
+    * write `implicit val ev: Evolved[Click] = Evolution.of[Click].version(2)...` without a terminal `.build`. */
+  implicit def evolutionDslAtToEvolved[T](dsl: EvolutionDslAt[T]): Evolved[T] = dsl.evolved
 
 }

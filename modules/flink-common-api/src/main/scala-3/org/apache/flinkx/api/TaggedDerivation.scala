@@ -6,20 +6,23 @@ import scala.reflect.*
 
 import magnolia1.{CallByNeed, CaseClass, SealedTrait, Monadic}
 import magnolia1.Macro.*
+import org.apache.flinkx.api.evolution.dsl.OptionalEvolved
 
-// Typeclass derivation providing `ClassTag` and `TypeTag` givens.
+// Typeclass derivation providing `ClassTag`, `TypeTag` and `OptionalEvolved` givens.
 // Copied & modified from Magnolia, since the Scala 3 version disallows adding constraints to `join` and `split`.
 trait CommonTaggedDerivation[TypeClass[_]]:
   private[api] type Typeclass[T] = TypeClass[T]
 
   def join[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      optionalEvolved: OptionalEvolved[T]
   ): Typeclass[T]
 
   inline def derivedMirrorProduct[A](product: Mirror.ProductOf[A])(using
       ClassTag[A],
-      TypeTag[A]
+      TypeTag[A],
+      OptionalEvolved[A]
   ): Typeclass[A] =
     val parameters = IArray(
       getParams_[A, product.MirroredElemLabels, product.MirroredElemTypes](
@@ -137,7 +140,8 @@ trait CommonTaggedDerivation[TypeClass[_]]:
 trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
   def split[T](ctx: SealedTrait[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      optionalEvolved: OptionalEvolved[T]
   ): Typeclass[T]
 
   transparent inline def subtypes[T, SubtypeTuple <: Tuple](
@@ -163,14 +167,19 @@ trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
               derived(using
                 summonInline[Mirror.Of[s]],
                 summonInline[ClassTag[s]],
-                summonInline[TypeTag[s]]
+                summonInline[TypeTag[s]],
+                summonInline[OptionalEvolved[s]]
               )
           }),
           x => m.ordinal(x) == idx,
           _.asInstanceOf[s & T]
         ) :: subtypes[T, tail](m, idx + 1)
 
-  inline def derivedMirrorSum[A](sum: Mirror.SumOf[A])(using ClassTag[A], TypeTag[A]): Typeclass[A] =
+  inline def derivedMirrorSum[A](sum: Mirror.SumOf[A])(using
+      ClassTag[A],
+      TypeTag[A],
+      OptionalEvolved[A]
+  ): Typeclass[A] =
     val sealedTrait = SealedTrait(
       typeInfo[A],
       IArray(subtypes[A, sum.MirroredElemTypes](sum)*),
@@ -182,9 +191,14 @@ trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
 
     split(sealedTrait)
 
-  inline def derivedMirror[A](using mirror: Mirror.Of[A], c: ClassTag[A], t: TypeTag[A]): Typeclass[A] =
+  inline def derivedMirror[A](using
+      mirror: Mirror.Of[A],
+      c: ClassTag[A],
+      t: TypeTag[A],
+      e: OptionalEvolved[A]
+  ): Typeclass[A] =
     inline mirror match
       case sum: Mirror.SumOf[A]         => derivedMirrorSum[A](sum)
       case product: Mirror.ProductOf[A] => derivedMirrorProduct[A](product)
 
-  inline def derived[A](using Mirror.Of[A], ClassTag[A], TypeTag[A]): Typeclass[A] = derivedMirror[A]
+  inline def derived[A](using Mirror.Of[A], ClassTag[A], TypeTag[A], OptionalEvolved[A]): Typeclass[A] = derivedMirror[A]
