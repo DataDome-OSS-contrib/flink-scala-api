@@ -11,31 +11,22 @@ import scala.language.experimental.macros
   *   import org.apache.flinkx.api.evolution.dsl._
   *   Evolution.of[Click]
   *     .version(3).added(_.fieldInFile)
-  *     .version(2).renamed(_.id, formerName = "identifier")
-  *     .build
+  *     .version(2).renamed(formerName = "identifier", _.id)
   * }}}
   */
-final class EvolutionDslAccessors[T](val dsl: EvolutionDslAt[T]) extends AnyVal {
+trait EvolutionDslAccessors[T] {
 
   /** Typed-accessor equivalent of `.added(name)`. Field name is extracted from `accessor` at macro-expansion time and
     * validated against the case class. */
-  def addedField[A](accessor: T => A): EvolutionDslAt[T] =
+  final def added[A](accessor: T => A): EvolutionDslAt[T] =
     macro DslMacros.added[T, A]
 
   /** Typed-accessor equivalent of `.renamed(formerName, currentName)`. Current name comes from `accessor`. */
-  def renamedField[A](accessor: T => A, formerName: String): EvolutionDslAt[T] =
+  final def renamed[A](formerName: String, accessor: T => A): EvolutionDslAt[T] =
     macro DslMacros.renamed[T, A]
 
   /** Typed-accessor equivalent of `.transformed[A, B](name, mapper)`. Field name comes from `accessor`. */
-  def transformedField[A, B](accessor: T => B, mapper: A => B): EvolutionDslAt[T] =
+  final def transformed[A, B](accessor: T => B, mapper: A => B): EvolutionDslAt[T] =
     macro DslMacros.transformed[T, A, B]
-
-}
-
-object EvolutionDslAccessors {
-
-  /** Implicit conversion that augments [[EvolutionDslAt]] with the typed-accessor methods. */
-  implicit def toAccessors[T](dsl: EvolutionDslAt[T]): EvolutionDslAccessors[T] =
-    new EvolutionDslAccessors[T](dsl)
 
 }

@@ -16,17 +16,16 @@ object DslMacros {
   )(accessor: c.Expr[T => A]): c.Expr[EvolutionDslAt[T]] = {
     import c.universe._
     val name = fieldNameFromAccessor(c)(accessor)
-    // `c.prefix.tree` is the implicit-class wrapper `EvolutionDslAccessors(dsl)`; the underlying builder lives in
-    // its `dsl` field.
-    c.Expr[EvolutionDslAt[T]](q"${c.prefix.tree}.dsl.added($name)")
+    // `c.prefix.tree` is the `EvolutionDslAt[T]` instance the macro was invoked on
+    c.Expr[EvolutionDslAt[T]](q"${c.prefix.tree}.added($name)")
   }
 
   def renamed[T: c.WeakTypeTag, A](
       c: blackbox.Context
-  )(accessor: c.Expr[T => A], formerName: c.Expr[String]): c.Expr[EvolutionDslAt[T]] = {
+  )(formerName: c.Expr[String], accessor: c.Expr[T => A]): c.Expr[EvolutionDslAt[T]] = {
     import c.universe._
     val name = fieldNameFromAccessor(c)(accessor)
-    c.Expr[EvolutionDslAt[T]](q"${c.prefix.tree}.dsl.renamed($formerName, $name)")
+    c.Expr[EvolutionDslAt[T]](q"${c.prefix.tree}.renamed($formerName, $name)")
   }
 
   def transformed[T: c.WeakTypeTag, A, B](
@@ -34,7 +33,7 @@ object DslMacros {
   )(accessor: c.Expr[T => B], mapper: c.Expr[A => B]): c.Expr[EvolutionDslAt[T]] = {
     import c.universe._
     val name = fieldNameFromAccessor(c)(accessor)
-    c.Expr[EvolutionDslAt[T]](q"${c.prefix.tree}.dsl.transformed($name, $mapper)")
+    c.Expr[EvolutionDslAt[T]](q"${c.prefix.tree}.transformed($name, $mapper)")
   }
 
   /** Pattern-match the lambda's AST to extract the selected field name. Recognises `_.field`, `t => t.field`, and the

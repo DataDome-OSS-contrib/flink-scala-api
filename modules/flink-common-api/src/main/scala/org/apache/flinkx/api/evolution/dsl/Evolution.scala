@@ -66,7 +66,7 @@ final class EvolutionDslAt[T] private[dsl] (
     private val currentVersion: Int,
     private val sectionSince: Int,
     private[dsl] val evolved: Evolved[T]
-) {
+) extends EvolutionDslAccessors[T] {
 
   // -- Version section transition -----------------------------------------------------------------
 

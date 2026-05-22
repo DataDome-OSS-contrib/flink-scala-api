@@ -77,6 +77,30 @@ class EvolutionDslTest extends AnyFlatSpec with Matchers with TestUtils with Bef
     ex.getMessage should include("at most once")
   }
 
+  //
+
+  it should "extract field name from a `_.field` lambda in `.added`" in {
+    val ev: Evolved[Foo] = Evolution.of[Foo].version(2).added(_.addedAtV2)
+    ev.fieldDeltas should contain only FieldDelta.Add("addedAtV2", since = 2)
+  }
+
+  it should "extract current field name in `.renamed`" in {
+    // Scala 2 macros don't support named arguments; pass formerName positionally.
+    val ev: Evolved[Foo] = Evolution.of[Foo].version(2).renamed("oldName", _.name)
+    ev.fieldDeltas should contain only FieldDelta.Rename("oldName", "name", since = 2)
+  }
+
+  it should "extract current field name in `.transformed`" in {
+    val ev: Evolved[Foo] = Evolution.of[Foo].version(2).transformed(_.count, (i: Int) => i.toString)
+    ev.fieldDeltas should have size 1
+    ev.fieldDeltas.head match {
+      case t: FieldDelta.Transform[_, _] =>
+        t.fieldName shouldBe "count"
+        t.since shouldBe 2
+      case other => fail(s"expected Transform, got $other")
+    }
+  }
+
   // -- Integration: DSL recognised by TypeInformationDerivation via implicit summoning -----------
 
   it should "drive the runtime Evolution registry from an implicit Evolved[T]" in {
