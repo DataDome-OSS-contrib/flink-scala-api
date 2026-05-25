@@ -9,8 +9,11 @@ import org.apache.flinkx.api.evolution.{EvolutionBuilder, Evolutions}
   * `TypeInformationDerivation`.
   *
   * Field-level deltas in [[Evolved.fieldDeltas]] are translated into `FieldEvolution` entries. For [[FieldDelta.Add]],
-  * the default value is supplied by the caller via `defaultFor`, since defaults are only available through Magnolia at
-  * derivation time.
+  * the default value comes from one of two sources:
+  *   1. the macro-captured default carried by [[FieldDelta.Add.default]] when the user used the typed-accessor
+  *      `.added(_.field)` overload (already validated at compile time);
+  *   2. `defaultFor(name)` as a runtime fallback for the string-based `.added("field")` overload, which can't be
+  *      statically checked.
   */
 @Internal
 object EvolvedMerger {
@@ -24,8 +27,9 @@ object EvolvedMerger {
     * @param currentClass
     *   The current ADT class (used as context for class-name resolution)
     * @param defaultFor
-    *   Lookup function from field name to Magnolia-supplied default value, used to materialize [[FieldDelta.Add]]
-    *   entries. Should return `None` if the field has no default.
+    *   Runtime fallback lookup from field name to Magnolia-supplied default value. Used only when a
+    *   [[FieldDelta.Add]] has no macro-captured default (string-based API path). Should return `None` if the field
+    *   has no default.
     */
   def merge[T](
       evolved: Evolved[T],
@@ -34,8 +38,8 @@ object EvolvedMerger {
       defaultFor: String => Option[Any]
   ): Unit = {
     evolved.fieldDeltas.foreach {
-      case FieldDelta.Add(fieldName, since) =>
-        builder.fieldEvolutions += Add(since, currentClass, fieldName, defaultFor(fieldName))
+      case FieldDelta.Add(fieldName, since, dslDefault) =>
+        builder.fieldEvolutions += Add(since, currentClass, fieldName, dslDefault.orElse(defaultFor(fieldName)))
       case FieldDelta.Rename(formerName, currentName, since) =>
         builder.fieldEvolutions += Rename(since, currentClass, formerName, currentName)
       case t: FieldDelta.Transform[a, b] =>

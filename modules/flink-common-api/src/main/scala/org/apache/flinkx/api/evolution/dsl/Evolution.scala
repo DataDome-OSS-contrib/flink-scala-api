@@ -87,11 +87,14 @@ final class EvolutionDslAt[T] private[dsl] (
 
   // -- Field-level operations (case class) --------------------------------------------------------
 
-  /** Record that `fieldName` was added in this version section. The current field must have a default value, otherwise
-    * derivation will throw `AddedFieldWithoutDefaultException`.
+  /** Record that `fieldName` was added in this version section.
+    *
+    * If `default` is `None`, the current field must have a default value (sourced from Magnolia at derivation time);
+    * otherwise derivation will throw `AddedFieldWithoutDefaultException`. The typed-accessor `.added(_.field)` macro
+    * supplies `default` directly, which lets it catch the missing-default case at compile time.
     */
-  def added(fieldName: String): EvolutionDslAt[T] =
-    copyWith(evolved.copy(fieldDeltas = evolved.fieldDeltas :+ FieldDelta.Add(fieldName, sectionSince)))
+  def added(fieldName: String, default: Option[Any] = None): EvolutionDslAt[T] =
+    copyWith(evolved.copy(fieldDeltas = evolved.fieldDeltas :+ FieldDelta.Add(fieldName, sectionSince, default)))
 
   /** Record that the field was renamed from `formerName` to `currentName` in this version section. */
   def renamed(formerName: String, currentName: String): EvolutionDslAt[T] =

@@ -68,11 +68,15 @@ sealed trait FieldDelta {
 
 object FieldDelta {
 
-  /** Field added in version `since`. The default value is sourced from Magnolia at derivation time; it is an error if
-    * the current field has no default.
+  /** Field added in version `since`.
+    *
+    * `default` is populated by the typed-accessor macro (`.added(_.field)`) — it captures the case class's
+    * synthetic default-method at compile time, so the absence of a default value becomes a compile error. For the
+    * string-based API (`.added("field")`), `default` is `None` and the merger falls back to Magnolia's
+    * `Param.default` at derivation time (failing at runtime if the field has no default).
     */
   @Internal
-  final case class Add(fieldName: String, override val since: Int) extends FieldDelta
+  final case class Add(fieldName: String, override val since: Int, default: Option[Any] = None) extends FieldDelta
 
   /** Field renamed from `formerName` to `currentName` in version `since`. */
   @Internal

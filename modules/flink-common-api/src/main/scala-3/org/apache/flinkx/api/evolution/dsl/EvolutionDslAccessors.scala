@@ -14,9 +14,11 @@ package org.apache.flinkx.api.evolution.dsl
 trait EvolutionDslAccessors[T]:
   self: EvolutionDslAt[T] =>
 
-  /** Typed-accessor equivalent of `.added(name: String)`. */
+  /** Typed-accessor equivalent of `.added(name: String)`. Unlike the string variant, this macro statically verifies
+    * the case class field has a default value and captures it into the resulting `FieldDelta.Add`, replacing the
+    * runtime check otherwise performed at derivation time. */
   inline def added[A](inline accessor: T => A): EvolutionDslAt[T] =
-    self.added(DslMacros.fieldName[T, A](accessor))
+    DslMacros.addedCall[T, A](self, accessor)
 
   /** Typed-accessor equivalent of `.renamed(formerName, currentName)`. */
   inline def renamed[A](formerName: String, inline accessor: T => A): EvolutionDslAt[T] =

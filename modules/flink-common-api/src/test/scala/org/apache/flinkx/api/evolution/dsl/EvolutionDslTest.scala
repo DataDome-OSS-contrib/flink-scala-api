@@ -77,17 +77,30 @@ class EvolutionDslTest extends AnyFlatSpec with Matchers with TestUtils with Bef
     ex.getMessage should include("at most once")
   }
 
-  //
+  // -- Test accessors macros
 
-  it should "extract field name from a `_.field` lambda in `.added`" in {
+  it should "extract field name and capture the default value from a `_.field` lambda in `.added`" in {
     val ev: Evolved[Foo] = Evolution.of[Foo].version(2).added(_.addedAtV2)
-    ev.fieldDeltas should contain only FieldDelta.Add("addedAtV2", since = 2)
+    // The macro captures `Foo.apply$default$2` (= 0) so the runtime check at derivation time is unnecessary.
+    ev.fieldDeltas should contain only FieldDelta.Add("addedAtV2", since = 2, default = Some(0))
+  }
+
+  it should "reject added non-existent field at compile time" in {
+    "Evolution.of[Foo].version(1).added(_.doesNotExist)" shouldNot compile
+  }
+
+  it should "reject `.added(_.field)` at compile time when the field has no default value" in {
+    "Evolution.of[Foo].version(2).added(_.name)" shouldNot compile
   }
 
   it should "extract current field name in `.renamed`" in {
     // Scala 2 macros don't support named arguments; pass formerName positionally.
     val ev: Evolved[Foo] = Evolution.of[Foo].version(2).renamed("oldName", _.name)
     ev.fieldDeltas should contain only FieldDelta.Rename("oldName", "name", since = 2)
+  }
+
+  it should "reject renamed non-existent field at compile time" in {
+    "Evolution.of[Foo].version(1).renamed(\"oldName\", _.doesNotExist)" shouldNot compile
   }
 
   it should "extract current field name in `.transformed`" in {
@@ -99,6 +112,10 @@ class EvolutionDslTest extends AnyFlatSpec with Matchers with TestUtils with Bef
         t.since shouldBe 2
       case other => fail(s"expected Transform, got $other")
     }
+  }
+
+  it should "reject transformed non-existent field at compile time" in {
+    "Evolution.of[Foo].version(1).transformed(_.doesNotExist, (i: Int) => i.toString)" shouldNot compile
   }
 
   // -- Integration: DSL recognised by TypeInformationDerivation via implicit summoning -----------
