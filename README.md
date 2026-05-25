@@ -590,6 +590,10 @@ object Animal {
 }
 ```
 
+##### Outdated former evolution
+
+It may arrive former evolutions get overwritten by newer evolutions. The rule of thumb is to describe how to restore a current state from that old checkpoint version.
+
 ### Compatibility
 
 This project uses a separate set of serializers for collections, instead of Flink's own TraversableSerializer. So probably you
