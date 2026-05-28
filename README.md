@@ -592,7 +592,35 @@ object Animal {
 
 ##### Outdated former evolution
 
-It may arrive former evolutions get overwritten by newer evolutions. The rule of thumb is to describe how to restore a current state from that old checkpoint version.
+It may arrive former evolutions get overwritten by newer evolutions. The rule of thumb is to describe how to restore a current state from these former checkpoints versions.
+
+**Rename then delete a field:**
+
+Given this version 0:
+```scala
+case class Dog(name: String, kind: String)
+```
+And this version 1:
+```scala mdoc:reset-object
+import org.apache.flinkx.api._
+
+@version(1)
+case class Dog(
+  name: String,
+  @renamed(since = 1, "kind") breed: String
+)
+```
+If you want to delete `breed` field but still be able to restore from v0 and v1 checkpoints:
+```scala mdoc:reset-object
+import org.apache.flinkx.api._
+
+@version(2)
+@deletedFields(since = 1, "kind")
+@deletedFields(since = 2, "breed")
+case class Dog(name: String)
+```
+
+**Delete then recreate a class:**
 
 ### Compatibility
 
