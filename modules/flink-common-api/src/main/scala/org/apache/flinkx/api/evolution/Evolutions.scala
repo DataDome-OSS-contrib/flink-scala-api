@@ -2,6 +2,7 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.{Internal, VisibleForTesting}
 import org.apache.flinkx.api.evolution.Evolution.DeletedClass
+import org.apache.flinkx.api.evolution.dsl.Evolved
 import org.apache.flinkx.api.util.ClassUtil
 import org.apache.flinkx.api.version
 
@@ -110,11 +111,12 @@ object Evolutions {
       )
       .asInstanceOf[Class[T]]
 
-  private[api] def findVersionInAnnotations[A](currentClass: Class[_], annotations: Seq[Any]): Int = annotations
+  private[api] def findVersion[A](currentClass: Class[_], annotations: Seq[Any], evolved: Option[Evolved[_]]): Int = annotations
     .collectFirst {
       case version(c) if c >= 0 => c
       case version(c)           => throw VersionNotAllowedException(currentClass, c)
     }
+    .orElse(evolved.map(_.currentVersion))
     .getOrElse(0)
 
   @VisibleForTesting

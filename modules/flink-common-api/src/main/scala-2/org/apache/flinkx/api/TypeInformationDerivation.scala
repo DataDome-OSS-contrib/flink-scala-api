@@ -6,6 +6,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
+import org.apache.flinkx.api.evolution.dsl.{EvolvedMerger, OptionalEvolved}
 import org.apache.flinkx.api.evolution.{EvolutionBuilder, EvolutionNotAllowedException, Evolutions}
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer, nullable}
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation, MarkerTypeInfo}
@@ -23,7 +24,7 @@ private[api] trait TypeInformationDerivation {
 
   protected val cache: mutable.Map[String, TypeInformation[_]] = mutable.Map.empty
 
-  def join[T <: Product: ClassTag: TypeTag](
+  def join[T <: Product: ClassTag: TypeTag: OptionalEvolved](
       ctx: CaseClass[TypeInformation, T]
   ): TypeInformation[T] = {
     val cacheKey = typeName[T]
@@ -34,7 +35,8 @@ private[api] trait TypeInformationDerivation {
       case None         =>
         cache.put(cacheKey, MarkerTypeInfo)
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
-        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        val evolvedDsl = implicitly[OptionalEvolved[T]].value
+        val version    = Evolutions.findVersion(clazz, ctx.annotations, evolvedDsl)
         val fieldNames = ctx.parameters.map(_.label).toArray
         val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
           new ScalaCaseObjectSerializer[T](clazz)
@@ -89,6 +91,10 @@ private[api] trait TypeInformationDerivation {
               case _                    => // Ignore other annotations
             }
           }
+          // Merge DSL-supplied evolutions (defaults sourced from Magnolia's `Param.default`).
+          evolvedDsl.foreach { ev =>
+            EvolvedMerger.merge[T](ev, builder, clazz, name => ctx.parameters.find(_.label == name).flatMap(_.default))
+          }
         }
         Evolutions.register(builder)
 
@@ -103,13 +109,14 @@ private[api] trait TypeInformationDerivation {
     }
   }
 
-  def split[T: ClassTag: TypeTag](ctx: SealedTrait[TypeInformation, T]): TypeInformation[T] = {
+  def split[T: ClassTag: TypeTag: OptionalEvolved](ctx: SealedTrait[TypeInformation, T]): TypeInformation[T] = {
     val cacheKey = typeName[T]
     cache.get(cacheKey) match {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version        = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        val evolvedDsl     = implicitly[OptionalEvolved[T]].value
+        val version        = Evolutions.findVersion(clazz, ctx.annotations, evolvedDsl)
         val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
         val serializer     = new CoproductSerializer[T](
           clazz = clazz,
@@ -153,6 +160,8 @@ private[api] trait TypeInformationDerivation {
               case _          => // Ignore other annotations
             }
           }
+          // Merge DSL-supplied evolutions for the sealed trait
+          evolvedDsl.foreach { ev => EvolvedMerger.merge[T](ev, builder, clazz, _ => None) }
           Evolutions.register(builder)
         }
 
