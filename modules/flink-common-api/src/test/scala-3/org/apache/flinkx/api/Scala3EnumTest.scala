@@ -72,13 +72,13 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     val derived = createSerializer[ValueRemovedWithoutAnnotation]
       .asInstanceOf[Scala3EnumSerializer[ValueRemovedWithoutAnnotation & Product]]
     val formerSerializer = new Scala3EnumSerializer(
-      clazz = derived.clazz,
+      evolution = derived.evolution,
       version = 0,
       enumValueNames = derived.enumValueNames,
       enumValueSerializers = derived.enumValueSerializers
     )
     val currentSerializer = new Scala3EnumSerializer(
-      clazz = derived.clazz,
+      evolution = derived.evolution,
       version = 1,
       enumValueNames = derived.enumValueNames.dropRight(1),
       enumValueSerializers = derived.enumValueSerializers.dropRight(1)
@@ -94,7 +94,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
   it should "resolve the schema compatibility of an enum restored by an outdated source code as incompatible" in {
     val derived          = createSerializer[RolledBackEnum].asInstanceOf[Scala3EnumSerializer[RolledBackEnum & Product]]
     val formerSerializer = new Scala3EnumSerializer(
-      clazz = derived.clazz,
+      evolution = derived.evolution,
       version = derived.version + 1,
       enumValueNames = derived.enumValueNames.dropRight(1),
       enumValueSerializers = derived.enumValueSerializers.dropRight(1)

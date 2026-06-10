@@ -32,22 +32,6 @@ private[api] trait TypeInformationDerivation {
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
         val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val fieldNames = ctx.parameters.map(_.label).toArray
-        val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
-          new ScalaCaseObjectSerializer[T](clazz)
-        } else {
-          new CaseClassSerializer[T](
-            clazz = clazz,
-            isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
-            version = version,
-            fieldNames = fieldNames,
-            paramSerializers = ctx.parameters.map { p =>
-              val ser = p.typeclass.createSerializer(config)
-              if (p.annotations.exists(_.isInstanceOf[nullable])) {
-                NullableSerializer.wrapIfNullIsNotSupported(ser, true)
-              } else ser
-            }.toArray
-          )
-        }
 
         val builder = new EvolutionBuilder(clazz, version, fieldNames) // Field names required even with version 0
         if (version == 0) {
@@ -66,10 +50,10 @@ private[api] trait TypeInformationDerivation {
         } else { // version > 0
           // Iterate over case class annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)
+            case r: renamed        => builder.registerFormerClass(r.formerName, clazz, r.since)
             case d: deletedFields  => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
             case d: deletedClasses =>
-              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
+              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                     => // Ignore other annotations
@@ -87,6 +71,24 @@ private[api] trait TypeInformationDerivation {
           }
         }
         Evolutions.register(builder)
+        val evolution = Evolutions.get(clazz, version)
+
+        val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
+          new ScalaCaseObjectSerializer[T](evolution, version)
+        } else {
+          new CaseClassSerializer[T](
+            evolution = evolution,
+            version = version,
+            isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
+            fieldNames = fieldNames,
+            paramSerializers = ctx.parameters.map { p =>
+              val ser = p.typeclass.createSerializer(config)
+              if (p.annotations.exists(_.isInstanceOf[nullable])) {
+                NullableSerializer.wrapIfNullIsNotSupported(ser, true)
+              } else ser
+            }.toArray
+          )
+        }
 
         val ti = new CaseClassTypeInfo[T](
           clazz = clazz,
@@ -107,13 +109,6 @@ private[api] trait TypeInformationDerivation {
         val version        = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
         val subtypeFqns    = subtypeClasses.map(_.getName)
-        val serializer     = new CoproductSerializer[T](
-          clazz = clazz,
-          version = version,
-          subtypeClasses = subtypeClasses,
-          subtypeFqns = subtypeFqns,
-          subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
-        )
 
         if (version == 0) {
           // Do not allow Evolution annotations on version 0
@@ -131,9 +126,9 @@ private[api] trait TypeInformationDerivation {
           val builder = new EvolutionBuilder(clazz, version, subtypeFqns)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.foreach {
-            case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)
+            case r: renamed        => builder.registerFormerClass(r.formerName, clazz, r.since)
             case d: deletedClasses =>
-              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.throwOnInstance))
+              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                     => // Ignore other annotations
@@ -141,7 +136,7 @@ private[api] trait TypeInformationDerivation {
           // Iterate over subtypes annotations to register evolutions from current source code
           ctx.subtypes.foreach { p =>
             p.annotations.collect {
-              case r: renamed => Evolutions.registerFormerClass(r.formerName, p.typeclass.getTypeClass)
+              case _: renamed if p.annotations.exists(_.isInstanceOf[version])        => // registered by join()
               case _: deletedFields if p.annotations.exists(_.isInstanceOf[version])  => // allowed on versioned subtype
               case _: deletedClasses if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
               case _: postDeserialize[T] if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
@@ -151,6 +146,15 @@ private[api] trait TypeInformationDerivation {
           }
           Evolutions.register(builder)
         }
+        val evolution = Evolutions.get(clazz, version)
+
+        val serializer = new CoproductSerializer[T](
+          evolution = evolution,
+          version = version,
+          subtypeClasses = subtypeClasses,
+          subtypeFqns = subtypeFqns,
+          subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
+        )
 
         val ti = new CoproductTypeInformation[T](clazz, serializer)
         cache.putIfAbsent(cacheKey, ti).getOrElse(ti).asInstanceOf[TypeInformation[T]]

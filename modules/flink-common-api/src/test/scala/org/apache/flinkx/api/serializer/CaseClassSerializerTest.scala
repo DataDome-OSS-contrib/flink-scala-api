@@ -3,6 +3,7 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flink.api.java.typeutils.runtime.RowSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
+import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.serializer.CaseClassSerializerTest.{Immutable, Mutable, OuterImmutable, OuterMutable}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -10,36 +11,61 @@ import org.scalatest.matchers.should.Matchers
 class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
 
   "isImmutableType" should "be true when parameters are immutable" in {
-    val serializer =
-      new CaseClassSerializer[Immutable](classOf[Immutable], true, 0, Array.empty, Array(StringSerializer.INSTANCE))
+    val serializer = new CaseClassSerializer[Immutable](
+      Evolutions.get(classOf[Immutable], 0),
+      0,
+      true,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
     serializer.isImmutableType should be(true)
   }
 
   it should "be false when one parameter is mutable" in {
-    val serializer =
-      new CaseClassSerializer[Mutable](classOf[Mutable], false, 0, Array.empty, Array(StringSerializer.INSTANCE))
+    val serializer = new CaseClassSerializer[Mutable](
+      Evolutions.get(classOf[Mutable], 0),
+      0,
+      false,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
     serializer.isImmutableType should be(false)
   }
 
   it should "be false when the content of one parameter is mutable" in {
-    val mutableSerializer =
-      new CaseClassSerializer[Mutable](classOf[Mutable], false, 0, Array.empty, Array(StringSerializer.INSTANCE))
-    val serializer =
-      new CaseClassSerializer[OuterImmutable](classOf[OuterImmutable], true, 0, Array.empty, Array(mutableSerializer))
+    val mutableSerializer = new CaseClassSerializer[Mutable](
+      Evolutions.get(classOf[Mutable], 0),
+      0,
+      false,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
+    val serializer = new CaseClassSerializer[OuterImmutable](
+      Evolutions.get(classOf[OuterImmutable], 0),
+      0,
+      true,
+      Array.empty,
+      Array(mutableSerializer)
+    )
     serializer.isImmutableType should be(false)
   }
 
   "isImmutableSerializer" should "be true when sub-serializers are immutable" in {
-    val serializer =
-      new CaseClassSerializer[Immutable](classOf[Immutable], true, 0, Array.empty, Array(StringSerializer.INSTANCE))
+    val serializer = new CaseClassSerializer[Immutable](
+      Evolutions.get(classOf[Immutable], 0),
+      0,
+      true,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
     serializer.isImmutableSerializer should be(true)
   }
 
   it should "be false when one sub-serializer is mutable" in {
     val serializer = new CaseClassSerializer[Immutable](
-      classOf[Immutable],
-      true,
+      Evolutions.get(classOf[Immutable], 0),
       0,
+      true,
       Array.empty,
       Array(new RowSerializer(Array.empty))
     )
@@ -48,7 +74,13 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
 
   "copy" should "return the same case class when immutable" in {
     val immutableSerializer =
-      new CaseClassSerializer[Immutable](classOf[Immutable], true, 0, Array.empty, Array(StringSerializer.INSTANCE))
+      new CaseClassSerializer[Immutable](
+        Evolutions.get(classOf[Immutable], 0),
+        0,
+        true,
+        Array.empty,
+        Array(StringSerializer.INSTANCE)
+      )
     val expectedData = Immutable("a")
 
     val resultData = immutableSerializer.copy(expectedData)
@@ -58,7 +90,13 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
 
   it should "return null when the given case class is null" in {
     val immutableSerializer =
-      new CaseClassSerializer[Immutable](classOf[Immutable], true, 0, Array.empty, Array(StringSerializer.INSTANCE))
+      new CaseClassSerializer[Immutable](
+        Evolutions.get(classOf[Immutable], 0),
+        0,
+        true,
+        Array.empty,
+        Array(StringSerializer.INSTANCE)
+      )
 
     val resultData = immutableSerializer.copy(null)
 
@@ -66,8 +104,13 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
   }
 
   it should "copy the case class when mutable" in {
-    val mutableSerializer =
-      new CaseClassSerializer[Mutable](classOf[Mutable], false, 0, Array.empty, Array(StringSerializer.INSTANCE))
+    val mutableSerializer = new CaseClassSerializer[Mutable](
+      Evolutions.get(classOf[Mutable], 0),
+      0,
+      false,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
     val expectedData = Mutable("a")
 
     val resultData = mutableSerializer.copy(expectedData)
@@ -77,10 +120,21 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
   }
 
   it should "copy the case class and its content when the content of one parameter is mutable" in {
-    val mutableSerializer =
-      new CaseClassSerializer[Mutable](classOf[Mutable], false, 0, Array.empty, Array(StringSerializer.INSTANCE))
+    val mutableSerializer = new CaseClassSerializer[Mutable](
+      Evolutions.get(classOf[Mutable], 0),
+      0,
+      false,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
     val outerImmutableSerializer =
-      new CaseClassSerializer[OuterImmutable](classOf[OuterImmutable], true, 0, Array.empty, Array(mutableSerializer))
+      new CaseClassSerializer[OuterImmutable](
+        Evolutions.get(classOf[OuterImmutable], 0),
+        0,
+        true,
+        Array.empty,
+        Array(mutableSerializer)
+      )
     val expectedData = OuterImmutable(Mutable("a"))
 
     val resultData = outerImmutableSerializer.copy(expectedData)
@@ -92,9 +146,21 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
 
   it should "copy the case class when mutable but not its immutable content" in {
     val immutableSerializer =
-      new CaseClassSerializer[Immutable](classOf[Immutable], true, 0, Array.empty, Array(StringSerializer.INSTANCE))
+      new CaseClassSerializer[Immutable](
+        Evolutions.get(classOf[Immutable], 0),
+        0,
+        true,
+        Array.empty,
+        Array(StringSerializer.INSTANCE)
+      )
     val outerMutableSerializer =
-      new CaseClassSerializer[OuterMutable](classOf[OuterMutable], false, 0, Array.empty, Array(immutableSerializer))
+      new CaseClassSerializer[OuterMutable](
+        Evolutions.get(classOf[OuterMutable], 0),
+        0,
+        false,
+        Array.empty,
+        Array(immutableSerializer)
+      )
     val expectedData = OuterMutable(Immutable("a"))
 
     val resultData = outerMutableSerializer.copy(expectedData)
@@ -105,10 +171,20 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
   }
 
   it should "copy the serialized stream" in {
-    val serializer =
-      new CaseClassSerializer[Immutable](classOf[Immutable], true, 0, Array.empty, Array(StringSerializer.INSTANCE))
-    val outerSerializer =
-      new CaseClassSerializer[OuterMutable](classOf[OuterMutable], true, 0, Array.empty, Array(serializer))
+    val serializer = new CaseClassSerializer[Immutable](
+      Evolutions.get(classOf[Immutable], 0),
+      0,
+      true,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
+    val outerSerializer = new CaseClassSerializer[OuterMutable](
+      Evolutions.get(classOf[OuterMutable], 0),
+      0,
+      true,
+      Array.empty,
+      Array(serializer)
+    )
     val expectedData = OuterMutable(Immutable("a"))
 
     val output = new DataOutputSerializer(1024)
@@ -123,14 +199,24 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
   }
 
   "duplicate" should "return itself when the serializer is immutable" in {
-    val serializer =
-      new CaseClassSerializer[Mutable](classOf[Mutable], false, 0, Array.empty, Array(StringSerializer.INSTANCE))
+    val serializer = new CaseClassSerializer[Mutable](
+      Evolutions.get(classOf[Mutable], 0),
+      0,
+      false,
+      Array.empty,
+      Array(StringSerializer.INSTANCE)
+    )
     serializer.duplicate() should be theSameInstanceAs serializer
   }
 
   it should "return a new instance of itself when the serializer is mutable" in {
-    val serializer =
-      new CaseClassSerializer[Mutable](classOf[Mutable], false, 0, Array.empty, Array(new RowSerializer(Array.empty)))
+    val serializer = new CaseClassSerializer[Mutable](
+      Evolutions.get(classOf[Mutable], 0),
+      0,
+      false,
+      Array.empty,
+      Array(new RowSerializer(Array.empty))
+    )
     val duplicatedSerializer = serializer.duplicate()
     duplicatedSerializer shouldNot be theSameInstanceAs serializer
     duplicatedSerializer should be(serializer)

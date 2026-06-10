@@ -34,7 +34,7 @@ class CollectionSerializerSnapshot[F[_], T, S <: TypeSerializer[F[T]]](
 
   override def readSnapshot(readVersion: Int, in: DataInputView, userCodeClassLoader: ClassLoader): Unit = {
     clazz = InstantiationUtil.resolveClassByName[S](in, userCodeClassLoader)
-    vclazz = Evolutions.resolveFormerClass(in.readUTF(), userCodeClassLoader)
+    vclazz = Evolutions.get(in.readUTF(), 0, userCodeClassLoader).currentClass
     nestedSerializer = TypeSerializerSnapshot.readVersionedSnapshot[T](in, userCodeClassLoader).restoreSerializer()
   }
 

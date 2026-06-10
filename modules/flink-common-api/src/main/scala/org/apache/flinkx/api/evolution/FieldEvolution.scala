@@ -3,6 +3,7 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.annotation.Internal
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.FieldEvolution.{FieldIndex, Phase}
+import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable
 
@@ -20,6 +21,8 @@ import scala.collection.mutable
   */
 @Internal
 abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] {
+
+  private[FieldEvolution] lazy val logger: Logger = LoggerFactory.getLogger(this.getClass)
 
   /** Mutate field-name to field-value map in place to apply this evolution step.
     *
@@ -59,8 +62,8 @@ object FieldEvolution {
 
   /** Remove a field from the field map. Backs the `@deletedFields` annotation.
     *
-    * @throws FieldNotFoundException
-    *   if `formerName` is not present in the field map.
+    * A field already absent is ignored rather than reported: restoring the oldest versions replays every deletion, so a
+    * field renamed then deleted is legitimately named by a deletion that no longer finds it.
     */
   @Internal
   final case class Delete(
