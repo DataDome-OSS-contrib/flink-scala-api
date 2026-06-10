@@ -4,6 +4,7 @@ import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnap
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.serializer.CoproductSerializerSnapshotTest.{ADT, Bar, Foo}
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.evolution.Evolutions
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -20,7 +21,7 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
       new CoproductSerializer.CoproductSerializerSnapshot(
         Some(
           new CoproductSerializer[ADT](
-            classOf[ADT],
+            Evolutions.get(classOf[ADT], 0),
             0,
             subtypeClasses,
             subtypeClasses.map(_.getName),
@@ -69,7 +70,7 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val newSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT](
       Some(
         new CoproductSerializer[ADT](
-          classOf[ADT],
+          Evolutions.get(classOf[ADT], 0),
           0,
           subtypeClasses,
           subtypeClasses.map(_.getName),

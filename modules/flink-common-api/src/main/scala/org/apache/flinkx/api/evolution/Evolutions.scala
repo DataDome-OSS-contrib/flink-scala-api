@@ -23,39 +23,91 @@ import scala.collection.concurrent
   *     [[register]] an immutable [[Evolution]] for that ADT class.
   *   - At deserialization time, the ADT serializers [[get]] the evolutions and apply them in correct order.
   *
-  * Class renames and deletions are resolved through [[registerFormerClass]] / [[registerDeletedFormerClass]] /
-  * [[resolveFormerClass]], which translate the fully-qualified class names recorded in the snapshot into the current
-  * classes (or a deletion marker).
+  * Class renames and deletions are resolved through [[EvolutionBuilder.registerFormerClass]] /
+  * [[registerDeletedFormerClass]], which translate the fully-qualified class names recorded in the snapshot into the
+  * current classes (or a deletion marker).
   *
-  * Concurrency: registration runs at startup during derivation (single-threaded per ADT); [[get]] and
-  * [[resolveFormerClass]] are safe to call concurrently from multiple Flink tasks afterward.
+  * Concurrency: registration runs at startup during derivation (single-threaded per ADT); [[get]] is safe to call
+  * concurrently from multiple Flink tasks afterward.
   */
 @Internal
 object Evolutions {
 
-  private val initEvolutions: Seq[(Class[_], Evolution[_])] = Seq((DeletedClass, Evolution.DeletedClassEvolution))
+  private val currentClassToEvolutions: concurrent.Map[String, Array[Evolution[_]]] = concurrent.TrieMap.empty
 
-  private val currentClassToEvolutions: concurrent.Map[Class[_], Evolution[_]] = concurrent.TrieMap(initEvolutions: _*)
-  private val formerClassNameToCurrentClass: concurrent.Map[String, Class[_]]  = concurrent.TrieMap.empty
-  private val deletedFormerClassThrowOnInstance: concurrent.Map[String, Unit]  = concurrent.TrieMap.empty
-
-  /** Build the [[Evolution]] from the given builder and register it for the deserialization phase. */
+  /** Build the [[Evolution]]s from the given builder and register them for the deserialization phase. */
   def register[T](builder: EvolutionBuilder[T]): Unit =
-    currentClassToEvolutions.put(builder.currentClass, builder.build())
+    builder.build().foreachEntry { (className, evolutions) =>
+      currentClassToEvolutions.updateWith(className) {
+        case Some(registered) => Some(declare(className, registered ++ evolutions))
+        case _                => Some(declare(className, evolutions.asInstanceOf[Array[Evolution[_]]]))
+      }
+    }
 
-  /** Return the [[Evolution]] associated with the given ADT class, or [[Evolution.NoEvolution]] otherwise. */
-  def get[T](clazz: Class[T]): Evolution[T] =
-    currentClassToEvolutions.getOrElse(clazz, Evolution.NoEvolution).asInstanceOf[Evolution[T]]
-
-  /** Register the mapping between a former ADT class name and the current ADT class.
+  /** Sort the evolutions of a class name, and reject a name claimed by two different ADTs.
     *
-    * @param formerClassName
-    *   Name of the former ADT class as declared when the data was serialized (simple, relative or absolute)
-    * @param currentClass
-    *   Current ADT class, used as reference to resolve `formerClassName` to its fully-qualified internal form
+    * A name legitimately gets several evolutions, one per version boundary, but at a given former version it must
+    * resolve to a single current class.
+    *
+    * @throws FormerClassConflictException
+    *   if two evolutions declared for the same version resolve to different current classes
     */
-  def registerFormerClass(formerClassName: String, currentClass: Class[_]): Unit =
-    declareFormerClass(ClassUtil.resolveFormerClassName(formerClassName, currentClass), currentClass)
+  private def declare(className: String, evolutions: Array[Evolution[_]]): Array[Evolution[_]] = {
+    evolutions
+      .groupBy(_.version)
+      .collectFirst { case (_, sameVersion) if sameVersion.map(_.currentClass).distinct.length > 1 => sameVersion }
+      .foreach { conflicting =>
+        val classes = conflicting.map(_.currentClass).distinct
+        throw FormerClassConflictException(className, describeDeclaration(classes(0)), describeDeclaration(classes(1)))
+      }
+    evolutions.sorted
+  }
+
+  private def describeDeclaration(currentClass: Class[_]): String =
+    if (isDeletedClass(currentClass)) "deleted" else s"renamed to $currentClass"
+
+  /** `true` if the given current class is the marker of a former class registered as deleted. */
+  def isDeletedClass(currentClass: Class[_]): Boolean = currentClass == DeletedClass
+
+  /** Return the [[Evolution]] declared for the given former ADT member name at the given former version, if any.
+    *
+    * Unlike others [[get]], never loads any class, so it also answers for the names that designate no class at all: the
+    * `<enum binary name>#<value name>` of a Scala 3 enum value, in particular. Returning `None` means nothing was
+    * declared for that name, not that the member is unknown.
+    *
+    * @param formerName
+    *   Former fully qualified class name, or `<enum binary name>#<value name>` for a Scala 3 enum value
+    * @param formerVersion
+    *   Former schema version of the ADT declaring that member
+    */
+  def get[T](formerName: String, formerVersion: Int): Option[Evolution[T]] =
+    currentClassToEvolutions
+      .get(formerName)
+      .flatMap(_.find(_.version >= formerVersion))
+      .map(_.asInstanceOf[Evolution[T]])
+
+  /** Return the [[Evolution]] associated with the given ADT class, or [[Evolution.noEvolution]] otherwise. */
+  def get[T](clazz: Class[T], formerVersion: Int): Evolution[T] =
+    get[T](clazz.getName, formerVersion).getOrElse(Evolution.noEvolution(clazz, formerVersion))
+
+  /** Return the [[Evolution]] associated with the given former ADT class name, or [[Evolution.noEvolution]] of the
+    * class loaded by name otherwise.
+    *
+    * @throws IOException
+    *   if no evolution is declared for that name, and it can't be loaded either
+    */
+  def get[T](formerClassName: String, formerVersion: Int, cl: ClassLoader): Evolution[T] =
+    if (formerClassName == null) Evolution.NoEvolution.asInstanceOf[Evolution[T]] // Snapshot written before 2.4.0
+    else
+      get[T](formerClassName, formerVersion).getOrElse {
+        val currentClass =
+          try Class.forName(formerClassName, false, cl).asInstanceOf[Class[T]]
+          catch { // Same behavior as org.apache.flink.util.InstantiationUtil.resolveClassByName
+            case e: ClassNotFoundException =>
+              throw new IOException(s"Could not find class '$formerClassName' in classpath.", e)
+          }
+        Evolution.noEvolution(currentClass, formerVersion)
+      }
 
   /** Register that a former ADT subtype or field type has been deleted from the current source code.
     *
@@ -65,73 +117,22 @@ object Evolutions {
     *   Current ADT class, used as reference to resolve `formerClassName` to its fully-qualified internal form
     * @param throwOnInstance
     *   If `true`, encountering an instance of this former class during deserialization throws via
-    *   [[checkThrowOnInstance]]. If `false`, the instance is deserialized as `null`.
+    *   [[Evolution.returnNullOrThrow]]. If `false`, the instance is deserialized as `null`.
     */
-  def registerDeletedFormerClass(formerClassName: String, currentClass: Class[_], throwOnInstance: Boolean): Unit = {
+  def registerDeletedFormerClass(
+      formerClassName: String,
+      currentClass: Class[_],
+      formerVersion: Int,
+      throwOnInstance: Boolean
+  ): Unit = {
     val formerFqn = ClassUtil.resolveFormerClassName(formerClassName, currentClass)
-    declareFormerClass(formerFqn, DeletedClass)
-    if (throwOnInstance) deletedFormerClassThrowOnInstance(formerFqn) = ()
+    // A class deleted in version N still exists in the data written in version N - 1
+    val deletedEvolution = new Evolution(formerFqn, formerVersion - 1, DeletedClass, throwOnInstance = throwOnInstance)
+    currentClassToEvolutions.updateWith(formerFqn) {
+      case Some(registered) => Some(declare(formerFqn, registered.appended(deletedEvolution)))
+      case _                => Some(Array(deletedEvolution))
+    }
   }
-
-  /** Declare which current class a former class name resolves to, and reject a name claimed by two different ADTs.
-    *
-    * @throws FormerClassConflictException
-    *   if `formerFqn` is already declared to resolve to another class
-    */
-  private def declareFormerClass(formerFqn: String, currentClass: Class[_]): Unit =
-    formerClassNameToCurrentClass
-      .putIfAbsent(formerFqn, currentClass)
-      .filter(_ != currentClass)
-      .map(describeDeclaration)
-      .foreach(declared => throw FormerClassConflictException(formerFqn, declared, describeDeclaration(currentClass)))
-
-  private def describeDeclaration(currentClass: Class[_]): String =
-    if (currentClass == DeletedClass) "deleted" else s"renamed to $currentClass"
-
-  /** `true` if `formerFqn` was registered as deleted via `@deletedClasses`, `false` otherwise.
-    *
-    * @param formerFqn
-    *   Fully qualified former class name, or `<enum fqn>#<value name>` for a Scala 3 enum value
-    */
-  def isDeletedFormerClass(formerFqn: String): Boolean =
-    formerClassNameToCurrentClass.get(formerFqn).contains(DeletedClass)
-
-  /** Throw a [[DeletedInstanceException]] if an instance of the deleted former class identified by `formerFqn` was
-    * registered with `throwOnInstance = true`; return instance otherwise.
-    *
-    * @param instance
-    *   The ADT instance to check
-    * @param formerFqn
-    *   Fully qualified former class name
-    */
-  def checkThrowOnInstance[T](instance: T, formerFqn: String): T =
-    if (instance == null && deletedFormerClassThrowOnInstance.contains(formerFqn))
-      throw DeletedInstanceException(formerFqn)
-    else instance
-
-  /** Resolve a fully-qualified former class name read from a checkpoint to the current class:
-    *   - Returns the class registered via [[registerFormerClass]] if it was renamed.
-    *   - Returns [[Evolution.DeletedClass]] marker if the name was registered via [[registerDeletedFormerClass]].
-    *   - Otherwise loads the class by name through the user-code class loader.
-    *
-    * @param formerFqn
-    *   Fully qualified former class name as recorded in the checkpoint
-    * @param cl
-    *   The user code class loader
-    * @throws IOException
-    *   if the class is not registered and cannot be loaded
-    */
-  def resolveFormerClass[T](formerFqn: String, cl: ClassLoader): Class[T] =
-    formerClassNameToCurrentClass
-      .getOrElse(
-        formerFqn,
-        try Class.forName(formerFqn, false, cl)
-        catch { // Same behavior as org.apache.flink.util.InstantiationUtil.resolveClassByName
-          case e: ClassNotFoundException =>
-            throw new IOException(s"Could not find class '$formerFqn' in classpath.", e)
-        }
-      )
-      .asInstanceOf[Class[T]]
 
   private[api] def findVersionInAnnotations[A](currentClass: Class[_], annotations: Seq[Any]): Int = annotations
     .collectFirst {
@@ -142,10 +143,8 @@ object Evolutions {
 
   @VisibleForTesting
   private[api] def reset(): Unit = {
+    org.apache.flinkx.api.auto.cache.clear()
     currentClassToEvolutions.clear()
-    currentClassToEvolutions.addAll(initEvolutions)
-    formerClassNameToCurrentClass.clear()
-    deletedFormerClassThrowOnInstance.clear()
   }
 
 }
