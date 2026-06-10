@@ -9,13 +9,13 @@ import org.apache.flink.api.common.typeutils.{
   TypeSerializerSnapshot
 }
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 import org.apache.flinkx.api.serializer.CoproductSerializer.CoproductSerializerSnapshot
 import org.slf4j.{Logger, LoggerFactory}
 
 class CoproductSerializer[T](
-    val clazz: Class[T],
+    val evolution: Evolution[T],
     val version: Int,
     val subtypeClasses: Array[Class[_]],
     val subtypeFqns: Array[String],
@@ -25,15 +25,12 @@ class CoproductSerializer[T](
   require(
     // The serialized form holds the index of the subtype, so the three arrays describe the same subtypes in one order
     subtypeClasses.length == subtypeSerializers.length && subtypeFqns.length == subtypeSerializers.length,
-    s"$clazz has ${subtypeClasses.length} subtype classes and ${subtypeFqns.length} subtype names for" +
+    s"${evolution.currentClass} has ${subtypeClasses.length} subtype classes and ${subtypeFqns.length} subtype names for" +
       s" ${subtypeSerializers.length} subtype serializers"
   )
 
   override val isImmutableType: Boolean = subtypeSerializers.forall(_.isImmutableType)
   val isImmutableSerializer: Boolean    = subtypeSerializers.forall(s => s.duplicate().eq(s))
-
-  // Cache to lookup Evolution on first record only
-  @transient private lazy val evolution = Evolutions.get(clazz)
 
   override def copy(from: T): T = {
     if (from == null || isImmutableType) {
@@ -48,7 +45,7 @@ class CoproductSerializer[T](
     if (isImmutableSerializer) {
       this
     } else {
-      new CoproductSerializer[T](clazz, version, subtypeClasses, subtypeFqns, subtypeSerializers.map(_.duplicate()))
+      new CoproductSerializer[T](evolution, version, subtypeClasses, subtypeFqns, subtypeSerializers.map(_.duplicate()))
     }
   }
 
@@ -84,8 +81,9 @@ class CoproductSerializer[T](
     if (index == NullMarkerByte) {
       null.asInstanceOf[T]
     } else {
+      // A deleted former subtype throws or reads as null through the evolution of its own serializer
       val instance = subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.postDeserialize.apply(version, Evolutions.checkThrowOnInstance(instance, subtypeFqns(index)))
+      evolution.postDeserialize.apply(version, instance)
     }
   }
 
@@ -114,8 +112,9 @@ object CoproductSerializer {
 
     @transient private lazy val log: Logger = LoggerFactory.getLogger(classOf[CoproductSerializerSnapshot[_]])
 
-    private var clazz: Class[T]                 = _
-    private var coproductVersion: Int           = 0 // version of the coproduct class (through @version)
+    private var evolution: Evolution[T] = _
+    // Schema version of the sealed trait this snapshot describes, as declared by @version at write time
+    private var coproductVersion: Int           = 0
     private var subtypeClasses: Array[Class[_]] = Array.empty
     private var subtypeFqns: Array[String]      = Array.empty
 
@@ -127,7 +126,7 @@ object CoproductSerializer {
         serializer.foreach { s =>
           // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
           setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
-          clazz = s.clazz
+          evolution = s.evolution
           coproductVersion = s.version
           subtypeClasses = s.subtypeClasses
           subtypeFqns = s.subtypeFqns
@@ -141,19 +140,20 @@ object CoproductSerializer {
         override def createOuterSerializerWithNestedSerializers(
             nestedSerializers: Array[TypeSerializer[_]]
         ): CoproductSerializer[T] =
-          new CoproductSerializer[T](clazz, coproductVersion, subtypeClasses, subtypeFqns, nestedSerializers)
+          new CoproductSerializer[T](evolution, coproductVersion, subtypeClasses, subtypeFqns, nestedSerializers)
 
         override def writeOuterSnapshot(out: DataOutputView): Unit = {
-          out.writeUTF(clazz.getName)
+          out.writeUTF(evolution.className)
           out.writeInt(coproductVersion)
           StringArraySerializer.INSTANCE.serialize(subtypeFqns, out)
         }
 
         override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-          clazz = if (readOuterSnapshotVersion > 3) Evolutions.resolveFormerClass(in.readUTF(), cl) else null
+          val coproductClassName = if (readOuterSnapshotVersion > 3) in.readUTF() else null
           coproductVersion = if (readOuterSnapshotVersion > 3) in.readInt() else 0
+          evolution = Evolutions.get(coproductClassName, coproductVersion, cl)
           subtypeFqns = StringArraySerializer.INSTANCE.deserialize(in)
-          subtypeClasses = subtypeFqns.map(Evolutions.resolveFormerClass(_, cl))
+          subtypeClasses = subtypeFqns.map(Evolutions.get(_, coproductVersion, cl).currentClass)
         }
 
       }
@@ -166,11 +166,11 @@ object CoproductSerializer {
       if (readVersion == 2) {
         val len = in.readInt()
 
-        clazz = null
+        evolution = Evolutions.get(null, 0, userCodeClassLoader)
         coproductVersion = 0
 
         subtypeFqns = (0 until len).map(_ => in.readUTF()).toArray
-        subtypeClasses = subtypeFqns.map(Evolutions.resolveFormerClass(_, userCodeClassLoader))
+        subtypeClasses = subtypeFqns.map(Evolutions.get(_, 0, userCodeClassLoader).currentClass)
 
         val subtypeSerializers = (0 until len)
           .map(_ => TypeSerializerSnapshot.readVersionedSnapshot(in, userCodeClassLoader).restoreSerializer())
@@ -194,7 +194,7 @@ object CoproductSerializer {
           case None =>
             TypeSerializerSchemaCompatibility.compatibleAfterMigration()
           case Some(reason) =>
-            log.warn(s"Cannot migrate $clazz from version ${old.coproductVersion}: $reason")
+            log.warn(s"Cannot migrate ${evolution.currentClass} from version ${old.coproductVersion}: $reason")
             TypeSerializerSchemaCompatibility.incompatible()
         }
       case old: CoproductSerializerSnapshot[T] if isSameClass(old) =>
@@ -205,15 +205,19 @@ object CoproductSerializer {
 
     /** Whether the former snapshot describes the very same sealed trait.
       *
-      * `old.clazz` has been resolved by `readOuterSnapshot`, so a renamed or moved former trait already reads as the
+      * `old.evolution` has been resolved by `readOuterSnapshot`, so a renamed or moved former trait already carries the
       * current one. A snapshot written before 2.4.0 records no trait name at all, leaving nothing to compare.
       */
     private def isSameClass(old: CoproductSerializerSnapshot[T]): Boolean =
-      clazz == null || old.clazz == null || clazz.getName == old.clazz.getName
+      evolution.currentClass == null || old.evolution.currentClass == null ||
+        evolution.currentClass == old.evolution.currentClass
 
-    /** Whether reading the former form described by `old` requires applying the declared evolutions. */
+    /** Whether reading the former form described by `old` requires applying the declared evolutions.
+      *
+      * `old.evolution` holds the evolutions migrating the very version the former data was written at.
+      */
     private def isEvolutionRequired(old: CoproductSerializerSnapshot[T]): Boolean =
-      clazz != null && !Evolutions.get(clazz).isAvoidable(old.coproductVersion, old.subtypeFqns)
+      evolution.currentClass != null && !old.evolution.isAvoidable(old.subtypeFqns)
 
     /** Check every former subtype is either declared deleted, or still a member of the current sealed trait, possibly
       * under another name, and that the schema of these surviving subtypes can itself be migrated.
@@ -231,13 +235,14 @@ object CoproductSerializer {
         )
       } else {
         old.subtypeFqns.indices.iterator
-          .filterNot(i => Evolutions.isDeletedFormerClass(old.subtypeFqns(i)))
+          .filterNot(i => Evolutions.isDeletedClass(old.subtypeClasses(i)))
           .flatMap { i =>
             val formerFqn    = old.subtypeFqns(i)
             val currentIndex = subtypeClasses.indexOf(old.subtypeClasses(i))
             if (currentIndex < 0) {
               Some(
-                s"former subtype '$formerFqn' is no longer a member of $clazz. Use @renamed(since = <version>," +
+                s"former subtype '$formerFqn' is no longer a member of ${evolution.currentClass}." +
+                  s" Use @renamed(since = <version>," +
                   s"\"$formerFqn\") to declare it renamed or moved, or @deletedClasses(since = <version>," +
                   s"\"$formerFqn\") to declare it deleted"
               )

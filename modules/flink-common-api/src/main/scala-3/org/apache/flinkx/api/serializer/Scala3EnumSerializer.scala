@@ -9,13 +9,19 @@ import org.apache.flink.api.common.typeutils.{
   TypeSerializerSnapshot
 }
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{
+  DeletedReturnNull,
+  DeletedThrowOnInstance,
+  Renamed,
+  Unchanged
+}
+import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
 
 /** Serializer for Scala 3 enum. Handle nullable value. */
 class Scala3EnumSerializer[T <: Product](
-    val clazz: Class[T],
+    val evolution: Evolution[T],
     val version: Int,
     val enumValueNames: Array[String],
     val enumValueSerializers: Array[TypeSerializer[_]]
@@ -24,14 +30,11 @@ class Scala3EnumSerializer[T <: Product](
   require(
     // The serialized form holds the index of the enum value, so both arrays describe the same values in one order
     enumValueNames.length == enumValueSerializers.length,
-    s"$clazz has ${enumValueNames.length} value names for ${enumValueSerializers.length} value serializers"
+    s"${evolution.currentClass} has ${enumValueNames.length} value names for ${enumValueSerializers.length} value serializers"
   )
 
   override val isImmutableType: Boolean = enumValueSerializers.forall(_.isImmutableType)
   val isImmutableSerializer: Boolean    = enumValueSerializers.forall(s => s.duplicate().eq(s))
-
-  // Cache to lookup Evolution on first record only
-  @transient private lazy val evolution = Evolutions.get(clazz)
 
   override def copy(from: T): T = {
     if (from == null || isImmutableType) {
@@ -46,7 +49,7 @@ class Scala3EnumSerializer[T <: Product](
     if (isImmutableSerializer) {
       this
     } else {
-      new Scala3EnumSerializer[T](clazz, version, enumValueNames, enumValueSerializers.map(_.duplicate()))
+      new Scala3EnumSerializer[T](evolution, version, enumValueNames, enumValueSerializers.map(_.duplicate()))
     }
   }
 
@@ -81,9 +84,9 @@ class Scala3EnumSerializer[T <: Product](
     if (index == NullMarkerByte) {
       null.asInstanceOf[T]
     } else {
-      val fqn      = s"${clazz.getName}#${enumValueNames(index)}"
+      // A deleted former value throws or reads as null through the evolution of its own serializer
       val instance = enumValueSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.postDeserialize.apply(version, Evolutions.checkThrowOnInstance(instance, fqn))
+      evolution.postDeserialize.apply(version, instance)
     }
   }
 
@@ -110,14 +113,15 @@ class Scala3EnumSerializerSnapshot[T <: Product](
 
   @transient private lazy val log: Logger = LoggerFactory.getLogger(classOf[Scala3EnumSerializerSnapshot[?]])
 
-  private var clazz: Class[T]               = _
-  private var enumVersion: Int              = 0 // version of the enum class (through @version)
+  private var evolution: Evolution[T] = _
+  // Schema version of the enum this snapshot describes, as declared by @version at write time
+  private var enumVersion: Int              = 0
   private var enumValueNames: Array[String] = Array.empty
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
     setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
-    clazz = s.clazz
+    evolution = s.evolution
     enumVersion = s.version
     enumValueNames = s.enumValueNames
   }
@@ -130,17 +134,18 @@ class Scala3EnumSerializerSnapshot[T <: Product](
   override protected def createOuterSerializerWithNestedSerializers(
       nestedSerializers: Array[TypeSerializer[_]]
   ): Scala3EnumSerializer[T] =
-    new Scala3EnumSerializer(clazz, enumVersion, enumValueNames, nestedSerializers)
+    new Scala3EnumSerializer(evolution, enumVersion, enumValueNames, nestedSerializers)
 
   override def writeOuterSnapshot(out: DataOutputView): Unit = {
-    out.writeUTF(clazz.getName)
+    out.writeUTF(evolution.className)
     out.writeInt(enumVersion)
     StringArraySerializer.INSTANCE.serialize(enumValueNames, out)
   }
 
   override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-    clazz = if (readOuterSnapshotVersion > 1) Evolutions.resolveFormerClass(in.readUTF(), cl) else null
+    val enumClassName = if (readOuterSnapshotVersion > 1) in.readUTF() else null
     enumVersion = if (readOuterSnapshotVersion > 1) in.readInt() else 0
+    evolution = Evolutions.get(enumClassName, enumVersion, cl)
     enumValueNames = StringArraySerializer.INSTANCE.deserialize(in)
   }
 
@@ -157,7 +162,7 @@ class Scala3EnumSerializerSnapshot[T <: Product](
         case None =>
           TypeSerializerSchemaCompatibility.compatibleAfterMigration()
         case Some(reason) =>
-          log.warn(s"Cannot migrate $clazz from version ${old.enumVersion}: $reason")
+          log.warn(s"Cannot migrate ${evolution.currentClass} from version ${old.enumVersion}: $reason")
           TypeSerializerSchemaCompatibility.incompatible()
       }
     case old: Scala3EnumSerializerSnapshot[T] if isSameClass(old) =>
@@ -168,15 +173,19 @@ class Scala3EnumSerializerSnapshot[T <: Product](
 
   /** Whether the former snapshot describes the very same enum.
     *
-    * `old.clazz` has been resolved by `readOuterSnapshot`, so a renamed or moved former enum already reads as the
+    * `old.evolution` has been resolved by `readOuterSnapshot`, so a renamed or moved former enum already carries the
     * current one. A snapshot written before 2.4.0 records no enum name at all, leaving nothing to compare.
     */
   private def isSameClass(old: Scala3EnumSerializerSnapshot[T]): Boolean =
-    clazz == null || old.clazz == null || clazz.getName == old.clazz.getName
+    evolution.currentClass == null || old.evolution.currentClass == null ||
+      evolution.currentClass == old.evolution.currentClass
 
-  /** Whether reading the former form described by `old` requires applying the declared evolutions. */
+  /** Whether reading the former form described by `old` requires applying the declared evolutions.
+    *
+    * `old.evolution` holds the evolutions migrating the very version the former data was written at.
+    */
   private def isEvolutionRequired(old: Scala3EnumSerializerSnapshot[T]): Boolean =
-    clazz != null && !Evolutions.get(clazz).isAvoidable(old.enumVersion, old.enumValueNames)
+    evolution.currentClass != null && !old.evolution.isAvoidable(old.enumValueNames)
 
   /** Check every former enum value is either declared deleted, or still a value of the current enum, possibly under
     * another name, and that the schema of these surviving values can itself be migrated.
@@ -185,9 +194,22 @@ class Scala3EnumSerializerSnapshot[T <: Product](
     *   `None` if the migration is possible, the reason it isn't otherwise
     */
   private def checkMigration(old: Scala3EnumSerializerSnapshot[T]): Option[String] = {
-    val evolution             = Evolutions.get(clazz)
     val currentValueSnapshots = getNestedSerializerSnapshots
     val formerValueSnapshots  = old.getNestedSerializerSnapshots
+
+    def checkValue(formerIndex: Int, formerName: String, currentName: String): Option[String] = {
+      val currentIndex = enumValueNames.indexOf(currentName)
+      if (currentIndex < 0) {
+        Some(
+          s"former value '$formerName' is no longer a value of ${evolution.currentClass}." +
+            s" Use @renamed(since = <version>,\"$formerName\") to declare it renamed, or" +
+            s" @deletedClasses(since = <version>,\"$formerName\") to declare it deleted"
+        )
+      } else if (isValueIncompatible(currentValueSnapshots(currentIndex), formerValueSnapshots(formerIndex))) {
+        Some(s"former value '$formerName' can't be migrated to '$currentName'")
+      } else None
+    }
+
     if (old.enumVersion > enumVersion) {
       Some(
         s"the former version ${old.enumVersion} is more recent than the current version $enumVersion. Restore from a" +
@@ -195,21 +217,14 @@ class Scala3EnumSerializerSnapshot[T <: Product](
       )
     } else {
       old.enumValueNames.indices.iterator
-        // A deleted enum value is registered as `<enum fqn>#<value name>`, as Scala3EnumSerializer.deserialize checks
-        .filterNot(i => Evolutions.isDeletedFormerClass(s"${clazz.getName}#${old.enumValueNames(i)}"))
         .flatMap { i =>
-          val formerName   = old.enumValueNames(i)
-          val currentName  = evolution.resolveFormerEnumValueName(formerName)
-          val currentIndex = enumValueNames.indexOf(currentName)
-          if (currentIndex < 0) {
-            Some(
-              s"former value '$formerName' is no longer a value of $clazz. Use @renamed(since = <version>," +
-                s"\"$formerName\") to declare it renamed, or @deletedClasses(since = <version>,\"$formerName\") to" +
-                s" declare it deleted"
-            )
-          } else if (isValueIncompatible(currentValueSnapshots(currentIndex), formerValueSnapshots(i))) {
-            Some(s"former value '$formerName' can't be migrated to '$currentName'")
-          } else None
+          val formerName = old.enumValueNames(i)
+          old.evolution.getEnumValueEvolution(formerName) match {
+            // A deleted former value throws or reads as null through the evolution of its own serializer
+            case DeletedThrowOnInstance | DeletedReturnNull => None
+            case Renamed(currentName)                       => checkValue(i, formerName, currentName)
+            case Unchanged                                  => checkValue(i, formerName, formerName)
+          }
         }
         .nextOption()
     }
