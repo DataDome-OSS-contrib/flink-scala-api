@@ -4,6 +4,7 @@ import org.apache.flink.api.common.typeutils.CompositeTypeSerializerUtil.setNest
 import org.apache.flink.api.common.typeutils.base.array.StringArraySerializer
 import org.apache.flink.api.common.typeutils.{
   CompositeTypeSerializerSnapshot,
+  CompositeTypeSerializerUtil,
   TypeSerializer,
   TypeSerializerSchemaCompatibility,
   TypeSerializerSnapshot
@@ -150,11 +151,61 @@ object CoproductSerializer {
         adapter.readSnapshot(readVersion, in, userCodeClassLoader)
       }
 
+    /** Resolves the schema compatibility, adding the support of subtypes appended to the sealed trait on top of the
+      * standard [[CompositeTypeSerializerSnapshot]] resolution, which considers any change of the nested serializer
+      * count, so any change of the subtype count, as incompatible.
+      */
     override def resolveSchemaCompatibility(
         oldSerializerSnapshot: TypeSerializerSnapshot[T]
     ): TypeSerializerSchemaCompatibility[T] = oldSerializerSnapshot match {
-      case oss: CoproductSerializerSnapshot[T] => adapter.resolveSchemaCompatibility(oss.adapter)
-      case _                                   => TypeSerializerSchemaCompatibility.incompatible()
+      case oss: CoproductSerializerSnapshot[T] =>
+        val newSubtypeSnapshots = adapter.getNestedSerializerSnapshots
+        val oldSubtypeSnapshots = oss.adapter.getNestedSerializerSnapshots
+        if (newSubtypeSnapshots.length > oldSubtypeSnapshots.length) {
+          resolveAppendedSubtypesSchemaCompatibility(oss, newSubtypeSnapshots, oldSubtypeSnapshots)
+        } else {
+          adapter.resolveSchemaCompatibility(oss.adapter)
+        }
+      case _ => TypeSerializerSchemaCompatibility.incompatible()
+    }
+
+    /** Resolves the schema compatibility when the sealed trait has more subtypes than the one the old snapshot was
+      * written with. The serialized form holds the index of the subtype, so an older form can be read as long as the
+      * subtypes it knows kept their index, which means the new subtypes are appended at the end of the list. Only the
+      * compatibility of the common subtypes is resolved, as Flink requires an identical nested serializer count.
+      */
+    private def resolveAppendedSubtypesSchemaCompatibility(
+        oldSnapshot: CoproductSerializerSnapshot[T],
+        newSubtypeSnapshots: Array[TypeSerializerSnapshot[_]],
+        oldSubtypeSnapshots: Array[TypeSerializerSnapshot[_]]
+    ): TypeSerializerSchemaCompatibility[T] = {
+      val oldSubtypeCount    = oldSubtypeSnapshots.length
+      val commonSubtypeNames = subtypeClasses.take(oldSubtypeCount).map(_.getName)
+      if (!commonSubtypeNames.sameElements(oldSnapshot.subtypeClasses.map(_.getName))) {
+        // The subtypes known by the older form must have kept their index: they can't be reordered nor removed
+        TypeSerializerSchemaCompatibility.incompatible()
+      } else {
+        val commonSubtypesCompatibility = CompositeTypeSerializerUtil.constructIntermediateCompatibilityResult[T](
+          newSubtypeSnapshots.take(oldSubtypeCount),
+          oldSubtypeSnapshots
+        )
+        if (commonSubtypesCompatibility.isIncompatible) {
+          TypeSerializerSchemaCompatibility.incompatible()
+        } else if (commonSubtypesCompatibility.isCompatibleAfterMigration) {
+          TypeSerializerSchemaCompatibility.compatibleAfterMigration()
+        } else if (commonSubtypesCompatibility.isCompatibleWithReconfiguredSerializer) {
+          val appendedSubtypeSerializers = newSubtypeSnapshots.drop(oldSubtypeCount).map(_.restoreSerializer())
+          TypeSerializerSchemaCompatibility.compatibleWithReconfiguredSerializer(
+            new CoproductSerializer[T](
+              subtypeClasses,
+              commonSubtypesCompatibility.getNestedSerializers ++ appendedSubtypeSerializers
+            )
+          )
+        } else {
+          // The appended subtypes are unknown to the older form, which can be read as is
+          TypeSerializerSchemaCompatibility.compatibleAsIs()
+        }
+      }
     }
 
     override def restoreSerializer(): TypeSerializer[T] = adapter.restoreSerializer()

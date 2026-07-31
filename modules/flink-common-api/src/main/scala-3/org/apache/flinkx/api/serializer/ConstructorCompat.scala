@@ -33,10 +33,7 @@ private[serializer] trait ConstructorCompat:
             e
           )
 
-    lazy val defaultArgs = cls.getMethods
-      .filter(_.getName.startsWith("$lessinit$greater$default"))
-      .sortBy(_.getName())
-      .map(_.invoke(null))
+    lazy val defaultArgs = lookupDefaultValues(cls).map(_._2)
 
     (args: Array[AnyRef]) => {
       // Append default values for missing arguments
@@ -47,6 +44,22 @@ private[serializer] trait ConstructorCompat:
         applyMethod.invoke(null, allArgs*).asInstanceOf[T]
       else constructor.newInstance(allArgs*).asInstanceOf[T]
     }
+
+  /** 1-based indices of the class primary constructor parameters having a default value. */
+  final def defaultValueIndices(cls: Class[?]): Set[Int] = lookupDefaultValues(cls).map(_._1).toSet
+
+  /** Default values of the class primary constructor parameters, by 1-based parameter index, in declaration order.
+    * Parameters without a default value are skipped.
+    */
+  private def lookupDefaultValues(cls: Class[?]): Array[(Int, AnyRef)] =
+    cls.getMethods
+      .filter(_.getName.startsWith(DefaultValueMethodPrefix))
+      .map(method => method.getName.drop(DefaultValueMethodPrefix.length).toInt -> method)
+      .sortBy(_._1) // Sort by parameter index, as the lexicographic order of the method names isn't the same
+      .map((index, method) => index -> method.invoke(null))
+
+  // Prefix of the methods giving the default value of the constructor parameter of the suffixed 1-based index
+  private val DefaultValueMethodPrefix: String = "$lessinit$greater$default$"
 
   // Enum modifier constant defined in java.lang.reflect.Modifier.ENUM but inaccessible
   private val EnumModifier: Int = 0x00004000

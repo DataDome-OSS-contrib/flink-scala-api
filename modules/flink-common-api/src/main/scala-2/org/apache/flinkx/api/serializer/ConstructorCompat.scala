@@ -33,18 +33,8 @@ private[serializer] trait ConstructorCompat {
 
     val classMirror     = rootMirror.reflectClass(classSymbol)
     val constructor     = classMirror.reflectConstructor(primaryConstructorSymbol)
-    val claas           = cm.classSymbol(cls)
-    val module          = claas.companion.asModule
-    val im              = cm.reflect(cm.reflectModule(module).instance)
-    val ts              = im.symbol.typeSignature
     val constructorSize = primaryConstructorSymbol.paramLists.flatten.size
-    val defaultValues   = (1 to constructorSize)
-      .flatMap { i =>
-        val defarg = ts.member(TermName(s"$$lessinit$$greater$$default$$$i"))
-        if (defarg != NoSymbol)
-          Some(im.reflectMethod(defarg.asMethod)())
-        else None
-      }
+    val defaultValues   = lookupDefaultValues(cls, constructorSize).map(_._2)
 
     (args: Array[AnyRef]) => {
       // Append default values for missing arguments
@@ -52,5 +42,33 @@ private[serializer] trait ConstructorCompat {
       constructor.apply(allArgs: _*).asInstanceOf[T]
     }
   }
+
+  /** 1-based indices of the class primary constructor parameters having a default value. */
+  final def defaultValueIndices(cls: Class[_]): Set[Int] =
+    lookupDefaultValues(cls, maxConstructorSize(cls)).map(_._1).toSet
+
+  /** Default values of the first `constructorSize` parameters of the class primary constructor, by 1-based parameter
+    * index, in declaration order. Parameters without a default value are skipped.
+    */
+  private def lookupDefaultValues(cls: Class[_], constructorSize: Int): Seq[(Int, Any)] = {
+    val companion = cm.classSymbol(cls).companion
+    if (companion.isModule) {
+      val im = cm.reflect(cm.reflectModule(companion.asModule).instance)
+      val ts = im.symbol.typeSignature
+      (1 to constructorSize)
+        .flatMap { i =>
+          val defarg = ts.member(TermName(s"$$lessinit$$greater$$default$$$i"))
+          if (defarg != NoSymbol)
+            Some(i -> im.reflectMethod(defarg.asMethod)())
+          else None
+        }
+    } else {
+      // Without a companion object, the class can't have any default value
+      Seq.empty
+    }
+  }
+
+  private def maxConstructorSize(cls: Class[_]): Int =
+    cls.getConstructors.foldLeft(0)((maxSize, constructor) => math.max(maxSize, constructor.getParameterCount))
 
 }

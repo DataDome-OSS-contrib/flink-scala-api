@@ -20,7 +20,13 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.annotation.Internal
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerSnapshot.OuterSchemaCompatibility
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerUtil.setNestedSerializersSnapshots
-import org.apache.flink.api.common.typeutils.{CompositeTypeSerializerSnapshot, TypeSerializer, TypeSerializerSnapshot}
+import org.apache.flink.api.common.typeutils.{
+  CompositeTypeSerializerSnapshot,
+  CompositeTypeSerializerUtil,
+  TypeSerializer,
+  TypeSerializerSchemaCompatibility,
+  TypeSerializerSnapshot
+}
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
@@ -157,7 +163,13 @@ class CaseClassSerializer[T <: Product](
       source.skipBytesToRead(nullPadding.length)
       target.skipBytesToWrite(nullPadding.length)
     } else {
-      super.copy(source, target)
+      // Copy the fields of the source, which can be an older form having less fields, and not all the fields of
+      // this serializer, like TupleSerializerBase does
+      var i = 0
+      while (i < sourceArity) {
+        fieldSerializers(i).copy(source, target)
+        i += 1
+      }
     }
   }
 
@@ -177,7 +189,8 @@ object CaseClassSerializer {
 /** [[TypeSerializerSnapshot]] for [[CaseClassSerializer]]. */
 final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     serializer: Option[CaseClassSerializer[T]]
-) extends CompositeTypeSerializerSnapshot[T, CaseClassSerializer[T]] {
+) extends CompositeTypeSerializerSnapshot[T, CaseClassSerializer[T]]
+    with ConstructorCompat {
 
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
@@ -235,6 +248,66 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     } else {
       OuterSchemaCompatibility.INCOMPATIBLE
     }
+  }
+
+  /** Resolves the schema compatibility, adding the support of fields appended to the case class on top of the standard
+    * [[CompositeTypeSerializerSnapshot]] resolution, which considers any change of the nested serializer count, so any
+    * change of the field count, as incompatible.
+    */
+  override def resolveSchemaCompatibility(
+      oldSerializerSnapshot: TypeSerializerSnapshot[T]
+  ): TypeSerializerSchemaCompatibility[T] = oldSerializerSnapshot match {
+    case oldSnapshot: ScalaCaseClassSerializerSnapshot[T]
+        if resolveOuterSchemaCompatibility(oldSnapshot) == OuterSchemaCompatibility.COMPATIBLE_AS_IS =>
+      val newFieldSnapshots = getNestedSerializerSnapshots
+      val oldFieldSnapshots = oldSnapshot.getNestedSerializerSnapshots
+      if (newFieldSnapshots.length > oldFieldSnapshots.length) {
+        resolveAppendedFieldsSchemaCompatibility(newFieldSnapshots, oldFieldSnapshots)
+      } else {
+        super.resolveSchemaCompatibility(oldSerializerSnapshot)
+      }
+    case _ => super.resolveSchemaCompatibility(oldSerializerSnapshot)
+  }
+
+  /** Resolves the schema compatibility when the case class has more fields than the one the old snapshot was written
+    * with. [[CaseClassSerializer]] writes the field count in the serialized form, so it can read an older form having
+    * less fields, as long as the appended fields have a default value to fill the missing ones. Only the compatibility
+    * of the common fields is resolved, as Flink requires an identical nested serializer count.
+    */
+  private def resolveAppendedFieldsSchemaCompatibility(
+      newFieldSnapshots: Array[TypeSerializerSnapshot[_]],
+      oldFieldSnapshots: Array[TypeSerializerSnapshot[_]]
+  ): TypeSerializerSchemaCompatibility[T] = serializedClass match {
+    case None        => throw new IllegalStateException("type can not be NULL")
+    case Some(clazz) =>
+      val fieldIndicesWithDefaultValue = defaultValueIndices(clazz)
+      val appendedFieldIndices         = (oldFieldSnapshots.length + 1) to newFieldSnapshots.length
+      if (!appendedFieldIndices.forall(fieldIndicesWithDefaultValue.contains)) {
+        // Without a default value, an appended field can't be filled when reading an older serialized form
+        TypeSerializerSchemaCompatibility.incompatible()
+      } else {
+        val commonFieldsCompatibility = CompositeTypeSerializerUtil.constructIntermediateCompatibilityResult[T](
+          newFieldSnapshots.take(oldFieldSnapshots.length),
+          oldFieldSnapshots
+        )
+        if (commonFieldsCompatibility.isIncompatible) {
+          TypeSerializerSchemaCompatibility.incompatible()
+        } else if (commonFieldsCompatibility.isCompatibleAfterMigration) {
+          TypeSerializerSchemaCompatibility.compatibleAfterMigration()
+        } else if (commonFieldsCompatibility.isCompatibleWithReconfiguredSerializer) {
+          val appendedFieldSerializers = newFieldSnapshots.drop(oldFieldSnapshots.length).map(_.restoreSerializer())
+          TypeSerializerSchemaCompatibility.compatibleWithReconfiguredSerializer(
+            new CaseClassSerializer[T](
+              clazz,
+              commonFieldsCompatibility.getNestedSerializers ++ appendedFieldSerializers,
+              isCaseClassImmutable
+            )
+          )
+        } else {
+          // The appended fields are filled with their default value when reading the older serialized form
+          TypeSerializerSchemaCompatibility.compatibleAsIs()
+        }
+      }
   }
 
 }
