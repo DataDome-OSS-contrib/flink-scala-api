@@ -20,7 +20,12 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.annotation.Internal
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerSnapshot.OuterSchemaCompatibility
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerUtil.setNestedSerializersSnapshots
-import org.apache.flink.api.common.typeutils.{CompositeTypeSerializerSnapshot, TypeSerializer, TypeSerializerSnapshot}
+import org.apache.flink.api.common.typeutils.{
+  CompositeTypeSerializerSnapshot,
+  TypeSerializer,
+  TypeSerializerSchemaCompatibility,
+  TypeSerializerSnapshot
+}
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
@@ -236,6 +241,10 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
       OuterSchemaCompatibility.INCOMPATIBLE
     }
   }
+
+  override def resolveSchemaCompatibility(
+      oldSerializerSnapshot: TypeSerializerSnapshot[T]
+  ): TypeSerializerSchemaCompatibility[T] = TypeSerializerSchemaCompatibility.compatibleAsIs()
 
 }
 

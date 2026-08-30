@@ -152,10 +152,7 @@ object CoproductSerializer {
 
     override def resolveSchemaCompatibility(
         oldSerializerSnapshot: TypeSerializerSnapshot[T]
-    ): TypeSerializerSchemaCompatibility[T] = oldSerializerSnapshot match {
-      case oss: CoproductSerializerSnapshot[T] => adapter.resolveSchemaCompatibility(oss.adapter)
-      case _                                   => TypeSerializerSchemaCompatibility.incompatible()
-    }
+    ): TypeSerializerSchemaCompatibility[T] = TypeSerializerSchemaCompatibility.compatibleAsIs()
 
     override def restoreSerializer(): TypeSerializer[T] = adapter.restoreSerializer()
 
