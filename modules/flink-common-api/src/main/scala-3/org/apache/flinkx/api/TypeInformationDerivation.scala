@@ -54,7 +54,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               }.toArray
             )
 
-        val builder = new EvolutionBuilder[T & Product](clazz, fieldNames) // Field names required even with version 0
+        val builder =
+          new EvolutionBuilder[T & Product](clazz, version, fieldNames) // Field names required even with version 0
         if version == 0 then
           // Do not allow Evolution annotations on version 0
           ctx.annotations.foreach {
@@ -90,7 +91,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               case _                    => // Ignore other annotations
             }
           }
-        Evolutions.register(builder)
+        // Don't register enum values, the enum is registered by split()
+        if !typeTag.isEnum then Evolutions.register(builder)
 
         val ti = new CaseClassTypeInfo[T & Product](
           clazz = clazz,
@@ -110,14 +112,18 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         cached.asInstanceOf[TypeInformation[T]]
 
       case None =>
-        val clazz      = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        val clazz   = classTag.runtimeClass.asInstanceOf[Class[T]]
+        val version = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
+        // Enum values are named by the enum, sealed trait subtypes by their own fully qualified class name
+        val memberNames: Array[String] =
+          if typeTag.isEnum then ctx.subtypes.map(_.typeInfo.short).toArray
+          else ctx.subtypes.map(_.typeclass.getTypeClass.getName).toArray
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
               clazz = clazz.asInstanceOf[Class[T & Product]],
               version = version,
-              enumValueNames = ctx.subtypes.map(_.typeInfo.short).toArray,
+              enumValueNames = memberNames,
               enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             ).asInstanceOf[TypeSerializer[T]]
           else
@@ -126,7 +132,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               clazz = clazz,
               version = version,
               subtypeClasses = subtypeClasses,
-              subtypeFqns = subtypeClasses.map(_.getName),
+              subtypeFqns = memberNames,
               subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             )
 
@@ -143,7 +149,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             }
           }
         else // version > 0
-          val builder = new EvolutionBuilder[T](clazz)
+          val builder = new EvolutionBuilder[T](clazz, version, memberNames)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.foreach {
             case r: renamed                          => Evolutions.registerFormerClass(r.formerName, clazz)

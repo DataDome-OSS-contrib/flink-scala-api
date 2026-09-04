@@ -1,7 +1,8 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
-import org.apache.flinkx.api.evolution.FieldEvolution.Phase
+import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flinkx.api.evolution.FieldEvolution.{FieldIndex, Phase}
 
 import scala.collection.mutable
 
@@ -20,13 +21,18 @@ import scala.collection.mutable
 @Internal
 abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] {
 
-  /** Mutate field-name to field-value `fieldMap` in place to apply this evolution step.
+  /** Mutate field-name to field-value map in place to apply this evolution step.
     *
     * Initially, the field map contains only the former fields, including:
     *   - fields that have been deleted since
     *   - values with their former type
     */
-  def apply(fieldMap: mutable.Map[String, AnyRef]): Unit
+  def apply(fieldValues: mutable.Map[String, AnyRef]): Unit
+
+  /** Mutate the field indexes in place the way [[apply]] mutates the field-value map, and return the same exceptions,
+    * without reading any data.
+    */
+  def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException]
 
   override def compare(that: FieldEvolution): Int = {
     val sinceComparison = since.compare(that.since)
@@ -37,6 +43,9 @@ abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[
 }
 
 object FieldEvolution {
+
+  /** Index of one field, tracked while replaying the evolutions, or `None` when the lineage is broken. */
+  type FieldIndex = Option[Int]
 
   /** Operation phase used to order evolutions within a single version (lower rank applied first). */
   @Internal
@@ -60,10 +69,14 @@ object FieldEvolution {
       formerName: String
   ) extends FieldEvolution(since, Phase.Delete) {
 
-    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
-      fieldMap.remove(formerName) match {
-        case None => throw FieldNotFoundException(currentClass, formerName, "delete", fieldMap.keys)
-        case _    =>
+    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
+      fieldValues.remove(formerName)
+    }
+
+    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] = {
+      fieldIndexes.remove(formerName) match {
+        case None => logger.warn(s"Ignoring field '$formerName' deletion: not found in $currentClass"); None
+        case _    => None
       }
     }
 
@@ -82,12 +95,18 @@ object FieldEvolution {
       currentName: String
   ) extends FieldEvolution(since, Phase.Rename) {
 
-    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
-      fieldMap.remove(formerName) match {
-        case Some(value) => fieldMap.put(currentName, value)
-        case _           => throw FieldNotFoundException(currentClass, formerName, "rename", fieldMap.keys)
+    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
+      fieldValues.remove(formerName) match {
+        case Some(value) => fieldValues.put(currentName, value)
+        case _           => throw FieldNotFoundException(currentClass, formerName, "rename", fieldValues.keys)
       }
     }
+
+    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] =
+      fieldIndexes.remove(formerName) match {
+        case Some(origin) => fieldIndexes.put(currentName, origin); None
+        case _            => Some(FieldNotFoundException(currentClass, formerName, "rename", fieldIndexes.keys))
+      }
 
   }
 
@@ -104,12 +123,19 @@ object FieldEvolution {
       mapper: A => B
   ) extends FieldEvolution(since, Phase.Transform) {
 
-    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
-      fieldMap.get(name) match {
-        case Some(value) => fieldMap.update(name, mapper.apply(value.asInstanceOf[A]).asInstanceOf[AnyRef])
-        case _           => throw FieldNotFoundException(currentClass, name, "transform", fieldMap.keys)
+    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
+      fieldValues.get(name) match {
+        case Some(value) => fieldValues.update(name, mapper.apply(value.asInstanceOf[A]).asInstanceOf[AnyRef])
+        case _           => throw FieldNotFoundException(currentClass, name, "transform", fieldValues.keys)
       }
     }
+
+    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] =
+      fieldIndexes.get(name) match {
+        // The mapper converts the former value to the current type, so their serializers cannot be compared anymore
+        case Some(_) => fieldIndexes.update(name, None); None
+        case _       => Some(FieldNotFoundException(currentClass, name, "transform", fieldIndexes.keys))
+      }
 
   }
 
@@ -130,12 +156,18 @@ object FieldEvolution {
 
     if (default.isEmpty) throw AddedFieldWithoutDefaultException(currentClass, name)
 
-    override def apply(fieldMap: mutable.Map[String, AnyRef]): Unit = {
-      fieldMap.put(name, default.get.asInstanceOf[AnyRef]) match {
-        case Some(_) => throw FieldAlreadyExistException(currentClass, name, fieldMap.keys)
+    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
+      fieldValues.put(name, default.get.asInstanceOf[AnyRef]) match {
+        case Some(_) => throw FieldAlreadyExistException(currentClass, name, fieldValues.keys)
         case _       =>
       }
     }
+
+    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] =
+      fieldIndexes.put(name, None) match {
+        case Some(_) => Some(FieldAlreadyExistException(currentClass, name, fieldIndexes.keys))
+        case _       => None
+      }
 
   }
 

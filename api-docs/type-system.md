@@ -268,10 +268,10 @@ savepoints: built-in compatibility rules that come "for free", and an opt-in ann
 
 ### Built-in compatibility
 
-Without any annotation, the following changes are safe between checkpoint write and restore (starting from version 2.3.0):
+Without any annotation, the following changes are safe between checkpoint write and restore (starting from version 2.4.0):
 * Case classes: you can reorder fields.
 * Sealed traits: you can reorder subtypes and add new subtypes.
-* For everything else (renames, deletions, type changes, cross-field migrations), use the annotation-based schema evolution below.
+* For everything else (additions, renames, deletions, type changes, cross-field migrations), use the annotation-based schema evolution below.
 
 ### Annotation-based schema evolution
 
