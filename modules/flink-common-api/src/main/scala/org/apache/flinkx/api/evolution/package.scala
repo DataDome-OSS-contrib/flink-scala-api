@@ -40,9 +40,23 @@ package object evolution {
         s"Cannot add '$field'. Field already exists in $clazz. Existing fields: ${fields.mkString("[\"", "\",\"", "\"]")}"
       )
 
+  /** Exception indicating an evolution of `currentClass` declares a `formerVersion` outside its version range. */
+  final case class SinceNotAllowedException(currentClass: Class[_], formerVersion: Int, currentVersion: Int)
+      extends FlinkRuntimeException(
+        s"An evolution of $currentClass is declared since=$formerVersion: it must be between 1 and the current" +
+          s" @version($currentVersion). Raise @version or fix the since of the annotation"
+      )
+
   /** Exception indicating added `currentField` in `currentClass` must have a default value. */
   final case class AddedFieldWithoutDefaultException(currentClass: Class[_], currentField: String)
       extends FlinkRuntimeException(s"'$currentField' added field in $currentClass must have a default value")
+
+  /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */
+  final case class FormerClassConflictException(formerFqn: String, declared: String, conflicting: String)
+      extends FlinkRuntimeException(
+        s"Former class '$formerFqn' is already declared as $declared, it can't also be declared as $conflicting." +
+          s" Two ADTs can't share the same former class name: fix their @renamed or @deletedClasses annotations"
+      )
 
   /** Exception indicating an instance of deleted `formerFqn` class has been encountered during deserialization. */
   final case class DeletedInstanceException(formerFqn: String)

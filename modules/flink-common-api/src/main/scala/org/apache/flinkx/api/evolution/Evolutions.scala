@@ -55,7 +55,7 @@ object Evolutions {
     *   Current ADT class, used as reference to resolve `formerClassName` to its fully-qualified internal form
     */
   def registerFormerClass(formerClassName: String, currentClass: Class[_]): Unit =
-    formerClassNameToCurrentClass(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) = currentClass
+    declareFormerClass(ClassUtil.resolveFormerClassName(formerClassName, currentClass), currentClass)
 
   /** Register that a former ADT subtype or field type has been deleted from the current source code.
     *
@@ -69,9 +69,32 @@ object Evolutions {
     */
   def registerDeletedFormerClass(formerClassName: String, currentClass: Class[_], throwOnInstance: Boolean): Unit = {
     val formerFqn = ClassUtil.resolveFormerClassName(formerClassName, currentClass)
-    formerClassNameToCurrentClass(formerFqn) = DeletedClass
+    declareFormerClass(formerFqn, DeletedClass)
     if (throwOnInstance) deletedFormerClassThrowOnInstance(formerFqn) = ()
   }
+
+  /** Declare which current class a former class name resolves to, and reject a name claimed by two different ADTs.
+    *
+    * @throws FormerClassConflictException
+    *   if `formerFqn` is already declared to resolve to another class
+    */
+  private def declareFormerClass(formerFqn: String, currentClass: Class[_]): Unit =
+    formerClassNameToCurrentClass
+      .putIfAbsent(formerFqn, currentClass)
+      .filter(_ != currentClass)
+      .map(describeDeclaration)
+      .foreach(declared => throw FormerClassConflictException(formerFqn, declared, describeDeclaration(currentClass)))
+
+  private def describeDeclaration(currentClass: Class[_]): String =
+    if (currentClass == DeletedClass) "deleted" else s"renamed to $currentClass"
+
+  /** `true` if `formerFqn` was registered as deleted via `@deletedClasses`, `false` otherwise.
+    *
+    * @param formerFqn
+    *   Fully qualified former class name, or `<enum fqn>#<value name>` for a Scala 3 enum value
+    */
+  def isDeletedFormerClass(formerFqn: String): Boolean =
+    formerClassNameToCurrentClass.get(formerFqn).contains(DeletedClass)
 
   /** Throw a [[DeletedInstanceException]] if an instance of the deleted former class identified by `formerFqn` was
     * registered with `throwOnInstance = true`; return instance otherwise.

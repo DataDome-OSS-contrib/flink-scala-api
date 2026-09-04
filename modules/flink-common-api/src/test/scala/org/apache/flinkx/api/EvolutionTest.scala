@@ -1,8 +1,10 @@
 package org.apache.flinkx.api
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution._
+import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -11,7 +13,22 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
 
   import org.apache.flinkx.api.EvolutionTest._
 
-  override protected def beforeEach(): Unit = Evolutions.reset()
+  // Schema of Click v0, as recorded in its snapshot, see the commented out fixture below
+  private val ClickV0FieldNames = Array("a", "inFileClicks", "fieldNotInFile", "identifier", "b")
+
+  /** Messages of every failure the dry run of `T` evolutions reports from the given former field names. */
+  private def dryRunFailures[T](formerFieldNames: Array[String])(implicit classTag: ClassTag[T]): Seq[String] =
+    Evolutions
+      .get(classTag.runtimeClass.asInstanceOf[Class[T]])
+      .dryRun(0, formerFieldNames)
+      .swap
+      .map(_.map(_.getMessage))
+      .getOrElse(Seq.empty)
+
+  override protected def beforeEach(): Unit = {
+    auto.cache.clear()
+    Evolutions.reset()
+  }
 
   /* Test to serialize Click v0 code into Click-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize Click v0" in {
@@ -35,6 +52,69 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
   it should "deserialize Event v0 to Action v1" in {
     val expected: Action = Web(123456790)
     testDeserializeFromFile("Event-v0", expected)
+  }
+
+  // A state backend gates the restore on the schema compatibility resolution, before deserializing anything: the
+  // evolutions are applied by the restored former serializer, so the state has to be migrated with it.
+  it should "resolve the schema compatibility of Click v0 to Click v3 as compatible after migration" in {
+    resolveSchemaCompatibilityFromFile[Click]("Click-v0") shouldBe Symbol("compatibleAfterMigration")
+  }
+
+  it should "resolve the schema compatibility of Event v0 to Action v1 as compatible after migration" in {
+    resolveSchemaCompatibilityFromFile[Action]("Event-v0") shouldBe Symbol("compatibleAfterMigration")
+  }
+
+  it should "resolve the schema compatibility of a state of Click v0 as compatible after migration" in {
+    // The value serializer of a MapState[String, Click], nested in a serializer resolving its nested serializers
+    resolveNestedSchemaCompatibilityFromFile[Click]("Click-v0") shouldBe Symbol("compatibleAfterMigration")
+  }
+
+  // A snapshot written before 2.4.0 carries no field name, so the fields are read by position: the evolutions can't
+  // apply, and the standard resolution checks that positional layout.
+  it should "resolve the schema compatibility of a pre-2.4.0 snapshot of an unchanged case class as compatible as is" in {
+    val formerSerializer = new CaseClassSerializer[ClickAction](
+      clazz = classOf[ClickAction],
+      isCaseClassImmutable = true,
+      version = 0,
+      fieldNames = Array.empty,
+      paramSerializers = Array(createSerializer[String], createSerializer[String])
+    )
+
+    resolveSchemaCompatibility(formerSerializer) shouldBe Symbol("compatibleAsIs")
+  }
+
+  it should "resolve the schema compatibility of an unevolved case class as compatible as is" in {
+    resolveSchemaCompatibility[ClickAction](createSerializer[ClickAction]) shouldBe Symbol("compatibleAsIs")
+  }
+
+  it should "resolve the schema compatibility of an unevolved sealed trait as compatible as is" in {
+    resolveSchemaCompatibility[Action](createSerializer[Action]) shouldBe Symbol("compatibleAsIs")
+  }
+
+  // Two unrelated ADTs must never be migrated into one another, even when the declared evolutions happen to line their
+  // schemas up: the former and the current classes are compared, after resolveFormerClass mapped any rename.
+  it should "resolve the schema compatibility of an unrelated case class as incompatible" in {
+    val formerSerializer = new CaseClassSerializer[UnrelatedFormerCaseClass](
+      clazz = classOf[UnrelatedFormerCaseClass],
+      isCaseClassImmutable = true,
+      version = 0,
+      fieldNames = Array("a", "removed"),
+      paramSerializers = Array(createSerializer[String], createSerializer[String])
+    )
+
+    resolveSchemaCompatibilityAfterRestore[UnrelatedCurrentCaseClass](formerSerializer) shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of an unrelated sealed trait as incompatible" in {
+    val formerSerializer = createSerializer[SharedSubtypeTrait]
+
+    resolveSchemaCompatibilityAfterRestore[OtherSharedSubtypeTrait](formerSerializer) shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of a foreign snapshot as incompatible" in {
+    resolveSchemaCompatibility[Action](createSerializer[Click].asInstanceOf[TypeSerializer[Action]]) shouldBe Symbol(
+      "incompatible"
+    )
   }
 
   // Error handling
@@ -105,6 +185,22 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
       implicitly[TypeInformation[WrongAddedOnFieldWithoutVersion]]
     }
     exception.getMessage shouldBe "@added(1) annotation is not allowed on Param(a) of class org.apache.flinkx.api.EvolutionTest$WrongAddedOnFieldWithoutVersion with version 0"
+  }
+
+  // An evolution outside the version range is never applied when it should, so it is refused at derivation instead of
+  // silently sending an unchanged schema down the migration path.
+  it should "throw when a field evolution has a since above the current version" in {
+    val exception = intercept[SinceNotAllowedException] {
+      implicitly[TypeInformation[WrongSinceAboveVersion]]
+    }
+    exception.getMessage shouldBe "An evolution of class org.apache.flinkx.api.EvolutionTest$WrongSinceAboveVersion is declared since=2: it must be between 1 and the current @version(1). Raise @version or fix the since of the annotation"
+  }
+
+  it should "throw when a field evolution has a since below 1" in {
+    val exception = intercept[SinceNotAllowedException] {
+      implicitly[TypeInformation[WrongSinceBelowOne]]
+    }
+    exception.getMessage shouldBe "An evolution of class org.apache.flinkx.api.EvolutionTest$WrongSinceBelowOne is declared since=0: it must be between 1 and the current @version(1). Raise @version or fix the since of the annotation"
   }
 
   it should "throw when @added is on a case class field without default value" in {
@@ -273,20 +369,178 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     exception.getMessage shouldBe "Cannot delete 'wrongFieldName'. Field not found in class org.apache.flinkx.api.EvolutionTest$WrongDeletedField. Available fields: [\"a\"]"
   }
 
-  it should "throw field not used when deserializing Click v0 with extra field" in {
-    val expected  = WrongFieldNotUsed("123456789")
-    val exception = intercept[FieldNotUsedException] {
-      testDeserializeFromFile("Click-v0", expected)
-    }
-    exception.getMessage shouldBe "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongFieldNotUsed. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
+  // The field names are checked by the dry run, when the schema compatibility is resolved, and no longer on every
+  // record: these assert the guidance the user gets, which resolveSchemaCompatibility only logs.
+  it should "report an unused former field when dry running Click v0 evolutions" in {
+    implicitly[TypeInformation[WrongFieldNotUsed]]
+
+    dryRunFailures[WrongFieldNotUsed](ClickV0FieldNames) shouldBe Seq(
+      "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongFieldNotUsed. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
+    )
   }
 
-  it should "throw missing field when deserializing Click v0 with missing field to instantiate" in {
-    val expected  = WrongMissingField("123456789", "is missing")
-    val exception = intercept[MissingFieldException] {
-      testDeserializeFromFile("Click-v0", expected)
+  it should "report every offending field when dry running Click v0 evolutions" in {
+    implicitly[TypeInformation[WrongSeveralFields]]
+
+    dryRunFailures[WrongSeveralFields](ClickV0FieldNames) shouldBe Seq(
+      "'missing' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$WrongSeveralFields. Use @added(since=<version>) annotation to indicate it has been added",
+      "'identifier' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongSeveralFields. Use @deletedFields(since=<version>,\"identifier\") annotation to indicate it has been deleted",
+      "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongSeveralFields. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted",
+    )
+  }
+
+  it should "report a missing current field when dry running Click v0 evolutions" in {
+    implicitly[TypeInformation[WrongMissingField]]
+
+    dryRunFailures[WrongMissingField](ClickV0FieldNames) shouldBe Seq(
+      "'missingField' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$WrongMissingField. Use @added(since=<version>) annotation to indicate it has been added"
+    )
+  }
+
+  // The declared evolutions are replayed on the former field names when resolving the compatibility, so a missing or
+  // wrong annotation refuses the restore up front instead of failing halfway through the migration.
+  it should "resolve the schema compatibility of Click v0 with a wrong added field as incompatible" in {
+    resolveSchemaCompatibilityFromFile[WrongAddedField]("Click-v0") shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of Click v0 with a wrong renamed field as incompatible" in {
+    resolveSchemaCompatibilityFromFile[WrongRenamedField]("Click-v0") shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of Click v0 with a wrong transformed field as incompatible" in {
+    resolveSchemaCompatibilityFromFile[WrongTransformedField]("Click-v0") shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of Click v0 with an extra field as incompatible" in {
+    resolveSchemaCompatibilityFromFile[WrongFieldNotUsed]("Click-v0") shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of Click v0 with a missing field as incompatible" in {
+    resolveSchemaCompatibilityFromFile[WrongMissingField]("Click-v0") shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of Click v0 with a wrong deleted field as incompatible" in {
+    resolveSchemaCompatibilityFromFile[WrongDeletedField]("Click-v0") shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of Click v0 with a field type changed without annotation as incompatible" in {
+    // The rename requires the evolutions, and 'fieldNotInFile' changed from Int to String without @transformed
+    resolveSchemaCompatibilityFromFile[WrongUntransformedField]("Click-v0") shouldBe Symbol("incompatible")
+  }
+
+  it should "resolve the schema compatibility of an evolved case class with an incompatible nested field as incompatible" in {
+    // The outer case class evolves through a rename, and its nested field type gained a field without @added
+    val formerNestedSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
+      clazz = classOf[AddedFieldWithoutAnnotation],
+      isCaseClassImmutable = true,
+      version = 0,
+      fieldNames = Array("a"),
+      paramSerializers = Array(createSerializer[String])
+    )
+    val formerSerializer = new CaseClassSerializer[OuterEvolvedWithNested](
+      clazz = classOf[OuterEvolvedWithNested],
+      isCaseClassImmutable = true,
+      version = 0,
+      fieldNames = Array("formerNested"),
+      paramSerializers = Array(formerNestedSerializer)
+    )
+
+    resolveSchemaCompatibility(formerSerializer) shouldBe Symbol("incompatible")
+  }
+
+  // A checkpoint written by a more recent source code, typically after a rollback: the annotations describing the
+  // versions in between don't exist here, so nothing can drive the migration.
+  it should "resolve the schema compatibility of a sealed trait restored by an outdated source code as incompatible" in {
+    val derived          = createSerializer[RolledBackTrait].asInstanceOf[CoproductSerializer[RolledBackTrait]]
+    val formerSerializer = new CoproductSerializer[RolledBackTrait](
+      clazz = derived.clazz,
+      version = derived.version + 1,
+      subtypeClasses = derived.subtypeClasses.dropRight(1),
+      subtypeFqns = derived.subtypeFqns.dropRight(1),
+      subtypeSerializers = derived.subtypeSerializers.dropRight(1)
+    )
+
+    resolveSchemaCompatibility(formerSerializer) shouldBe Symbol("incompatible")
+  }
+
+  // The former and the current classes are compared after resolveFormerClass mapped the former name to the current
+  // class, so a renamed case class must compare equal to itself.
+  it should "resolve the schema compatibility of a renamed case class as compatible after migration" in {
+    val formerSerializer = new CaseClassSerializer[FormerRenamedCaseClass](
+      clazz = classOf[FormerRenamedCaseClass],
+      isCaseClassImmutable = true,
+      version = 0,
+      fieldNames = Array("a", "removed"),
+      paramSerializers = Array(createSerializer[String], createSerializer[String])
+    )
+
+    resolveSchemaCompatibilityAfterRestore[RenamedCaseClass](formerSerializer) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
+  }
+
+  it should "resolve the schema compatibility of a sealed trait with a subtype removed without annotation as incompatible" in {
+    // The current schema drops the last subtype without declaring it with @deletedClasses
+    val derived = createSerializer[SubtypeRemovedWithoutAnnotation].asInstanceOf[CoproductSerializer[
+      SubtypeRemovedWithoutAnnotation
+    ]]
+    val formerSerializer = new CoproductSerializer[SubtypeRemovedWithoutAnnotation](
+      clazz = derived.clazz,
+      version = 0,
+      subtypeClasses = derived.subtypeClasses,
+      subtypeFqns = derived.subtypeFqns,
+      subtypeSerializers = derived.subtypeSerializers
+    )
+    val currentSerializer = new CoproductSerializer[SubtypeRemovedWithoutAnnotation](
+      clazz = derived.clazz,
+      version = 1,
+      subtypeClasses = derived.subtypeClasses.dropRight(1),
+      subtypeFqns = derived.subtypeFqns.dropRight(1),
+      subtypeSerializers = derived.subtypeSerializers.dropRight(1)
+    )
+
+    currentSerializer
+      .snapshotConfiguration()
+      .resolveSchemaCompatibility(formerSerializer.snapshotConfiguration()) shouldBe Symbol("incompatible")
+  }
+
+  // A serializer restored from a snapshot written before 2.4.0 legitimately holds no field name, as the test above
+  // checks, but any other count than one name per field serializer describes no readable form.
+  it should "throw when a case class serializer holds a field name count of its own" in {
+    val exception = intercept[IllegalArgumentException] {
+      new CaseClassSerializer[ClickAction](
+        clazz = classOf[ClickAction],
+        isCaseClassImmutable = true,
+        version = 1,
+        fieldNames = Array("id"),
+        paramSerializers = Array(createSerializer[String], createSerializer[String])
+      )
     }
-    exception.getMessage shouldBe "'missingField' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$WrongMissingField. Use @added(since=<version>) annotation to indicate it has been added"
+    exception.getMessage should endWith("has 1 field names for 2 field serializers")
+  }
+
+  it should "throw when two ADTs declare the same former class name" in {
+    implicitly[TypeInformation[FirstClaimingFormerName]]
+    val exception = intercept[FormerClassConflictException] {
+      implicitly[TypeInformation[SecondClaimingFormerName]]
+    }
+    exception.getMessage shouldBe "Former class 'org.apache.flinkx.api.EvolutionTest$SharedFormerName' is already declared as renamed to class org.apache.flinkx.api.EvolutionTest$FirstClaimingFormerName, it can't also be declared as renamed to class org.apache.flinkx.api.EvolutionTest$SecondClaimingFormerName. Two ADTs can't share the same former class name: fix their @renamed or @deletedClasses annotations"
+  }
+
+  it should "throw when a former class name is declared both renamed and deleted" in {
+    implicitly[TypeInformation[ClaimingFormerNameByRename]]
+    val exception = intercept[FormerClassConflictException] {
+      implicitly[TypeInformation[ClaimingFormerNameByDeletion]]
+    }
+    exception.getMessage shouldBe "Former class 'org.apache.flinkx.api.EvolutionTest$ClaimedByBoth' is already declared as renamed to class org.apache.flinkx.api.EvolutionTest$ClaimingFormerNameByRename, it can't also be declared as deleted. Two ADTs can't share the same former class name: fix their @renamed or @deletedClasses annotations"
+  }
+
+  // The same ADT is derived once per set of member type information, so a given annotation is legitimately read
+  // several times and declaring the same resolution again must stay a no-op.
+  it should "not throw when the same ADT declares its former class name twice" in {
+    implicitly[TypeInformation[FirstClaimingFormerName]]
+    auto.cache.clear() // Forces a second derivation of the very same ADT
+    implicitly[TypeInformation[FirstClaimingFormerName]] shouldNot be(null)
   }
 
   it should "throw when deserializing Event v0 with delete subtype instance" in {
@@ -294,6 +548,25 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
       testDeserializeFromFile[WrongDeletedClassesWithSubtypeInstanceThrow]("Event-v0", null)
     }
     exception.getMessage shouldBe "Encountered an instance of deleted 'org.apache.flinkx.api.EvolutionTest$View' class during deserialization. Don't delete a class in usage or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
+  }
+
+  // A field added without the @added annotation has no declared default value to fill when reading a former form, even
+  // when the case class declares one: the evolution has to be described rather than silently guessed.
+  it should "resolve the schema compatibility of a case class with a field added without annotation as incompatible" in {
+    val formerSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
+      clazz = classOf[AddedFieldWithoutAnnotation],
+      isCaseClassImmutable = true,
+      version = 0,
+      fieldNames = Array("a"),
+      paramSerializers = Array(createSerializer[String])
+    )
+
+    resolveSchemaCompatibilityAfterRestore[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol(
+      "incompatible"
+    )
+    dryRunFailures[AddedFieldWithoutAnnotation](Array("a")) shouldBe Seq(
+      "'b' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$AddedFieldWithoutAnnotation. Use @added(since=<version>) annotation to indicate it has been added"
+    )
   }
 
   it should "return null when deserializing Event v0 with delete subtype instance" in {
@@ -369,6 +642,65 @@ object EvolutionTest {
     case e @ _   => e
   }
 
+  case class AddedFieldWithoutAnnotation(a: String, b: Int = 42)
+
+  @version(1)
+  @renamed(since = 1, "Click")
+  @deletedFields(since = 1, "inFileClicks", "identifier", "b")
+  @deletedClasses(since = 1, throwOnInstance = false, "ClickEvent")
+  case class WrongUntransformedField(@renamed(since = 1, "a") renamedA: String, fieldNotInFile: String)
+
+  @version(1)
+  case class OuterEvolvedWithNested(@renamed(since = 1, "formerNested") nested: AddedFieldWithoutAnnotation)
+
+  case class UnrelatedFormerCaseClass(a: String, removed: String)
+
+  @version(1)
+  @deletedFields(since = 1, "removed")
+  case class UnrelatedCurrentCaseClass(a: String)
+
+  // Both traits are sealed in this file, so a single case class can be a member of each of them
+  @version(1)
+  sealed trait SharedSubtypeTrait
+  @version(1)
+  sealed trait OtherSharedSubtypeTrait
+  case class SharedSubtype(a: String) extends SharedSubtypeTrait with OtherSharedSubtypeTrait
+
+  @version(1)
+  @renamed(since = 1, "FormerRenamedCaseClass")
+  @deletedFields(since = 1, "removed")
+  case class RenamedCaseClass(a: String)
+
+  // Still declared to play the former class: the snapshot records its name, which the rename resolves
+  case class FormerRenamedCaseClass(a: String, removed: String)
+
+  @version(2)
+  sealed trait RolledBackTrait
+  case class RolledBackA(a: String) extends RolledBackTrait
+  case class RolledBackB(b: Int)    extends RolledBackTrait
+
+  @version(1)
+  @renamed(since = 1, "SharedFormerName")
+  case class FirstClaimingFormerName(a: String)
+
+  @version(1)
+  @renamed(since = 1, "SharedFormerName")
+  case class SecondClaimingFormerName(a: String)
+
+  @version(1)
+  @renamed(since = 1, "ClaimedByBoth")
+  case class ClaimingFormerNameByRename(a: String)
+
+  @version(1)
+  @deletedFields(since = 1, "removed")
+  @deletedClasses(since = 1, throwOnInstance = false, "ClaimedByBoth")
+  case class ClaimingFormerNameByDeletion(a: String)
+
+  @version(1)
+  sealed trait SubtypeRemovedWithoutAnnotation
+  case class RemainingSubtype(a: String) extends SubtypeRemovedWithoutAnnotation
+  case class RemovedSubtype(b: Int)      extends SubtypeRemovedWithoutAnnotation
+
   // Error handling
 
   @version(-1)
@@ -408,6 +740,13 @@ object EvolutionTest {
 
   @version(1)
   case class WrongAddedOnFieldWithoutDefaultValue(@added(1) a: String)
+
+  @version(1)
+  case class WrongSinceAboveVersion(@added(since = 2) a: String = "")
+
+  @version(1)
+  @deletedFields(since = 0, "removed")
+  case class WrongSinceBelowOne(a: String)
 
   case class WrongRenamedOnFieldWithoutVersion(@renamed(1, "a") a: String)
 
@@ -519,6 +858,12 @@ object EvolutionTest {
   @deletedFields(since = 2, "wrongFieldName")
   @deletedClasses(since = 1, "ClickEvent")
   case class WrongDeletedField(a: String)
+
+  @version(1)
+  @renamed(since = 1, "Click")
+  @deletedFields(since = 1, "inFileClicks", "fieldNotInFile")
+  @deletedClasses(since = 1, throwOnInstance = false, "ClickEvent")
+  case class WrongSeveralFields(a: String, missing: String)
 
   @version(1)
   @renamed(since = 1, "Click")

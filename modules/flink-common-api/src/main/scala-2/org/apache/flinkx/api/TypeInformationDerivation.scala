@@ -49,7 +49,7 @@ private[api] trait TypeInformationDerivation {
           )
         }
 
-        val builder = new EvolutionBuilder(clazz, fieldNames) // Field names required even with version 0
+        val builder = new EvolutionBuilder(clazz, version, fieldNames) // Field names required even with version 0
         if (version == 0) {
           // Do not allow Evolution annotations on version 0
           ctx.annotations.foreach {
@@ -106,11 +106,12 @@ private[api] trait TypeInformationDerivation {
         val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
         val version        = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
         val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
+        val subtypeFqns    = subtypeClasses.map(_.getName)
         val serializer     = new CoproductSerializer[T](
           clazz = clazz,
           version = version,
           subtypeClasses = subtypeClasses,
-          subtypeFqns = subtypeClasses.map(_.getName),
+          subtypeFqns = subtypeFqns,
           subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
         )
 
@@ -127,7 +128,7 @@ private[api] trait TypeInformationDerivation {
             }
           }
         } else { // version > 0
-          val builder = new EvolutionBuilder(clazz)
+          val builder = new EvolutionBuilder(clazz, version, subtypeFqns)
           // Iterate over coproduct annotations to register evolutions from current source code
           ctx.annotations.foreach {
             case r: renamed        => Evolutions.registerFormerClass(r.formerName, clazz)

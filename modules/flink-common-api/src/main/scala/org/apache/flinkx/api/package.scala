@@ -61,8 +61,8 @@ package object api {
 
   /** Marks a case class field added in a specific version. The annotated field must have a default value.
     *
-    * Adding a field in a case class without this annotation throws a
-    * [[org.apache.flinkx.api.evolution.FieldNotUsedException]] during deserialization.
+    * Adding a field in a case class without this annotation makes the schema compatibility resolution report the schema
+    * as incompatible, naming the field missing to instantiate the case class.
     *
     * Annotation of case class parameter.
     * @param since
@@ -144,8 +144,8 @@ package object api {
     *
     * Multiple annotations can coexist on the same class to record deletions made in different versions.
     *
-    * Removing a field in a case class without this annotation throws a
-    * [[org.apache.flinkx.api.evolution.MissingFieldException]] during deserialization. Annotation of case class.
+    * Removing a field in a case class without this annotation makes the schema compatibility resolution report the
+    * schema as incompatible, naming the former field left unused. Annotation of case class.
     * @param since
     *   Version in which the listed fields were deleted.
     * @param formerNames

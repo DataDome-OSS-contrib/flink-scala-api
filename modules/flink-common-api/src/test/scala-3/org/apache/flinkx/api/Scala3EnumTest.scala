@@ -3,6 +3,7 @@ package org.apache.flinkx.api
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.auto.*
+import org.apache.flinkx.api.serializer.Scala3EnumSerializer
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -58,6 +59,61 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     testDeserializeFromFile("Failure-Type-PARSING_TYPE-v0", expected)
   }
 
+  // A state backend gates the restore on the schema compatibility resolution, before deserializing anything: the
+  // evolutions are applied by the restored former serializer, so the state has to be migrated with it.
+  it should "resolve the schema compatibility of FailureType v0 to FailureCategory v1 as compatible after migration" in {
+    resolveSchemaCompatibilityFromFile[FailureCategory]("Failure-Type-PARSING_TYPE-v0") shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
+  }
+
+  it should "resolve the schema compatibility of an enum with a value removed without annotation as incompatible" in {
+    // The current schema drops the last enum value without declaring it with @deletedClasses
+    val derived = createSerializer[ValueRemovedWithoutAnnotation]
+      .asInstanceOf[Scala3EnumSerializer[ValueRemovedWithoutAnnotation & Product]]
+    val formerSerializer = new Scala3EnumSerializer(
+      clazz = derived.clazz,
+      version = 0,
+      enumValueNames = derived.enumValueNames,
+      enumValueSerializers = derived.enumValueSerializers
+    )
+    val currentSerializer = new Scala3EnumSerializer(
+      clazz = derived.clazz,
+      version = 1,
+      enumValueNames = derived.enumValueNames.dropRight(1),
+      enumValueSerializers = derived.enumValueSerializers.dropRight(1)
+    )
+
+    currentSerializer
+      .snapshotConfiguration()
+      .resolveSchemaCompatibility(formerSerializer.snapshotConfiguration()) shouldBe Symbol("incompatible")
+  }
+
+  // A checkpoint written by a more recent source code, typically after a rollback: the annotations describing the
+  // versions in between don't exist here, so nothing can drive the migration.
+  it should "resolve the schema compatibility of an enum restored by an outdated source code as incompatible" in {
+    val derived          = createSerializer[RolledBackEnum].asInstanceOf[Scala3EnumSerializer[RolledBackEnum & Product]]
+    val formerSerializer = new Scala3EnumSerializer(
+      clazz = derived.clazz,
+      version = derived.version + 1,
+      enumValueNames = derived.enumValueNames.dropRight(1),
+      enumValueSerializers = derived.enumValueSerializers.dropRight(1)
+    )
+
+    resolveSchemaCompatibility(formerSerializer) shouldBe Symbol("incompatible")
+  }
+
+  // Two unrelated enums must never be migrated into one another, even with identical value names
+  it should "resolve the schema compatibility of an unrelated enum as incompatible" in {
+    resolveSchemaCompatibilityAfterRestore[SecondUnrelatedEnum](createSerializer[FirstUnrelatedEnum]) shouldBe Symbol(
+      "incompatible"
+    )
+  }
+
+  it should "resolve the schema compatibility of an unevolved enum as compatible as is" in {
+    resolveSchemaCompatibility[Failure](createSerializer[Failure]) shouldBe Symbol("compatibleAsIs")
+  }
+
   /* Test to serialize FailureType.OTHER_TYPE v0 code into Failure-Type-OTHER_TYPE-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize FailureType.OTHER_TYPE v0" in {
     val failureType: FailureType = FailureType.OTHER_TYPE
@@ -96,6 +152,26 @@ object Scala3EnumTest {
     case MISSING extends FailureCategory(1)
     @renamed(since = 1, "PARSING_TYPE")
     case PARSING extends FailureCategory(2)
+  }
+
+  @version(1)
+  enum FirstUnrelatedEnum {
+    case X, Y
+  }
+
+  @version(1)
+  enum SecondUnrelatedEnum {
+    case X, Y
+  }
+
+  @version(2)
+  enum RolledBackEnum {
+    case First, Second
+  }
+
+  @version(1)
+  enum ValueRemovedWithoutAnnotation {
+    case Remaining, Removed
   }
 
   enum Example {

@@ -13,8 +13,11 @@ import scala.collection.mutable
   *
   * @param currentClass
   *   Current ADT class being derived
-  * @param currentFieldNames
-  *   Current case class field names, in declaration order; empty for sealed traits
+  * @param currentVersion
+  *   Current schema version of the ADT, the upper bound of the `since` of its evolutions
+  * @param currentMemberNames
+  *   Current ADT member names, in declaration order: the field names of a case class, the fully qualified names of the
+  *   subtypes of a sealed trait, or the value names of a Scala 3 enum
   * @param fieldEvolutions
   *   Field-level evolutions to apply on case class fields; empty for sealed traits
   * @param formerToCurrentEnumValueName
@@ -27,7 +30,8 @@ import scala.collection.mutable
 @Internal
 final class EvolutionBuilder[T](
     val currentClass: Class[T],
-    val currentFieldNames: Array[String] = Array.empty,
+    val currentVersion: Int,
+    val currentMemberNames: Array[String] = Array.empty,
     val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
     val formerToCurrentEnumValueName: mutable.Map[String, String] = mutable.Map.empty,
     private var postDeserialize: Option[(Int, T) => T] = None
@@ -39,14 +43,23 @@ final class EvolutionBuilder[T](
     throw EvolutionNotAllowedException(p, s"$currentClass twice")
   }
 
-  /** Build an immutable [[Evolution]] from accumulated registrations. */
-  def build(): Evolution[T] =
+  /** Build an immutable [[Evolution]] from accumulated registrations.
+    *
+    * @throws SinceNotAllowedException
+    *   if an evolution declares a `since` outside the version range of the ADT
+    */
+  def build(): Evolution[T] = {
+    fieldEvolutions
+      .find(e => e.since < 1 || e.since > currentVersion)
+      // An evolution outside the version range is never applied when it should
+      .foreach(e => throw SinceNotAllowedException(currentClass, e.since, currentVersion))
     new Evolution[T](
       currentClass,
-      currentFieldNames.clone(),
+      currentMemberNames.clone(),
       fieldEvolutions.sortInPlace().toArray,
       formerToCurrentEnumValueName.toMap,
       postDeserialize.getOrElse((_, i) => i)
     )
+  }
 
 }
