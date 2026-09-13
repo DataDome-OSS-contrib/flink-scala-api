@@ -36,13 +36,23 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         cached.asInstanceOf[TypeInformation[T]]
 
       case None =>
-        val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
-        val version    = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
-        val fieldNames = ctx.parameters.map(_.label).toArray
+        val clazz = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
+        // An enum value is not versioned on its own: it is a member of its enum, and is serialized with its version
+        val versionAnnotations = if typeTag.isEnum then ctx.inheritedAnnotations else ctx.annotations
+        val version            = Evolutions.findVersionInAnnotations(clazz, versionAnnotations)
+        val fieldNames         = ctx.parameters.map(_.label).toArray
 
         // Field names required even with version 0
         val builder = new EvolutionBuilder[T & Product](clazz, version, fieldNames)
-        if version == 0 then
+        if typeTag.isEnum then
+          ctx.annotations.foreach {
+            // An enum value declares no evolution of its own: its enum reads them in split()
+            case _: renamed if version > 0 => // Declared by the enum
+            case e: Evolved if version > 0 => throw EvolutionNotAllowedException(e, s"$clazz.${ctx.typeInfo.short}")
+            case e: Evolved                => throw EvolutionNotAllowedException(e, s"$clazz with version 0")
+            case _                         => // Ignore other annotations
+          }
+        else if version == 0 then
           // Do not allow Evolution annotations on version 0
           ctx.annotations.foreach {
             case _: renamed if ctx.inheritedAnnotations.exists(_.isInstanceOf[version]) => // Allow @renamed if parent has version
@@ -61,7 +71,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             case r: renamed        => builder.registerFormerClass(r.formerName, clazz, r.since)
             case d: deletedFields  => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
             case d: deletedClasses =>
-              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
+              d.formerClassNames.foreach(builder.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
             case p: postDeserialize[T & Product] => builder.addPostDeserialize(p)
             case e: Evolved                      => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                               => // Ignore other annotations
@@ -149,7 +159,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               val deleted = if d.throwOnInstance then DeletedThrowOnInstance else DeletedReturnNull
               d.formerClassNames.foreach(builder.formerEnumValues(_) = deleted)
             case d: deletedClasses =>
-              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
+              d.formerClassNames.foreach(builder.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                     => // Ignore other annotations

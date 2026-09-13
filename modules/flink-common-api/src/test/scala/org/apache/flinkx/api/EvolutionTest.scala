@@ -26,7 +26,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     */
   private def dryRunFailures(formerClassName: String, formerFieldNames: Array[String]): Seq[String] =
     Evolutions
-      .get[Any](formerClassName, 0)
+      .find[Any](formerClassName, 0, getClass.getClassLoader)
       .getOrElse(fail(s"No evolution registered for $formerClassName"))
       .dryRun(formerFieldNames)
       .swap
@@ -439,7 +439,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     dryRunFailures(ClickV0ClassName, ClickV0FieldNames) shouldBe Seq(
       "'missing' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$WrongSeveralFields. Use @added(since=<version>) annotation to indicate it has been added",
       "'identifier' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongSeveralFields. Use @deletedFields(since=<version>,\"identifier\") annotation to indicate it has been deleted",
-      "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongSeveralFields. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted",
+      "'b' field not used to instantiate class org.apache.flinkx.api.EvolutionTest$WrongSeveralFields. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
     )
   }
 

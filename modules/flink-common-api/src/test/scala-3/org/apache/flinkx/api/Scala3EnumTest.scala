@@ -3,7 +3,7 @@ package org.apache.flinkx.api
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.serializer.Scala3EnumSerializer
+import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -13,6 +13,16 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "derive type information for a Scala 3 enum" in {
     summon[TypeInformation[Example]] shouldNot be(null)
+  }
+
+  // A value is a member of its enum, not an ADT of its own: what it records has to describe the enum it belongs to
+  it should "serialize an enum value with the version of its enum" in {
+    val enumSerializer = createSerializer[FailureCategory].asInstanceOf[Scala3EnumSerializer[FailureCategory & Product]]
+
+    enumSerializer.version shouldBe 1
+    forAll(enumSerializer.enumValueSerializers.toSeq) {
+      _.asInstanceOf[Scala3EnumValueSerializer[?]].version shouldBe enumSerializer.version
+    }
   }
 
   it should "derive type information for a Scala 3 enum value" in {

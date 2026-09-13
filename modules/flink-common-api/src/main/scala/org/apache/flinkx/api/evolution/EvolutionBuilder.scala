@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution
+import org.apache.flinkx.api.evolution.Evolution.{AdtDeclaration, DeletedClass, EnumValueEvolution}
 import org.apache.flinkx.api.evolution.EvolutionBuilder.{ClassEvolution, postDeserializeIdentity}
 import org.apache.flinkx.api.postDeserialize
 import org.apache.flinkx.api.util.ClassUtil
@@ -23,6 +23,8 @@ import scala.collection.mutable
   *   subtypes of a sealed trait, or the value names of a Scala 3 enum
   * @param formerToCurrentClass
   *   Former ADT class names, with the current class they resolve to and the version of the rename
+  * @param deletedFormerClasses
+  *   Former class names deleted from the current source code, with the version of their deletion
   * @param fieldEvolutions
   *   Field-level evolutions to apply on case class fields; empty for sealed traits
   * @param formerEnumValues
@@ -38,6 +40,7 @@ final class EvolutionBuilder[T](
     val currentVersion: Int,
     val currentMemberNames: Array[String] = Array.empty,
     val formerToCurrentClass: mutable.Map[String, ClassEvolution] = mutable.Map.empty,
+    val deletedFormerClasses: mutable.Map[String, ClassEvolution] = mutable.Map.empty,
     val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
     val formerEnumValues: mutable.Map[String, EnumValueEvolution] = mutable.Map.empty,
     private var postDeserialize: Option[(Int, T) => T] = None
@@ -56,6 +59,27 @@ final class EvolutionBuilder[T](
     formerToCurrentClass(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) =
       ClassEvolution(currentClass, version)
 
+  /** Register that a former ADT subtype or field type has been deleted from the current source code.
+    *
+    * @param formerClassName
+    *   Name of the deleted former subtype or field type (simple, relative or absolute)
+    * @param currentClass
+    *   Current ADT class, used as reference to resolve `formerClassName` to its fully-qualified internal form
+    * @param version
+    *   Version in which the deletion took effect
+    * @param throwOnInstance
+    *   If `true`, encountering an instance of this former class during deserialization throws, otherwise the instance
+    *   is deserialized as `null`
+    */
+  def registerDeletedFormerClass(
+      formerClassName: String,
+      currentClass: Class[_],
+      version: Int,
+      throwOnInstance: Boolean
+  ): Unit =
+    deletedFormerClasses(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) =
+      ClassEvolution(DeletedClass, version, throwOnInstance)
+
   def addPostDeserialize(p: postDeserialize[T]): Unit = if (postDeserialize.isEmpty) {
     postDeserialize = Some(p.mapper)
   } else {
@@ -69,11 +93,11 @@ final class EvolutionBuilder[T](
     *   - the current name is valid from the version of the last rename (to avoid collision) up to the current one.
     *
     * @return
-    *   the [[Evolution]]s to register, by class name
+    *   the declaration of the ADT, holding the [[Evolution]]s to register by class name
     * @throws SinceNotAllowedException
     *   if an evolution declares a `since` outside the version range of the ADT
     */
-  def build(): Map[String, Array[Evolution[T]]] = {
+  private[evolution] def build(): AdtDeclaration = {
     fieldEvolutions
       .find(e => e.since < 1 || e.since > currentVersion)
       // An evolution outside the version range is never applied when it should
@@ -82,7 +106,7 @@ final class EvolutionBuilder[T](
     // Computed before adding the current name below, which is only valid from the last rename onwards
     val currentNameSince = formerToCurrentClass.values.map(_.version).maxOption.getOrElse(0)
     formerToCurrentClass.put(currentClass.getName, ClassEvolution(currentClass, currentVersion))
-    formerToCurrentClass.iterator.map { case (className, classEvolution) =>
+    val renamedNames = formerToCurrentClass.iterator.map { case (className, classEvolution) =>
       val isCurrentName = className == currentClass.getName
       val firstVersion  = if (isCurrentName) currentNameSince else 0
       val lastVersion   = if (isCurrentName) currentVersion else classEvolution.version - 1
@@ -95,7 +119,19 @@ final class EvolutionBuilder[T](
         .distinct
         .sorted
       className -> versions.map(buildEvolution(className, classEvolution, _)).toArray
-    }.toMap
+    }
+    // A class deleted in version N still exists in the data written in version N - 1
+    val deletedNames = deletedFormerClasses.iterator.map { case (className, classEvolution) =>
+      className -> Array(buildEvolution(className, classEvolution, classEvolution.version - 1))
+    }
+    val byClassName = (renamedNames ++ deletedNames)
+      .foldLeft(Map.empty[String, Array[Evolution[T]]]) { case (acc, (className, evolutions)) =>
+        acc.updatedWith(className)(registered => Some(registered.fold(evolutions)(_ ++ evolutions)))
+      }
+    // Every evolution of the ADT carries the whole declaration, to reinstate it where the derivation never ran
+    val declaration = new AdtDeclaration(currentClass, byClassName.asInstanceOf[Map[String, Array[Evolution[_]]]])
+    byClassName.valuesIterator.flatten.foreach(_.declaration = declaration)
+    declaration
   }
 
   private def buildEvolution(className: String, classEvolution: ClassEvolution, previousVersion: Int): Evolution[T] =
