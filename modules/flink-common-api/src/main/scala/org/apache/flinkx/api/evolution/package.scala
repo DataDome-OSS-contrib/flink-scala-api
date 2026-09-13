@@ -51,6 +51,15 @@ package object evolution {
   final case class AddedFieldWithoutDefaultException(currentClass: Class[_], currentField: String)
       extends FlinkRuntimeException(s"'$currentField' added field in $currentClass must have a default value")
 
+  /** Exception indicating the evolutions of `formerFqn` never reached the JVM restoring it. */
+  final case class EvolutionNotDeclaredException(formerFqn: String, formerVersion: Int)
+      extends FlinkRuntimeException(
+        s"Cannot restore '$formerFqn': the checkpoint was written at @version($formerVersion), but no evolution is" +
+          s" declared for that class here. The evolutions are read from the annotations when the type information is" +
+          s" derived, which happens where the job graph is built: make the state descriptor, or the TypeInformation" +
+          s" it is built from, reachable from the serialized function so that it reaches the TaskManager"
+      )
+
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */
   final case class FormerClassConflictException(formerFqn: String, declared: String, conflicting: String)
       extends FlinkRuntimeException(
