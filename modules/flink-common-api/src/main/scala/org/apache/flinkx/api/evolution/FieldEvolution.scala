@@ -20,9 +20,9 @@ import scala.collection.mutable
   *   Operation phase, defining sort order within a single version
   */
 @Internal
-abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] {
+abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] with Serializable {
 
-  private[FieldEvolution] lazy val logger: Logger = LoggerFactory.getLogger(this.getClass)
+  @transient private[FieldEvolution] lazy val logger: Logger = LoggerFactory.getLogger(this.getClass)
 
   /** Mutate field-name to field-value map in place to apply this evolution step.
     *
@@ -52,7 +52,7 @@ object FieldEvolution {
 
   /** Operation phase used to order evolutions within a single version (lower rank applied first). */
   @Internal
-  sealed abstract class Phase(val rank: Int)
+  sealed abstract class Phase(val rank: Int) extends Serializable
   object Phase {
     case object Delete    extends Phase(0)
     case object Rename    extends Phase(1)

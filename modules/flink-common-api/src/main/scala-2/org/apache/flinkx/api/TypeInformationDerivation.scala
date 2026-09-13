@@ -53,7 +53,7 @@ private[api] trait TypeInformationDerivation {
             case r: renamed        => builder.registerFormerClass(r.formerName, clazz, r.since)
             case d: deletedFields  => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
             case d: deletedClasses =>
-              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
+              d.formerClassNames.foreach(builder.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                     => // Ignore other annotations
@@ -128,7 +128,7 @@ private[api] trait TypeInformationDerivation {
           ctx.annotations.foreach {
             case r: renamed        => builder.registerFormerClass(r.formerName, clazz, r.since)
             case d: deletedClasses =>
-              d.formerClassNames.foreach(Evolutions.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
+              d.formerClassNames.foreach(builder.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
             case p: postDeserialize[T] => builder.addPostDeserialize(p)
             case e: Evolved            => throw EvolutionNotAllowedException(e, clazz.toString)
             case _                     => // Ignore other annotations

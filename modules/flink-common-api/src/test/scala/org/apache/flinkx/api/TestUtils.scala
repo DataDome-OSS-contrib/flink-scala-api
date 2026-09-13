@@ -23,7 +23,7 @@ import scala.reflect.ClassTag
 
 trait TestUtils extends Matchers with Inspectors {
 
-  private def snapshotPath(fileName: String): String =
+  protected def snapshotPath(fileName: String): String =
     getClass.getResource("/").toURI.resolve(s"../../../src/test/resources/$fileName.snapshot").getPath
 
   def serializeToFile[T](fileName: String, data: T)(implicit ser: TypeSerializer[T]): Unit = {
@@ -225,9 +225,17 @@ trait TestUtils extends Matchers with Inspectors {
       case _ => // ok
     }
 
+  /** Checks the serializer survives the Java serialization round trip the job graph puts it through.
+    *
+    * Reading it back matters as much as writing it: a class whose non-serializable base has no no-arg constructor is
+    * written without complaint and only fails on the way back.
+    */
   def javaSerializable[T](ser: TypeSerializer[T]): Unit = {
-    val stream = new ObjectOutputStream(new ByteArrayOutputStream())
-    stream.writeObject(ser)
+    val bytes = new ByteArrayOutputStream()
+    val out   = new ObjectOutputStream(bytes)
+    out.writeObject(ser)
+    out.close()
+    new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray)).readObject() shouldBe a[TypeSerializer[_]]
   }
 
   /** Tests a serializer by performing a serialization roundtrip, checking that the result matches the expected value,

@@ -3,7 +3,7 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.annotation.Internal
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.Unchanged
-import org.apache.flinkx.api.evolution.Evolution.{DeletedClass, EnumValueEvolution}
+import org.apache.flinkx.api.evolution.Evolution.{AdtDeclaration, DeletedClass, EnumValueEvolution, NoDeclaration}
 import org.apache.flinkx.api.evolution.FieldEvolution.FieldIndex
 
 import scala.collection.mutable
@@ -48,6 +48,17 @@ sealed class Evolution[T] private[evolution] (
     val postDeserialize: (Int, T) => T = (formerVersion: Int, currentAdtInstance: T) => currentAdtInstance
 ) extends Ordered[Evolution[_]]
     with Serializable {
+
+  /** The whole ADT declaration this evolution belongs to.
+    *
+    * Travels with the serializer holding this evolution, so that [[Evolutions.register]] can reinstate the declaration
+    * in a JVM where the derivation never ran: a TaskManager only Java-deserializes the serializers of the job graph,
+    * and the restore of a checkpoint reads the former names and versions out of the registry.
+    *
+    * Set by [[EvolutionBuilder.build]] once the evolutions it produces are all built, which makes the reference cyclic.
+    * Nothing reads it while deserializing, so the cycle stays inert.
+    */
+  private[evolution] var declaration: AdtDeclaration = NoDeclaration
 
   /** Evolutions of a same class name are sorted by ascending `version`, a deletion coming first among the evolutions
     * declared for the same version.
@@ -116,9 +127,10 @@ sealed class Evolution[T] private[evolution] (
     val fieldIndexes = mutable.Map.from(formerFieldNames.zipWithIndex.map { case (name, i) => name -> Option(i) })
     // The iterator is lazy, so it stops on the first failing evolution
     val failedEvolution = fieldEvolutions.iterator
-      .flatMap(_.dryRun(fieldIndexes)).nextOption()
+      .flatMap(_.dryRun(fieldIndexes))
+      .nextOption()
     // Check instantiation only when there is no failed evolution
-    val failures = failedEvolution.fold(checkInstantiation(fieldIndexes.keySet))(Array(_))
+    val failures = failedEvolution.fold(checkInstantiation(fieldIndexes.keySet))(Seq(_))
     if (failures.nonEmpty) Left(failures) else Right(currentMemberNames.map(fieldIndexes))
   }
 
@@ -140,6 +152,25 @@ object Evolution {
     new Evolution(clazz.getName, version, clazz) {
       override def isAvoidable(formerMemberNames: Array[String]): Boolean = true
     }
+
+  /** Every [[Evolution]] an ADT declares, by class name, with the ADT class they were derived from.
+    *
+    * The current class names the class loader the declaration belongs to, which is how [[Evolutions]] keeps the
+    * declarations of two jobs apart when this library is shared by several of them.
+    */
+  private[evolution] final class AdtDeclaration(
+      val currentClass: Class[_],
+      val byClassName: Map[String, Array[Evolution[_]]]
+  ) extends Serializable {
+
+    /** Class loader defining the ADT, `null` for the declarations of no class at all. */
+    def classLoader: ClassLoader = if (currentClass == null) null else currentClass.getClassLoader
+
+    def isEmpty: Boolean = byClassName.isEmpty
+  }
+
+  /** Declaration of the [[Evolution]]s built outside of an ADT derivation, which declare nothing to register. */
+  private[evolution] val NoDeclaration: AdtDeclaration = new AdtDeclaration(null, Map.empty)
 
   /** Singleton no-op [[Evolution]] for a snapshot recording no class name at all, as written before 2.4.0. */
   private[api] val NoEvolution: Evolution[Any] = new Evolution[Any](null, 0, null) {

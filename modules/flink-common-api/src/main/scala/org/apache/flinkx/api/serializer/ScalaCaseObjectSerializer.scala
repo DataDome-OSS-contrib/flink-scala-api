@@ -5,6 +5,8 @@ import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
 
+import java.io.{IOException, ObjectInputStream}
+
 class ScalaCaseObjectSerializer[T](val evolution: Evolution[T], val version: Int) extends ImmutableSerializer[T] {
 
   @transient private lazy val caseObject: T = if (evolution.isDeleted) {
@@ -19,6 +21,14 @@ class ScalaCaseObjectSerializer[T](val evolution: Evolution[T], val version: Int
   override def serialize(record: T, target: DataOutputView): Unit        = {}
   override def deserialize(source: DataInputView): T                     = caseObject
 
+  // A TaskManager only Java-deserializes the serializers of the job graph, so each of them registers again the ADT
+  // declaration it carries: the derivation ran on the client, and the restore needs the registry
+  @throws[IOException]
+  @throws[ClassNotFoundException]
+  private def readObject(in: ObjectInputStream): Unit = {
+    in.defaultReadObject()
+    Evolutions.register(evolution)
+  }
   override def snapshotConfiguration(): TypeSerializerSnapshot[T] =
     new ScalaCaseObjectSerializerSnapshot(Some(this))
 
