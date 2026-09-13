@@ -426,6 +426,45 @@ case class Dog(name: String)
 
 **Delete then recreate a class:**
 
+#### Deployment
+
+The evolutions are read from the annotations of your source code when the type information is derived, which happens on
+the client submitting the job. A TaskManager never derives anything: it receives the serializers of the job graph, and
+each of them carries the evolutions of its ADT and declares them again when it is deserialized, before any state is
+restored.
+
+This happens early enough: a TaskManager builds its operator chain, which deserializes the functions and the
+serializers of the job graph, before it restores any state. Declare the type information of a state where it travels
+with the job graph, in a field built with the rest of the graph:
+
+```scala
+class Counter extends KeyedProcessFunction[String, Event, Event] {
+  // Built on the client and serialized with this function, so its evolutions reach the TaskManager
+  private val descriptor = new ValueStateDescriptor("count", implicitly[TypeInformation[Event]])
+  …
+}
+```
+
+Anything evaluated only on the TaskManager derives the type information after the state has been restored, and the
+evolutions then come too late to be applied. A descriptor built inside `open()` or inside a `lazy val` falls in that
+case, and so does — less visibly — a descriptor held by a companion `object`: Java serialization carries instance
+fields, not statics, so an object whose `val` is read from `open()` alone initializes on the TaskManager. Initializing
+it on the client beforehand doesn't help either, as the TaskManager has statics of its own. The deciding question is
+whether the descriptor, or at least the `TypeInformation` it was built from, is reachable from the serialized
+function.
+
+When a checkpoint records a schema version but no declaration for that class reached the JVM restoring it, the
+restore fails with an `EvolutionNotDeclaredException` rather than reading the former form as if it had never evolved.
+A checkpoint written by a more recent source code is not that case: the declaration is there, it just doesn't reach
+that far, and the schema compatibility resolution reports it.
+
+These declarations are held per class loader defining the ADTs. With the default child-first class loading,
+`flink-scala-api` sits in your application jar and a job has a registry entirely of its own. Putting it in the `lib`
+directory of the cluster instead makes the registry itself shared by every job of a TaskManager, which stays correct —
+a class name is resolved in the registry of the job asking for it — but its entries hold the classes of the jobs that
+filled them, hence their class loaders, well after those jobs are gone. Keeping the library in the application jar
+remains the recommended deployment.
+
 ## Compatibility
 
 This project uses a separate set of serializers for collections, instead of Flink's own TraversableSerializer. So probably you

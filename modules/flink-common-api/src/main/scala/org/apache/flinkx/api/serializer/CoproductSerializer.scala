@@ -13,6 +13,7 @@ import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 import org.apache.flinkx.api.serializer.CoproductSerializer.CoproductSerializerSnapshot
 import org.slf4j.{Logger, LoggerFactory}
+import java.io.{IOException, ObjectInputStream}
 
 class CoproductSerializer[T](
     val evolution: Evolution[T],
@@ -95,6 +96,14 @@ class CoproductSerializer[T](
     }
   }
 
+  // A TaskManager only Java-deserializes the serializers of the job graph, so each of them registers again the ADT
+  // declaration it carries: the derivation ran on the client, and the restore needs the registry
+  @throws[IOException]
+  @throws[ClassNotFoundException]
+  private def readObject(in: ObjectInputStream): Unit = {
+    in.defaultReadObject()
+    Evolutions.register(evolution)
+  }
   override def snapshotConfiguration(): TypeSerializerSnapshot[T] =
     new CoproductSerializerSnapshot(Some(this))
 }
