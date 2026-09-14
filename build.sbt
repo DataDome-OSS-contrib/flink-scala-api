@@ -122,6 +122,36 @@ lazy val mimaSettings = Seq(
     ProblemFilters.exclude[ReversedMissingMethodProblem]("org.apache.flinkx.api.rowdata.RowDataConverter.rowType"),
     ProblemFilters.exclude[DirectMissingMethodProblem](
       "org.apache.flinkx.api.rowdata.RowDataConverter#DerivedRowDataConverter.this"
+    ),
+    // The ADT serializers take the schema version and the former member names required by the schema evolution feature
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CaseClassSerializer.this"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CoproductSerializer.this"),
+    // Former class names are now resolved by Evolutions.resolveFormerClass, which also maps the deleted ones
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.util.ClassUtil.resolveClassByName"),
+    // Case class field names are held in an Array, as the serializers and their snapshots do
+    ProblemFilters.exclude[com.typesafe.tools.mima.core.IncompatibleMethTypeProblem](
+      "org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable"
+    ),
+    // Scala 3 derivation now also collects the default value of the case class fields, for @added
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.CommonTaggedDerivation.getParams_$default$5"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.CommonTaggedDerivation.getParams_$default$5$"
+    ),
+    // The Scala 3 enum serializers take the schema version and the enum class instead of its companion module class
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.Scala3EnumSerializer.this"),
+    ProblemFilters.exclude[IncompatibleSignatureProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializer.this"
+    ),
+    ProblemFilters.exclude[IncompatibleSignatureProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.this"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.companionClass"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.companionClass_="
     )
   )
 )

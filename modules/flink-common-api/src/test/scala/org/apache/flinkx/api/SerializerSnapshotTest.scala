@@ -8,6 +8,7 @@ import org.apache.flink.util.ChildFirstClassLoader
 import org.apache.flinkx.api.SerializerSnapshotTest._
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.evolution.Evolutions
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -141,9 +142,11 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val expectedData = WithDefault(null)
     // Serializer before schema change: without serializers for the second "new" default fields
     val oldSerializer = new CaseClassSerializer[WithDefault](
-      clazz = classOf[WithDefault],
-      scalaFieldSerializers = Array(implicitly[TypeSerializer[SimpleClass1]]),
-      isCaseClassImmutable = false
+      evolution = Evolutions.get(classOf[WithDefault], 0),
+      version = 0,
+      isCaseClassImmutable = false,
+      fieldNames = Array("sc1"),
+      paramSerializers = Array(implicitly[TypeSerializer[SimpleClass1]])
     )
     val oldSnapshot = oldSerializer.snapshotConfiguration()
 
@@ -154,14 +157,17 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
     // Serialize the "old" data with "old" serializer
     oldSerializer.serialize(expectedData, output)
 
-    // Deserialize the old snapshot
+    // Now, application is restarted with the new (current) code
+    val newSerializer = implicitly[TypeSerializer[WithDefault]]
+
+    // Deserialize the old serializer
     val input                   = new DataInputDeserializer(output.getSharedBuffer)
     val deserializedOldSnapshot = TypeSerializerSnapshot
       .readVersionedSnapshot[WithDefault](input, getClass.getClassLoader) // Flink always calls this
+    val deserializedOldSerializer = deserializedOldSnapshot.restoreSerializer()
 
-    // Deserialize the old data with the new serializer
-    val newSerializer    = implicitly[TypeSerializer[WithDefault]]
-    val deserializedData = newSerializer.deserialize(input)
+    // Deserialize the old data with the deserialized old serializer
+    val deserializedData = deserializedOldSerializer.deserialize(input)
     deserializedData should be(expectedData)
 
     // serialize modified data with new serializer
@@ -214,6 +220,10 @@ object SerializerSnapshotTest {
 
   case class OuterClass(map: Map[UUID, List[OuterTrait]])
 
-  case class WithDefault(var sc1: SimpleClass1 = SimpleClass1("a", 1), var sc2: SimpleClass2 = SimpleClass2("b", 2))
+  @version(1)
+  case class WithDefault(
+      var sc1: SimpleClass1 = SimpleClass1("a", 1),
+      @added(since = 1) var sc2: SimpleClass2 = SimpleClass2("b", 2)
+  )
 
 }
