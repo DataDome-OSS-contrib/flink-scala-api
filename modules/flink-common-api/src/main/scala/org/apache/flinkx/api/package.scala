@@ -23,23 +23,6 @@ package object api {
     */
   final case class DerivationCacheKey(typeName: String, memberTypeInfos: Seq[TypeInformation[_]])
 
-  /** Declares the current schema version of an ADT (case class, sealed trait or Scala 3 enum) and opts it in to the
-    * annotation-based schema evolution feature allowing to restore former data read from a checkpoint to the current
-    * source code.
-    *
-    * This feature commonly employs the following vocabulary to qualify version, class, field, etc.:
-    *   - `Former` describes the serialization time when the checkpoint was done.
-    *   - `Current` describes the deserialization time with the current source code.
-    *
-    * An ADT without this annotation is considered to have version 0 which makes it safe to add `@version(1)` to an
-    * existing ADT and restore it from a checkpoint produced by the unversioned code.
-    *
-    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
-    * @param current
-    *   Current schema version, must be >= 0 or [[org.apache.flinkx.api.evolution.VersionNotAllowedException]] is thrown
-    */
-  final case class version(current: Int) extends StaticAnnotation
-
   /** Marker trait for every evolution annotation. */
   trait Evolved extends StaticAnnotation
 

@@ -8,7 +8,7 @@ import org.apache.flink.util.ChildFirstClassLoader
 import org.apache.flinkx.api.SerializerSnapshotTest._
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.evolution.{Declare, Evolutions}
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -139,6 +139,7 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
   }
 
   it should "serialize and deserialize case class with null and default" in {
+    Declare.declare[WithDefault]
     val expectedData = WithDefault(null)
     // Serializer before schema change: without serializers for the second "new" default fields
     val oldSerializer = new CaseClassSerializer[WithDefault](

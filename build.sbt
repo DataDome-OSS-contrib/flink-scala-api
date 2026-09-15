@@ -105,6 +105,17 @@ lazy val commonSettings = Seq(
   }
 )
 
+lazy val `sbt-evolutions` = project
+  .in(file("modules/sbt-evolutions"))
+  .enablePlugins(SbtPlugin)
+  .settings(
+    name               := "sbt-flinkx-evolutions",
+    scalaVersion       := "2.12.20",
+    crossScalaVersions := Seq("2.12.20"),
+    libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.20" % Test,
+    publish / skip := false
+  )
+
 // Checks that this build doesn't break the binary compatibility of the code compiled against mimaPreviousVersion
 lazy val mimaSettings = Seq(
   mimaPreviousArtifacts       := Set(organization.value %% moduleName.value % mimaPreviousVersion),

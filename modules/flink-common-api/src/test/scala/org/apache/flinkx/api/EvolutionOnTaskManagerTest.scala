@@ -4,7 +4,7 @@ import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnap
 import org.apache.flink.core.memory.DataInputViewStreamWrapper
 import org.apache.flink.util.InstantiationUtil
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.{EvolutionBuilder, EvolutionNotDeclaredException, Evolutions}
+import org.apache.flinkx.api.evolution.{Declare, EvolutionBuilder, EvolutionNotDeclaredException, Evolutions}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -12,21 +12,27 @@ import org.scalatest.matchers.should.Matchers
 import java.io.FileInputStream
 
 /** Reproduces what a TaskManager does with a serializer: it is Java-deserialized from the job graph into a JVM where
-  * the derivation never ran, so the [[Evolutions]] registry only holds what the serializers themselves carry.
+  * the derivation never ran, so the [[Evolutions]] registry only holds what the providers of the jar declare.
   */
 class EvolutionOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
 
   import org.apache.flinkx.api.EvolutionTest._
-  import org.apache.flinkx.api.evolution.EvolutionRenamedTest._
+  import org.apache.flinkx.api.evolution.EvolutionRenamedTest
+  import org.apache.flinkx.api.evolution.EvolutionRenamedTest.Pet
 
   override protected def beforeEach(): Unit = Evolutions.reset()
 
   /** Derive the serializer as the client does, ship it through Java serialization as the job graph does, then hand it
     * back in a JVM whose registry has been emptied, as a fresh TaskManager would.
+    *
+    * @param declare
+    *   Declarations of the ADT, replayed on the TaskManager side as the `EvolutionsProvider` of the jar does
     */
-  private def shipToTaskManager[T](serializer: TypeSerializer[T]): TypeSerializer[T] = {
+  private def shipToTaskManager[T](declare: => Unit)(serializer: => TypeSerializer[T]): TypeSerializer[T] = {
+    declare
     val jobGraphBytes = InstantiationUtil.serializeObject(serializer)
     Evolutions.reset() // Fresh TaskManager JVM: the derivation never ran here
+    declare            // What the provider listed in the jar does, on the first lookup that misses
     InstantiationUtil.deserializeObject[TypeSerializer[T]](jobGraphBytes, getClass.getClassLoader)
   }
 
@@ -39,11 +45,15 @@ class EvolutionOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUtil
   }
 
   // The former names of the trait, of its subtype and of its field are only known from the annotations of the current
-  // source code, which is read on the client: the registry has to be reinstated here to resolve them
+  // source code: the registry has to be filled here to resolve them
   it should "restore a renamed sealed trait on a TaskManager" in {
-    shipToTaskManager(createSerializer[Pet])
+    shipToTaskManager {
+      Declare.declare[Pet]
+      Declare.declare[EvolutionRenamedTest.Pony]
+      Declare.declare[EvolutionRenamedTest.Horse]
+    }(createSerializer[Pet])
 
-    restoreFromFile[Pet]("Pet-v0") shouldBe Pony("Spirit")
+    restoreFromFile[Pet]("Pet-v0") shouldBe EvolutionRenamedTest.Pony("Spirit")
   }
 
   // Restoring without the declaration would read the former form as if it never evolved, which no later check can
@@ -66,7 +76,11 @@ class EvolutionOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUtil
   }
 
   it should "restore a deleted subtype on a TaskManager" in {
-    shipToTaskManager(createSerializer[Animal])
+    shipToTaskManager {
+      Declare.declare[Animal]
+      Declare.declare[EvolutionTest.Horse]
+      Declare.declare[EvolutionTest.Lion]
+    }(createSerializer[Animal])
 
     restoreFromFile[Animal]("Animal-v0") shouldBe null
   }

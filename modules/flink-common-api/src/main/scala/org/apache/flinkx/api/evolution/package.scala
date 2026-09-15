@@ -10,6 +10,14 @@ package object evolution {
   final case class VersionNotAllowedException(currentClass: Class[_], version: Int)
       extends FlinkRuntimeException(s"Current version of $currentClass must be >= 0, got @version($version)")
 
+  /** Exception indicating a `version` annotation is declared on a field instead of on an ADT. */
+  final case class VersionNotAllowedOnFieldException(currentClass: Class[_], currentField: String)
+      extends FlinkRuntimeException(s"@version annotation is not allowed on $currentClass.$currentField")
+
+  /** Message of a misplaced evolution annotation, reported by the macros declaring the evolutions. */
+  private[api] def evolutionNotAllowed(annotation: String, target: String): String =
+    s"@$annotation annotation is not allowed on $target"
+
   /** Exception indicating `evolution` annotation is not allowed on `target`. */
   final case class EvolutionNotAllowedException(evolution: StaticAnnotation, target: String)
       extends FlinkRuntimeException(s"@$evolution annotation is not allowed on $target")
@@ -55,9 +63,10 @@ package object evolution {
   final case class EvolutionNotDeclaredException(formerFqn: String, formerVersion: Int)
       extends FlinkRuntimeException(
         s"Cannot restore '$formerFqn': the checkpoint was written at @version($formerVersion), but no evolution is" +
-          s" declared for that class here. The evolutions are read from the annotations when the type information is" +
-          s" derived, which happens where the job graph is built: make the state descriptor, or the TypeInformation" +
-          s" it is built from, reachable from the serialized function so that it reaches the TaskManager"
+          s" declared for that class here. The evolutions of a module travel in its jar, listed in" +
+          s" META-INF/services/${classOf[EvolutionsProvider].getName}: check that the module declaring that class" +
+          s" enables FlinkxEvolutionsPlugin, and that the assembly merges the service files instead of overwriting" +
+          s" them"
       )
 
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */

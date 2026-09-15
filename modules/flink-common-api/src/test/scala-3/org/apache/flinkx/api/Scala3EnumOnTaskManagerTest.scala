@@ -6,7 +6,7 @@ import org.apache.flink.util.InstantiationUtil
 import org.apache.flinkx.api.Scala3EnumTest.FailureCategory
 import org.apache.flinkx.api.serializer.Scala3EnumSerializer
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.evolution.{EvolutionNotDeclaredException, Evolutions}
+import org.apache.flinkx.api.evolution.{Declare, EvolutionNotDeclaredException, Evolutions}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -14,15 +14,17 @@ import org.scalatest.matchers.should.Matchers
 import java.io.FileInputStream
 
 /** Reproduces what a TaskManager does with an enum serializer: it is Java-deserialized from the job graph into a JVM
-  * where the derivation never ran, so the [[Evolutions]] registry is only what the serializers themselves carry.
+  * where the derivation never ran, so the [[Evolutions]] registry only holds what the providers of the jar declare.
   */
 class Scala3EnumOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
 
   override protected def beforeEach(): Unit = Evolutions.reset()
 
   it should "restore a renamed enum value on a TaskManager" in {
+    Declare.declare[FailureCategory]
     val jobGraphBytes = InstantiationUtil.serializeObject(createSerializer[FailureCategory])
-    Evolutions.reset() // Fresh TaskManager JVM: the derivation never ran here
+    Evolutions.reset()               // Fresh TaskManager JVM: the derivation never ran here
+    Declare.declare[FailureCategory] // What the provider listed in the jar does, on the first lookup that misses
     InstantiationUtil.deserializeObject[TypeSerializer[FailureCategory]](jobGraphBytes, getClass.getClassLoader)
 
     val input = new DataInputViewStreamWrapper(new FileInputStream(snapshotPath("Failure-Type-PARSING_TYPE-v0")))

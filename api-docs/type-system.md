@@ -428,30 +428,20 @@ case class Dog(name: String)
 
 #### Deployment
 
-The evolutions are read from the annotations of your source code when the type information is derived, which happens on
-the client submitting the job. A TaskManager never derives anything: it receives the serializers of the job graph, and
-each of them carries the evolutions of its ADT and declares them again when it is deserialized, before any state is
-restored.
-
-This happens early enough: a TaskManager builds its operator chain, which deserializes the functions and the
-serializers of the job graph, before it restores any state. Declare the type information of a state where it travels
-with the job graph, in a field built with the rest of the graph:
+The evolutions are read from the annotations of your source code, which the `sbt-evolutions` plugin scans at build
+time: it lists every versioned ADT of the module in a generated `EvolutionsProvider`, declared in
+`META-INF/services/org.apache.flinkx.api.evolution.EvolutionsProvider`. Enable it on every module declaring versioned
+ADTs:
 
 ```scala
-class Counter extends KeyedProcessFunction[String, Event, Event] {
-  // Built on the client and serialized with this function, so its evolutions reach the TaskManager
-  private val descriptor = new ValueStateDescriptor("count", implicitly[TypeInformation[Event]])
-  …
-}
+lazy val model = project.enablePlugins(FlinkxEvolutionsPlugin)
 ```
 
-Anything evaluated only on the TaskManager derives the type information after the state has been restored, and the
-evolutions then come too late to be applied. A descriptor built inside `open()` or inside a `lazy val` falls in that
-case, and so does — less visibly — a descriptor held by a companion `object`: Java serialization carries instance
-fields, not statics, so an object whose `val` is read from `open()` alone initializes on the TaskManager. Initializing
-it on the client beforehand doesn't help either, as the TaskManager has statics of its own. The deciding question is
-whether the descriptor, or at least the `TypeInformation` it was built from, is reachable from the serialized
-function.
+A TaskManager never derives anything, so it loads those providers itself: the first lookup finding nothing in its
+registry runs them, which happens while reading the checkpoint, before any state is restored. The rules therefore
+travel in the jar rather than in the job graph, and nothing constrains where you build your `StateDescriptor`s — a
+descriptor created in `open()`, in a `lazy val` or held by a companion `object` is declared just as well as one built
+with the rest of the graph.
 
 When a checkpoint records a schema version but no declaration for that class reached the JVM restoring it, the
 restore fails with an `EvolutionNotDeclaredException` rather than reading the former form as if it had never evolved.
