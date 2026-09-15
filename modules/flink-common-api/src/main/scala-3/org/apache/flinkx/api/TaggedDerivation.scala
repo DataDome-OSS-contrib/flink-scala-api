@@ -21,6 +21,7 @@ trait CommonTaggedDerivation[TypeClass[_]]:
       ClassTag[A],
       TypeTag[A]
   ): Typeclass[A] =
+    AnnotationTrees.readWholeOf[A] // Must run before the annotations of A are spliced below
     val parameters = IArray(
       getParams_[A, product.MirroredElemLabels, product.MirroredElemTypes](
         paramAnns[A].to(Map),
@@ -148,6 +149,7 @@ trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
       case _: EmptyTuple =>
         Nil
       case _: (s *: tail) =>
+        AnnotationTrees.readWholeOf[s] // Must run before the annotations of the subtype are spliced below
         new SealedTrait.Subtype(
           typeInfo[s],
           IArray.from(anns[s]),
@@ -171,6 +173,7 @@ trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
         ) :: subtypes[T, tail](m, idx + 1)
 
   inline def derivedMirrorSum[A](sum: Mirror.SumOf[A])(using ClassTag[A], TypeTag[A]): Typeclass[A] =
+    AnnotationTrees.readWholeOf[A] // Must run before the annotations of A are spliced below
     val sealedTrait = SealedTrait(
       typeInfo[A],
       IArray(subtypes[A, sum.MirroredElemTypes](sum)*),

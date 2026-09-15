@@ -10,7 +10,13 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils with
 
   import org.apache.flinkx.api.evolution.EvolutionRenamedTest._
 
-  override protected def beforeEach(): Unit = Evolutions.reset()
+  override protected def beforeEach(): Unit = {
+    Evolutions.reset()
+    // The derivation declares nothing: an ADT carries its evolutions through its own declaration
+    Declare.declare[Pet]
+    Declare.declare[Pony]
+    Declare.declare[Horse]
+  }
 
   /* Test to serialize Pet v0 code into Pet-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize Animal v0" in {
