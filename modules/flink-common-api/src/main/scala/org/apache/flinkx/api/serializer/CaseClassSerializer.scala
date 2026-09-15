@@ -35,7 +35,6 @@ import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.CurrentVersion
 import org.apache.flinkx.api.{NullMarker, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
-import java.io.{IOException, ObjectInputStream}
 
 import scala.collection.mutable
 
@@ -201,14 +200,6 @@ class CaseClassSerializer[T <: Product](
     constructor(fields)
   }
 
-  // A TaskManager only Java-deserializes the serializers of the job graph, so each of them registers again the ADT
-  // declaration it carries: the derivation ran on the client, and the restore needs the registry
-  @throws[IOException]
-  @throws[ClassNotFoundException]
-  private def readObject(in: ObjectInputStream): Unit = {
-    in.defaultReadObject()
-    Evolutions.register(evolution)
-  }
   override def snapshotConfiguration(): TypeSerializerSnapshot[T] =
     new ScalaCaseClassSerializerSnapshot[T](Some(this))
 
@@ -297,7 +288,7 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     * the current one.
     */
   private def isSameClass(old: ScalaCaseClassSerializerSnapshot[T]): Boolean =
-    evolution.currentClass == old.evolution.currentClass
+    evolution.currentClass.getName == old.evolution.currentClass.getName
 
   /** Whether reading the former schema described by `old` requires applying the declared evolutions.
     *
