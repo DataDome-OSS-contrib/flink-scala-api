@@ -18,7 +18,6 @@ import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 
-import java.io.{IOException, ObjectInputStream}
 import org.slf4j.{Logger, LoggerFactory}
 
 /** Serializer for Scala 3 enum. Handle nullable value. */
@@ -101,14 +100,6 @@ class Scala3EnumSerializer[T <: Product](
     }
   }
 
-  // A TaskManager only Java-deserializes the serializers of the job graph, so each of them registers again the ADT
-  // declaration it carries: the derivation ran on the client, and the restore needs the registry
-  @throws[IOException]
-  @throws[ClassNotFoundException]
-  private def readObject(in: ObjectInputStream): Unit = {
-    in.defaultReadObject()
-    Evolutions.register(evolution)
-  }
   override def snapshotConfiguration(): TypeSerializerSnapshot[T] = new Scala3EnumSerializerSnapshot(Some(this))
 
 }
@@ -188,7 +179,7 @@ class Scala3EnumSerializerSnapshot[T <: Product](
     */
   private def isSameClass(old: Scala3EnumSerializerSnapshot[T]): Boolean =
     evolution.currentClass == null || old.evolution.currentClass == null ||
-      evolution.currentClass == old.evolution.currentClass
+      evolution.currentClass.getName == old.evolution.currentClass.getName
 
   /** Whether reading the former form described by `old` requires applying the declared evolutions.
     *

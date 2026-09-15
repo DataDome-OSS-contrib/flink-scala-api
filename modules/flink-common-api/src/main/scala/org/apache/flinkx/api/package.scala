@@ -23,20 +23,18 @@ package object api {
     */
   final case class DerivationCacheKey(typeName: String, memberTypeInfos: Seq[TypeInformation[_]])
 
-  /** Declares the current schema version of an ADT (case class, sealed trait or Scala 3 enum) and opts it in to the
-    * annotation-based schema evolution feature allowing to restore former data read from a checkpoint to the current
-    * source code.
+  /** Declares the current schema version of an ADT, opting it in to the annotation-based schema evolution feature
+    * allowing to restore former data read from a savepoint to the current source code.
     *
     * This feature commonly employs the following vocabulary to qualify version, class, field, etc.:
     *   - `Former` describes the serialization time when the checkpoint was done.
     *   - `Current` describes the deserialization time with the current source code.
     *
-    * An ADT without this annotation is considered to have version 0 which makes it safe to add `@version(1)` to an
-    * existing ADT and restore it from a checkpoint produced by the unversioned code.
+    * Add `@version(1)` on an ADT afterward is valid: it will be restored from a savepoint as if it was from version 0.
     *
-    * Annotation of ADT (case class, sealed trait or Scala 3 enum).
+    * Annotation of ADT (case class, sealed trait or Scala 3 enum), never of a field.
     * @param current
-    *   Current schema version, must be >= 0 or [[org.apache.flinkx.api.evolution.VersionNotAllowedException]] is thrown
+    *   Current schema version, increase it every time the ADT changes. A version below 0 is rejected.
     */
   final case class version(current: Int) extends StaticAnnotation
 
@@ -53,7 +51,8 @@ package object api {
     *
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param mapper
-    *   A mapper function taking as parameters the former version and the current ADT instance after its deserialization
+    *   A mapper function taking as parameters the former version and the current ADT instance after its
+    *   deserialization. Read where the ADT is declared, so it must be visible from there.
     */
   final case class postDeserialize[A](mapper: (Int, A) => A) extends Evolved {
     override def toString: String = s"postDeserialize(<mapper>)"
@@ -134,7 +133,8 @@ package object api {
     * @param since
     *   Version in which the type-change occurred
     * @param mapper
-    *   Function converting the former value to the current type
+    *   Function converting the former value to the current type. Read where the ADT is declared, so it must be visible
+    *   from there.
     */
   final case class transformed[A, B](since: Int, mapper: A => B) extends Evolved {
     override def toString: String = s"transformed($since,<mapper>)"

@@ -84,6 +84,8 @@ lazy val commonSettings = Seq(
   },
   // some IT tests won't work without running in forked JVM
   Test / fork := true,
+  // The tests read the sources they check, which the matrix layout puts outside the working directory
+  Test / javaOptions += s"-Dflinkx.test.sources=${(Test / scalaSource).value.getAbsolutePath}",
   // Need to isolate macro usage to version-specific folders.
   Compile / unmanagedSourceDirectories += {
     val dir              = (Compile / scalaSource).value.getPath

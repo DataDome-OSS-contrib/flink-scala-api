@@ -1,8 +1,8 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
-import org.apache.flinkx.api.evolution.Evolution.{AdtDeclaration, DeletedClass, EnumValueEvolution}
-import org.apache.flinkx.api.evolution.EvolutionBuilder.{ClassEvolution, postDeserializeIdentity}
+import org.apache.flinkx.api.evolution.Evolution.{DeletedClass, EnumValueEvolution}
+import org.apache.flinkx.api.evolution.EvolutionBuilder.{AdtDeclaration, ClassEvolution, postDeserializeIdentity}
 import org.apache.flinkx.api.postDeserialize
 import org.apache.flinkx.api.util.ClassUtil
 
@@ -128,10 +128,7 @@ final class EvolutionBuilder[T](
       .foldLeft(Map.empty[String, Array[Evolution[T]]]) { case (acc, (className, evolutions)) =>
         acc.updatedWith(className)(registered => Some(registered.fold(evolutions)(_ ++ evolutions)))
       }
-    // Every evolution of the ADT carries the whole declaration, to reinstate it where the derivation never ran
-    val declaration = new AdtDeclaration(currentClass, byClassName.asInstanceOf[Map[String, Array[Evolution[_]]]])
-    byClassName.valuesIterator.flatten.foreach(_.declaration = declaration)
-    declaration
+    new AdtDeclaration(currentClass, byClassName.asInstanceOf[Map[String, Array[Evolution[_]]]])
   }
 
   private def buildEvolution(className: String, classEvolution: ClassEvolution, previousVersion: Int): Evolution[T] =
@@ -149,6 +146,16 @@ final class EvolutionBuilder[T](
 }
 
 object EvolutionBuilder {
+
+  /** Every [[Evolution]] an ADT declares, by class name, with the ADT class they were derived from.
+    *
+    * The current class names the class loader the declaration belongs to, which is how [[Evolutions]] keeps the
+    * declarations of two jobs apart when this library is shared by several of them.
+    */
+  private[evolution] final class AdtDeclaration(
+      val currentClass: Class[_],
+      val byClassName: Map[String, Array[Evolution[_]]]
+  )
 
   // Serializable, as the Evolution holding it travels with the serializer
   def postDeserializeIdentity[T]: (Int, T) => T = new ((Int, T) => T) with Serializable {

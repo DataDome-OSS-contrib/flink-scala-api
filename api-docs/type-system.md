@@ -428,33 +428,63 @@ case class Dog(name: String)
 
 #### Deployment
 
-The evolutions are read from the annotations of your source code when the type information is derived, which happens on
-the client submitting the job. A TaskManager never derives anything: it receives the serializers of the job graph, and
-each of them carries the evolutions of its ADT and declares them again when it is deserialized, before any state is
-restored.
-
-This happens early enough: a TaskManager builds its operator chain, which deserializes the functions and the
-serializers of the job graph, before it restores any state. Declare the type information of a state where it travels
-with the job graph, in a field built with the rest of the graph:
+The evolutions are read from the annotations of your source code, which an `EvolutionsProvider` declares.
+Write one provider per module/package declaring versioned ADTs:
+- `declarePackage("package")` finds versioned ADTs: it declares every `@version` annotated ADT of that
+package and of its sub-packages including nested in objects, as the compiler sees them — a dependency contributing
+classes to that same package is covered too.
+- `declarePackage` without an argument does the same for the package the provider itself sits in, so a provider placed
+at the root of a model declares it whole without naming it.
+- Use `declare` to name explicitly an ADT that comes from another module or a library.
 
 ```scala
-class Counter extends KeyedProcessFunction[String, Event, Event] {
-  // Built on the client and serialized with this function, so its evolutions reach the TaskManager
-  private val descriptor = new ValueStateDescriptor("count", implicitly[TypeInformation[Event]])
-  …
+package com.example.model
+
+class ModelEvolutions extends EvolutionsProvider {
+  override def declare(): Unit = {
+    Declare.declarePackage("com.example.model")
+    Declare.declarePackage            // com.example.model and its sub-packages
+    Declare.declare[org.shared.Money] // Explicit declaration of an ADT
+  }
 }
 ```
 
-Anything evaluated only on the TaskManager derives the type information after the state has been restored, and the
-evolutions then come too late to be applied. A descriptor built inside `open()` or inside a `lazy val` falls in that
-case, and so does — less visibly — a descriptor held by a companion `object`: Java serialization carries instance
-fields, not statics, so an object whose `val` is read from `open()` alone initializes on the TaskManager. Initializing
-it on the client beforehand doesn't help either, as the TaskManager has statics of its own. The deciding question is
-whether the descriptor, or at least the `TypeInformation` it was built from, is reachable from the serialized
-function.
+List it in `src/main/resources/META-INF/services/org.apache.flinkx.api.evolution.EvolutionsProvider`, a one-line file
+holding the fully qualified name of your provider. An assembly must merge those service files rather than overwrite them
+(with sbt-assembly, `MergeStrategy.filterDistinctLines`).
 
-When a checkpoint records a schema version but no declaration for that class reached the JVM restoring it, the
-restore fails with an `EvolutionNotDeclaredException` rather than reading the former form as if it had never evolved.
+The mappers of `@transformed` and `@postDeserialize` are read where the ADT is declared, so they must be visible from
+there: `private[model]` is enough for a provider sitting in that package, but a mapper private to its own ADT needs
+that ADT declared from its own module, the provider then only calling it:
+
+```scala
+object Order {
+  private def bump(version: Int, order: Order): Order = order.copy(note = "v" + version)
+
+  // The private mapper is visible here
+  private[model] def declareEvolutions(): Unit = Declare.declare[Order]
+}
+```
+
+A test guards against an ADT no provider declares — typically one added outside the declared packages:
+
+```scala
+EvolutionsCheck.undeclaredIn(new File("src/main/scala"), "com.example") shouldBe empty
+```
+
+It reads the sources rather than the compiled classes, because an incremental build recompiles neither the provider
+nor this check when a source file is added: an ADT added since the provider was last compiled would otherwise go
+unreported until the next clean build.
+
+A TaskManager never derives anything, so it loads those providers itself: the first lookup finding nothing in its
+registry runs them, which happens while reading the checkpoint, before any state is restored. The rules therefore
+travel in the jar rather than in the job graph, and nothing constrains where you build your `StateDescriptor`s — a
+descriptor created in `open()`, in a `lazy val` or held by a companion `object` is declared just as well as one built
+with the rest of the graph.
+
+A versioned ADT whose evolutions no provider declares fails with an `EvolutionNotDeclaredException`, rather than
+building a serializer without any of its rules: when its type information is derived, and again when a checkpoint
+recording that version is restored.
 A checkpoint written by a more recent source code is not that case: the declaration is there, it just doesn't reach
 that far, and the schema compatibility resolution reports it.
 

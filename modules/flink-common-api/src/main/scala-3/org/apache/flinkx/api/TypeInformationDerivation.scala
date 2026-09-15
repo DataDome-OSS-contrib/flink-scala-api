@@ -5,9 +5,7 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{DeletedReturnNull, DeletedThrowOnInstance, Renamed}
-import org.apache.flinkx.api.evolution.{Evolution, EvolutionBuilder, EvolutionNotAllowedException, Evolutions}
+import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -37,58 +35,12 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
-        // An enum value is not versioned on its own: it is a member of its enum, and is serialized with its version
-        val versionAnnotations = if typeTag.isEnum then ctx.inheritedAnnotations else ctx.annotations
-        val version            = Evolutions.findVersionInAnnotations(clazz, versionAnnotations)
-        val fieldNames         = ctx.parameters.map(_.label).toArray
+        // An enum value is not versioned on its own: it's a member of its enum, whose version it is serialized with
+        val annotations = if typeTag.isEnum then ctx.inheritedAnnotations else ctx.annotations
+        val version     = Evolutions.findVersion(clazz, annotations.toSeq)
+        val fieldNames  = ctx.parameters.map(_.label).toArray
+        Evolutions.checkNoVersionOnFields(clazz, ctx.parameters.map(p => p.label -> p.annotations.toSeq).toSeq)
 
-        // Field names required even with version 0
-        val builder = new EvolutionBuilder[T & Product](clazz, version, fieldNames)
-        if typeTag.isEnum then
-          ctx.annotations.foreach {
-            // An enum value declares no evolution of its own: its enum reads them in split()
-            case _: renamed if version > 0 => // Declared by the enum
-            case e: Evolved if version > 0 => throw EvolutionNotAllowedException(e, s"$clazz.${ctx.typeInfo.short}")
-            case e: Evolved                => throw EvolutionNotAllowedException(e, s"$clazz with version 0")
-            case _                         => // Ignore other annotations
-          }
-        else if version == 0 then
-          // Do not allow Evolution annotations on version 0
-          ctx.annotations.foreach {
-            case _: renamed if ctx.inheritedAnnotations.exists(_.isInstanceOf[version]) => // Allow @renamed if parent has version
-            case e: Evolved => throw EvolutionNotAllowedException(e, s"$clazz with version 0")
-            case _          => // Ignore other annotations
-          }
-          ctx.parameters.foreach { p =>
-            p.annotations.foreach {
-              case e: Evolved => throw EvolutionNotAllowedException(e, s"$p of $clazz with version 0")
-              case _          => // Ignore other annotations
-            }
-          }
-        else // version > 0
-          // Iterate over case class annotations to register evolutions on current source code
-          ctx.annotations.foreach {
-            case r: renamed        => builder.registerFormerClass(r.formerName, clazz, r.since)
-            case d: deletedFields  => d.formerNames.foreach(builder.fieldEvolutions += Delete(d.since, clazz, _))
-            case d: deletedClasses =>
-              d.formerClassNames.foreach(builder.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
-            case p: postDeserialize[T & Product] => builder.addPostDeserialize(p)
-            case e: Evolved                      => throw EvolutionNotAllowedException(e, clazz.toString)
-            case _                               => // Ignore other annotations
-          }
-          // Iterate over case class fields annotations to register evolutions from current source code
-          ctx.parameters.foreach { p =>
-            p.annotations.foreach {
-              case a: added             => builder.fieldEvolutions += Add(a.since, clazz, p.label, p.default)
-              case r: renamed           => builder.fieldEvolutions += Rename(r.since, clazz, r.formerName, p.label)
-              case t: transformed[_, _] => builder.fieldEvolutions += Transform(t.since, clazz, p.label, t.mapper)
-              case e: version           => throw EvolutionNotAllowedException(e, s"$clazz.${p.label}")
-              case e: Evolved           => throw EvolutionNotAllowedException(e, s"$clazz.${p.label}")
-              case _                    => // Ignore other annotations
-            }
-          }
-        // An enum value is not a class: its evolutions are held by the evolution of its enum, registered by split()
-        if !typeTag.isEnum then Evolutions.register(builder)
         val evolution = Evolutions.get(clazz, version)
 
         val serializer =
@@ -127,57 +79,13 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz   = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version = Evolutions.findVersionInAnnotations(clazz, ctx.annotations)
-        // Derive the subtypes first, as they register their own evolutions and check their own annotations. Enum
-        // values are excluded because their evolutions are held by this enum, which must be registered before
-        // deriving them.
+        val version = Evolutions.findVersion(clazz, ctx.annotations.toSeq)
+        // An enum value is named by its enum, and has no class of its own to serialize
         val subtypeClasses: Array[Class[?]] =
           if typeTag.isEnum then Array.empty else ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[?]]
-        // Enum values are named by the enum, sealed trait subtypes by their own fully qualified class name
         val memberNames: Array[String] =
           if typeTag.isEnum then ctx.subtypes.map(_.typeInfo.short).toArray else subtypeClasses.map(_.getName)
-        val builder = new EvolutionBuilder[T](clazz, version, memberNames)
 
-        if version == 0 then
-          // Do not allow Evolution annotations on version 0
-          ctx.annotations.foreach {
-            case e: Evolved => throw EvolutionNotAllowedException(e, s"$clazz with version 0")
-            case _          => // Ignore other annotations
-          }
-          ctx.subtypes.foreach { p =>
-            p.annotations.foreach {
-              case e: Evolved => throw EvolutionNotAllowedException(e, s"$p of $clazz with version 0")
-              case _          => // Ignore other annotations
-            }
-          }
-        else // version > 0
-          // Iterate over coproduct annotations to register evolutions from current source code
-          ctx.annotations.foreach {
-            case r: renamed => builder.registerFormerClass(r.formerName, clazz, r.since)
-            // An enum value is not a class, so its deletion is held by the evolution of its enum
-            case d: deletedClasses if typeTag.isEnum =>
-              val deleted = if d.throwOnInstance then DeletedThrowOnInstance else DeletedReturnNull
-              d.formerClassNames.foreach(builder.formerEnumValues(_) = deleted)
-            case d: deletedClasses =>
-              d.formerClassNames.foreach(builder.registerDeletedFormerClass(_, clazz, d.since, d.throwOnInstance))
-            case p: postDeserialize[T] => builder.addPostDeserialize(p)
-            case e: Evolved            => throw EvolutionNotAllowedException(e, clazz.toString)
-            case _                     => // Ignore other annotations
-          }
-          // Iterate over subtypes annotations to register evolutions from current source code
-          ctx.subtypes.foreach { p =>
-            p.annotations.foreach {
-              case r: renamed if typeTag.isEnum => builder.formerEnumValues(r.formerName) = Renamed(p.typeInfo.short)
-              case _: renamed if p.annotations.exists(_.isInstanceOf[version])        => // registered by join()
-              case _: deletedFields if p.annotations.exists(_.isInstanceOf[version])  => // allowed on versioned subtype
-              case _: deletedClasses if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
-              case _: postDeserialize[T] if p.annotations.exists(_.isInstanceOf[version]) => // allowed on versioned subtype
-              case e: Evolved => throw EvolutionNotAllowedException(e, p.typeclass.getTypeClass.toString)
-              case _          => // Ignore other annotations
-            }
-          }
-
-        Evolutions.register(builder)
         val evolution = Evolutions.get(clazz, version)
 
         val serializer =
