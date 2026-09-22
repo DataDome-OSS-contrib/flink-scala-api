@@ -4,6 +4,7 @@ import magnolia1.{CaseClass, SealedTrait}
 import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerConfigImpl}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
+import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer, nullable}
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -28,24 +29,33 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
+        val version    = Evolutions.findVersion(clazz, ctx.annotations)
+        val fieldNames = ctx.parameters.map(_.label).toArray
+        Evolutions.checkNoVersionOnFields(clazz, ctx.parameters.map(p => p.label -> p.annotations))
+
+        val evolution = Evolutions.get(clazz, version)
+
         val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
-          new ScalaCaseObjectSerializer[T](clazz)
+          new ScalaCaseObjectSerializer[T](evolution, version)
         } else {
           new CaseClassSerializer[T](
-            clazz = clazz,
-            scalaFieldSerializers = ctx.parameters.map { p =>
+            evolution = evolution,
+            version = version,
+            isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
+            fieldNames = fieldNames,
+            paramSerializers = ctx.parameters.map { p =>
               val ser = p.typeclass.createSerializer(config)
               if (p.annotations.exists(_.isInstanceOf[nullable])) {
                 NullableSerializer.wrapIfNullIsNotSupported(ser, true)
               } else ser
-            }.toArray,
-            isCaseClassImmutable = isCaseClassImmutable(clazz, ctx.parameters.map(_.label))
+            }.toArray
           )
         }
+
         val ti = new CaseClassTypeInfo[T](
           clazz = clazz,
           fieldTypes = ctx.parameters.map(_.typeclass),
-          fieldNames = ctx.parameters.map(_.label),
+          fieldNames = fieldNames,
           ser = serializer
         )
         cache.putIfAbsent(cacheKey, ti).getOrElse(ti).asInstanceOf[TypeInformation[T]]
@@ -57,12 +67,22 @@ private[api] trait TypeInformationDerivation {
     cache.get(cacheKey) match {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
+        val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
+        val version        = Evolutions.findVersion(clazz, ctx.annotations)
+        val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
+        val subtypeFqns    = subtypeClasses.map(_.getName)
+
+        val evolution = Evolutions.get(clazz, version)
+
         val serializer = new CoproductSerializer[T](
-          subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray,
+          evolution = evolution,
+          version = version,
+          subtypeClasses = subtypeClasses,
+          subtypeFqns = subtypeFqns,
           subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
         )
-        val clazz = classTag[T].runtimeClass.asInstanceOf[Class[T]]
-        val ti    = new CoproductTypeInformation[T](clazz, serializer)
+
+        val ti = new CoproductTypeInformation[T](clazz, serializer)
         cache.putIfAbsent(cacheKey, ti).getOrElse(ti).asInstanceOf[TypeInformation[T]]
     }
   }

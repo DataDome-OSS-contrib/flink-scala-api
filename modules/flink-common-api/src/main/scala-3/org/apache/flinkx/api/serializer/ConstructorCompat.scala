@@ -33,19 +33,12 @@ private[serializer] trait ConstructorCompat:
             e
           )
 
-    lazy val defaultArgs = cls.getMethods
-      .filter(_.getName.startsWith("$lessinit$greater$default"))
-      .sortBy(_.getName())
-      .map(_.invoke(null))
-
     (args: Array[AnyRef]) => {
-      // Append default values for missing arguments
-      val allArgs = args ++ defaultArgs.takeRight(constructor.getParameterCount - args.length)
       if isEnum(constructor) then
         // Apply method is used for enum case classes because it cannot be instantiated by its constructor
         val applyMethod = cls.getMethod("apply", constructor.getParameterTypes*)
-        applyMethod.invoke(null, allArgs*).asInstanceOf[T]
-      else constructor.newInstance(allArgs*).asInstanceOf[T]
+        applyMethod.invoke(null, args*).asInstanceOf[T]
+      else constructor.newInstance(args*).asInstanceOf[T]
     }
 
   // Enum modifier constant defined in java.lang.reflect.Modifier.ENUM but inaccessible

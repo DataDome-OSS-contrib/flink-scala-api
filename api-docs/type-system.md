@@ -263,32 +263,237 @@ object Foo {
 
 ## Schema evolution
 
-### ADT
-For the child case classes being part of ADT, the serializers use a Flink's `CaseClassSerializer`, so all the compatibility rules
-are the same as for normal case classes.
+This library supports two complementary mechanisms for evolving the schema of state stored in checkpoints and
+savepoints: built-in compatibility rules that come "for free", and an opt-in annotation-based system for richer changes.
 
-For the sealed trait membership itself, this library uses own serialization format with the following rules:
-* you cannot reorder trait members, as wire format depends on the compile-time index of each member
-* you can add new members at the end of the list
-* you cannot remove ADT members
-* you cannot replace ADT members
+### Built-in compatibility
 
-### Case Class Changes
+Without any annotation, the following changes are safe between checkpoint write and restore (starting from version 2.4.0):
+* Case classes: you can reorder fields.
+* Sealed traits: you can reorder subtypes and add new subtypes.
+* For everything else (additions, renames, deletions, type changes, cross-field migrations), use the annotation-based schema evolution below.
 
-On a case class level, this library supports new field addition(s) with default value(s). This allows to restore a Flink job from a savepoint created using previous case class schema.
-For example:
+### Annotation-based schema evolution
 
-1. A Flink job was stopped with a savepoint using below case class schema:
+Annotate an ADT (case class, sealed trait or Scala 3 enum) with `@version(n)` to opt in it, then describe each
+change with one of the evolution annotations on the ADT or on its fields/subtypes. On restore, the library
+applies these operations against the former data read from the checkpoint so it matches the current source code.
+
+This schema evolution feature commonly employs the following vocabulary to qualify version, class, field, etc.:
+* `Former` describes the serialization time when the checkpoint was done.
+* `Current` describes the deserialization time with the current source code.
+
+An ADT without `@version` annotation is considered to have version 0 which makes it safe to add `@version(1)` to an
+existing ADT and restore it from a checkpoint produced by the unversioned code.
+
+For example, given this former schema serialized to the checkpoint (no annotations, version 0 is implicit):
 ```scala
-case class Click(id: String, inFileClicks: List[ClickEvent])
+import org.apache.flinkx.api._
+
+sealed trait Event
+case class View(ts: Long) extends Event
+case class Purchase(price: Double) extends Event
+case class Click(identifier: String, sessionId: Int, unused: String, history: List[ClickEvent]) extends Event
+case class ClickEvent(date: String)
+
 ```
-2. Now the Click case class is changed to:
+
+Current source code looks like this to reflect the evolutions:
+```scala mdoc:reset-object
+import org.apache.flinkx.api._
+
+@version(1)
+@renamed(since = 1, "Event")
+@deletedClasses(since = 1, throwOnInstance = false, "Purchase")
+@postDeserialize(updateAction)
+sealed trait Action
+
+@renamed(since = 1, "View")
+case class Web(ts: Long) extends Action
+
+@version(2)
+@deletedFields(since = 1, "unused", "history")
+@deletedClasses(since = 1, "ClickEvent")
+@postDeserialize(updateClick)
+case class Click(
+    @renamed(since = 1, "identifier") id: String,
+    @added(since = 2) ts: Long = System.currentTimeMillis(),
+    @transformed(since = 1, intToString) sessionId: String
+) extends Action
+
+def intToString(i: Int): String = i.toString
+def updateClick(formerVersion: Int, click: Click): Click =
+  if (formerVersion == 0) click.copy(sessionId = click.sessionId + click.ts)
+  else click
+def updateAction(formerVersion: Int, action: Action): Action = action match {
+  case Web(ts) => Web(ts + 1)
+  case null    => Click(java.util.UUID.randomUUID().toString, sessionId = "Former Purchase")
+  case e @ _   => e // ignore other cases
+}
+```
+
+**Available annotations:**
+
+| Annotation                                                           | Where                          | Effect                                                                                                                                                                                                                                                   |
+|----------------------------------------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@version(n)`                                                        | ADT                            | Declares the current schema version (`n >= 0`); opt in the ADT to evolution                                                                                                                                                                              |
+| `@added(since = n)`                                                  | case class field               | Field was added in version `n`; requires a default value                                                                                                                                                                                                 |
+| `@renamed(since = n, "oldName")`                                     | case class field, ADT, subtype | Field or class was formerly known under `"oldName"` before version `n`, or lived at another location (see [former class name resolution](#former-class-name-resolution))                                                                                 |
+| `@transformed(since = n, mapper)`                                    | case class field               | Field's type changed in version `n`; `mapper` converts the formerly serialized value to the current type                                                                                                                                                 |
+| `@deletedFields(since = n, "a", "b")`                                | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                                                                                                         |
+| `@deletedClasses(since = n, throwOnInstance = true, "OldClass1", …)` | ADT                            | Subtypes that have been removed, or field types that were referenced by a now-deleted field (see [former class name resolution](#former-class-name-resolution)). Throws by default when encountering an instance of deleted class during deserialization |
+| `@postDeserialize(mapper)`                                           | ADT                            | Applies the `mapper` function taking as parameters the former version and the current ADT instance after its deserialization                                                                                                                             |
+
+Field evolutions are applied in ascending `since` order. Within a single version, evolutions are applied in this canonical pipeline:
+Delete → Rename → Transform → Add. This ordering enables annotation combinations such as:
+* Rename a field and transform its value.
+* Delete a field (its serialized state is dropped) and re-add a field with the same name from a default value.
+
+> [!NOTE]
+> You can clean up old evolution annotations as long as you don't restore a checkpoint of an older version. For example with `Click`:
+> * if you didn't keep any v0 checkpoint, you can retain only `@version(2)` and `@added(since = 2)` annotations.
+> * if you only have v2 checkpoints, you can remove all annotations, even `@version(2)`. Current `Click` will then be treated as a version 0.
+
+#### Former class name resolution
+
+Former class names in `@renamed` and `@deletedClasses` annotations must be in binary name format where nested classes are separated by `$` instead of dots.
+See [Binary names](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ClassLoader.html#binary-name) of `java.lang.ClassLoader` javadoc for more details or [JLS 13.1](https://docs.oracle.com/javase/specs/jls/se21/html/jls-13.html#jls-13.1) for the complete definition.
+
+The former class names can be relative or absolute paths.
+
+Any path referencing a package (dot-separated in binary name format) is an absolute path.
+Start with a `/` to force absolute path (should be useful to reference unnamed package only).
+
+Other paths are resolved relatively to the parent of the annotated class (i.e. next to the annotated class).
+They can contain `$` to reference nested classes.
+
+For example, given this version 0:
 ```scala
-case class Click(id: String, inFileClicks: List[ClickEvent], 
-    fieldInFile: String = "test1",
-    fieldNotInFile: String = "test2")   
+package org.example
+
+sealed trait Brood
+
+object Brood {
+  case object Puppy extends Brood
+  case object Kitten extends Brood
+}
 ```
-3. Launch the same job with new case class schema version from the last savepoint. Job restore should work successfully.
+
+Version 1 looks like this to reflect the renames and deletions:
+```scala
+package org.example
+
+@version(1)
+@renamed(since = 1, "Brood")
+@deletedClasses(since = 1, "Brood$Puppy")
+sealed trait Animal
+
+object Animal {
+  @renamed(since = 1, "org.example.Brood$Kitten")
+  case object Cat extends Animal
+}
+```
+
+#### Outdated former evolution
+
+It may arrive former evolutions get overwritten by newer evolutions. The rule of thumb is to describe how to restore a current state from these former checkpoints versions.
+
+**Rename then delete a field:**
+
+Given this version 0:
+```scala
+case class Dog(name: String, kind: String)
+```
+And this version 1:
+```scala mdoc:reset-object
+import org.apache.flinkx.api._
+
+@version(1)
+case class Dog(
+  name: String,
+  @renamed(since = 1, "kind") breed: String
+)
+```
+If you want to delete `breed` field but still be able to restore from v0 and v1 checkpoints:
+```scala mdoc:reset-object
+import org.apache.flinkx.api._
+
+@version(2)
+@deletedFields(since = 1, "kind")
+@deletedFields(since = 2, "breed")
+case class Dog(name: String)
+```
+
+**Delete then recreate a class:**
+
+#### Deployment
+
+The evolutions are read from the annotations of your source code, which an `EvolutionsProvider` declares.
+Write one provider per module/package declaring versioned ADTs:
+- `declarePackage("package")` finds versioned ADTs: it declares every `@version` annotated ADT of that
+package and of its sub-packages including nested in objects, as the compiler sees them — a dependency contributing
+classes to that same package is covered too.
+- `declarePackage` without an argument does the same for the package the provider itself sits in, so a provider placed
+at the root of a model declares it whole without naming it.
+- Use `declare` to name explicitly an ADT that comes from another module or a library.
+
+```scala
+package com.example.model
+
+class ModelEvolutions extends EvolutionsProvider {
+  override def declare(): Unit = {
+    Declare.declarePackage("com.example.model")
+    Declare.declarePackage            // com.example.model and its sub-packages
+    Declare.declare[org.shared.Money] // Explicit declaration of an ADT
+  }
+}
+```
+
+List it in `src/main/resources/META-INF/services/org.apache.flinkx.api.evolution.EvolutionsProvider`, a one-line file
+holding the fully qualified name of your provider. An assembly must merge those service files rather than overwrite them
+(with sbt-assembly, `MergeStrategy.filterDistinctLines`).
+
+The mappers of `@transformed` and `@postDeserialize` are read where the ADT is declared, so they must be visible from
+there: `private[model]` is enough for a provider sitting in that package, but a mapper private to its own ADT needs
+that ADT declared from its own module, the provider then only calling it:
+
+```scala
+object Order {
+  private def bump(version: Int, order: Order): Order = order.copy(note = "v" + version)
+
+  // The private mapper is visible here
+  private[model] def declareEvolutions(): Unit = Declare.declare[Order]
+}
+```
+
+A test guards against an ADT no provider declares — typically one added outside the declared packages:
+
+```scala
+EvolutionsCheck.undeclaredIn(new File("src/main/scala"), "com.example") shouldBe empty
+```
+
+It reads the sources rather than the compiled classes, because an incremental build recompiles neither the provider
+nor this check when a source file is added: an ADT added since the provider was last compiled would otherwise go
+unreported until the next clean build.
+
+A TaskManager never derives anything, so it loads those providers itself: the first lookup finding nothing in its
+registry runs them, which happens while reading the checkpoint, before any state is restored. The rules therefore
+travel in the jar rather than in the job graph, and nothing constrains where you build your `StateDescriptor`s — a
+descriptor created in `open()`, in a `lazy val` or held by a companion `object` is declared just as well as one built
+with the rest of the graph.
+
+A versioned ADT whose evolutions no provider declares fails with an `EvolutionNotDeclaredException`, rather than
+building a serializer without any of its rules: when its type information is derived, and again when a checkpoint
+recording that version is restored.
+A checkpoint written by a more recent source code is not that case: the declaration is there, it just doesn't reach
+that far, and the schema compatibility resolution reports it.
+
+These declarations are held per class loader defining the ADTs. With the default child-first class loading,
+`flink-scala-api` sits in your application jar and a job has a registry entirely of its own. Putting it in the `lib`
+directory of the cluster instead makes the registry itself shared by every job of a TaskManager, which stays correct —
+a class name is resolved in the registry of the job asking for it — but its entries hold the classes of the jobs that
+filled them, hence their class loaders, well after those jobs are gone. Keeping the library in the application jar
+remains the recommended deployment.
 
 ## Compatibility
 
