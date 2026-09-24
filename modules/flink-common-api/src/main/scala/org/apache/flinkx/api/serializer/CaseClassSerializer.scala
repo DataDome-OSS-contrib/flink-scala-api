@@ -75,7 +75,7 @@ class CaseClassSerializer[T <: Product](
   @transient private lazy val constructor = lookupConstructor(tupleClass)
 
   // Cache to check for fast path on first record only
-  @transient private lazy val isEvolutionAvoidable = evolution.isAvoidable(fieldNames)
+  @transient private lazy val isEvolutionAvoidable = evolution.isAvoidable(version, fieldNames)
 
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
@@ -180,7 +180,7 @@ class CaseClassSerializer[T <: Product](
       if (evolution.isDeleted) {
         evolution.returnNullOrThrow
       } else {
-        evolution.postDeserialize(version, createInstance(fieldValues))
+        evolution.postEvolve(version, createInstance(fieldValues))
       }
     }
   }
@@ -296,7 +296,7 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     */
   private def isEvolutionRequired(old: ScalaCaseClassSerializerSnapshot[T]): Boolean =
     old.fieldNames.nonEmpty && // Keep compatibility with versions < 2.4.0
-      !old.evolution.isAvoidable(old.fieldNames)
+      !old.evolution.isAvoidable(old.caseClassVersion, old.fieldNames)
 
   /** Check the declared evolutions entirely describe the migration from the former schema:
     *   - replays evolutions on the former field names to check for exact match with current field names

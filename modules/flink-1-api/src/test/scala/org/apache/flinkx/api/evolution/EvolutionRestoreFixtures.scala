@@ -6,18 +6,20 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.functions.source.SourceFunction
 import org.apache.flink.util.Collector
-import org.apache.flinkx.api.{postDeserialize, renamed, version}
+import org.apache.flinkx.api.{postEvolution, renamed, version}
 
 /** The ADT that wrote the savepoint, and the one restoring it: renamed, with a renamed field. */
 object EvolutionRestoreFixtures {
 
-  /** Versioned, so restoring it needs its declaration, and marked on the way back from the state. */
+  /** Versioned, so restoring it needs its declaration, and marked when restored from a former version. */
   @version(1)
   @renamed(since = 1, "FormerOrder")
-  @postDeserialize(mark)
+  @postEvolution(mark)
   case class Order(id: String, total: Int)
+  object Order extends Evolved[Order]
 
-  /** Applied to every instance read back, so a restored value tells the declaration was applied. */
+  /** Applied to every instance restored from a former version, so a restored value tells the declaration was applied.
+    */
   def mark(version: Int, order: Order): Order =
     if (order.id.endsWith("!")) order else order.copy(id = order.id + "!")
 

@@ -5,7 +5,7 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
+import org.apache.flinkx.api.evolution.{Evolution, Evolutions, Evolvable}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -25,7 +25,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
   // Need to mix in via `& Product`.
   override def join[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T] =
     val cacheKey = DerivationCacheKey(classTag.runtimeClass, typeTag.toString, ctx.params.map(_.typeclass).toSeq)
     cache.get(cacheKey) match
@@ -38,7 +39,6 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val annotations = if typeTag.isEnum then ctx.inheritedAnnotations else ctx.annotations
         val version     = Evolutions.findVersion(clazz, annotations.toSeq)
         val fieldNames  = ctx.parameters.map(_.label).toArray
-        Evolutions.checkNoVersionOnFields(clazz, ctx.parameters.map(p => p.label -> p.annotations.toSeq).toSeq)
 
         val evolution = Evolutions.get(clazz, version)
 
@@ -69,7 +69,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
   override def split[T](ctx: SealedTrait[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T] =
     val cacheKey = DerivationCacheKey(classTag.runtimeClass, typeTag.toString, ctx.subtypes.map(_.typeclass).toSeq)
     cache.get(cacheKey) match

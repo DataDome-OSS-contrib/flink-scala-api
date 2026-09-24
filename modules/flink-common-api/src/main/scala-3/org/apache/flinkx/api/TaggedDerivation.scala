@@ -6,6 +6,7 @@ import scala.reflect.*
 
 import magnolia1.{CallByNeed, CaseClass, SealedTrait, Monadic}
 import magnolia1.Macro.*
+import org.apache.flinkx.api.evolution.Evolvable
 
 // Typeclass derivation providing `ClassTag` and `TypeTag` givens.
 // Copied & modified from Magnolia, since the Scala 3 version disallows adding constraints to `join` and `split`.
@@ -14,7 +15,8 @@ trait CommonTaggedDerivation[TypeClass[_]]:
 
   def join[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T]
 
   inline def derivedMirrorProduct[A](product: Mirror.ProductOf[A])(using
@@ -138,7 +140,8 @@ trait CommonTaggedDerivation[TypeClass[_]]:
 trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
   def split[T](ctx: SealedTrait[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T]
 
   transparent inline def subtypes[T, SubtypeTuple <: Tuple](
