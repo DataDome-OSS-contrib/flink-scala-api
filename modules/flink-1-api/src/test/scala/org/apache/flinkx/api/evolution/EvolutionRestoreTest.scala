@@ -2,6 +2,9 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.RuntimeExecutionMode
 import org.apache.flink.api.common.restartstrategy.RestartStrategies
+import org.apache.flink.api.common.serialization.SerializerConfigImpl
+import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.configuration.{
   CheckpointingOptions,
   Configuration,
@@ -11,7 +14,9 @@ import org.apache.flink.configuration.{
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration
 import org.apache.flink.test.util.MiniClusterWithClientResource
 import org.apache.flinkx.api.evolution.EvolutionRestoreFixtures._
+import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.serializers._
+import org.apache.flinkx.api.typeinfo.CaseClassTypeInfo
 import org.apache.flinkx.api.{IntegrationTestSink, StreamExecutionEnvironment}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.Eventually.eventually
@@ -26,8 +31,8 @@ import scala.jdk.CollectionConverters._
 
 /** Restores a savepoint written by a former ADT, through a MiniCluster, with the state descriptor built in `open`.
   *
-  * Nothing declares the evolutions here: the provider listed in `META-INF/services` is the only thing carrying them,
-  * and it is read while the TaskManager restores, which is what makes the shape of the descriptor irrelevant.
+  * Nothing declares the evolutions here: the companion of the ADT is the only thing carrying them, and the TaskManager
+  * initializes it while restoring, which is what makes the shape of the descriptor irrelevant.
   */
 class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
@@ -54,6 +59,22 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
     env
   }
 
+  /** Order as a job at version 0 wrote it, under its former name: only the data of a former version is post-evolved. */
+  private def formerOrderInfo: TypeInformation[Order] = {
+    val current    = implicitly[TypeInformation[Order]].asInstanceOf[CaseClassTypeInfo[Order]]
+    val serializer = current.createSerializer(new SerializerConfigImpl()).asInstanceOf[CaseClassSerializer[Order]]
+    val formerName = classOf[Order].getName.replace("Order", "FormerOrder")
+    val former     = new CaseClassSerializer[Order](
+      Evolutions.get[Order](formerName, 0, getClass.getClassLoader),
+      0,
+      serializer.isCaseClassImmutable,
+      serializer.fieldNames,
+      serializer.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
+    )
+    val fieldTypes = (0 until current.getArity).map(current.getTypeAt[Any])
+    new CaseClassTypeInfo[Order](classOf[Order], fieldTypes, current.fieldNames, former)
+  }
+
   it should "apply the declared evolutions to a state whose descriptor is built on the TaskManager" in {
     val checkpoints = Files.createTempDirectory("flinkx-evolution")
 
@@ -62,7 +83,7 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
     writing
       .addSource(new Endless(Seq(Order("a", 1))))
       .keyBy(_.id)
-      .process(new KeepLast[Order])
+      .process(new KeepLast[Order]()(formerOrderInfo))
       .uid("keep-last")
       .addSink(new IntegrationTestSink[String])
     val written = writing.executeAsync("write")
@@ -70,7 +91,7 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
     // Stopping with a savepoint keeps the state, where a job reaching its end would have it cleaned up
     val savepoint = written.stopWithSavepoint(false, checkpoints.toUri.toString, SavepointFormatType.CANONICAL).get()
 
-    // A fresh TaskManager knows nothing: only the provider of the jar can declare the evolutions, and only the
+    // A fresh TaskManager knows nothing: only the companion of the ADT can declare the evolutions, and only the
     // restore asks for them, long after the job graph was built
     Evolutions.reset()
 
@@ -84,11 +105,11 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
       .addSink(new IntegrationTestSink[String])
     restoring.execute("restore")
 
-    withClue("the state must be restored, and read back through the declared postDeserialize:")(
+    withClue("the state must be restored, and read back through the declared postEvolution:")(
       IntegrationTestSink.values.asScala.toList.map(_.toString).head should startWith("Order(a!,1) ->")
     )
-    withClue("nothing but the provider could have declared it:")(
-      Evolutions.declaredNames(getClass.getClassLoader) should contain(classOf[Order].getName)
+    withClue("nothing but the companion could have declared it:")(
+      Evolutions.declaredClassNames should contain(classOf[Order].getName)
     )
   }
 

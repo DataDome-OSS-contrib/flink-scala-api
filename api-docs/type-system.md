@@ -305,7 +305,7 @@ import org.apache.flinkx.api._
 @version(1)
 @renamed(since = 1, "Event")
 @deletedClasses(since = 1, throwOnInstance = false, "Purchase")
-@postDeserialize(updateAction)
+@postEvolution(updateAction)
 sealed trait Action
 
 @renamed(since = 1, "View")
@@ -314,7 +314,7 @@ case class Web(ts: Long) extends Action
 @version(2)
 @deletedFields(since = 1, "unused", "history")
 @deletedClasses(since = 1, "ClickEvent")
-@postDeserialize(updateClick)
+@postEvolution(updateClick)
 case class Click(
     @renamed(since = 1, "identifier") id: String,
     @added(since = 2) ts: Long = System.currentTimeMillis(),
@@ -342,7 +342,7 @@ def updateAction(formerVersion: Int, action: Action): Action = action match {
 | `@transformed(since = n, mapper)`                                    | case class field               | Field's type changed in version `n`; `mapper` converts the formerly serialized value to the current type                                                                                                                                                 |
 | `@deletedFields(since = n, "a", "b")`                                | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                                                                                                         |
 | `@deletedClasses(since = n, throwOnInstance = true, "OldClass1", …)` | ADT                            | Subtypes that have been removed, or field types that were referenced by a now-deleted field (see [former class name resolution](#former-class-name-resolution)). Throws by default when encountering an instance of deleted class during deserialization |
-| `@postDeserialize(mapper)`                                           | ADT                            | Applies the `mapper` function taking as parameters the former version and the current ADT instance after its deserialization                                                                                                                             |
+| `@postEvolution(mapper)`                                             | ADT                            | After an evolution, applies the `mapper` function taking as parameters the former version and the current ADT instance after its deserialization                                                                                                         |
 
 Field evolutions are applied in ascending `since` order. Within a single version, evolutions are applied in this canonical pipeline:
 Delete → Rename → Transform → Add. This ordering enables annotation combinations such as:
@@ -426,67 +426,45 @@ case class Dog(name: String)
 
 **Delete then recreate a class:**
 
-#### Deployment
+#### Declaring the evolutions
 
-The evolutions are read from the annotations of your source code, which an `EvolutionsProvider` declares.
-Write one provider per module/package declaring versioned ADTs:
-- `declarePackage("package")` finds versioned ADTs: it declares every `@version` annotated ADT of that
-package and of its sub-packages including nested in objects, as the compiler sees them — a dependency contributing
-classes to that same package is covered too.
-- `declarePackage` without an argument does the same for the package the provider itself sits in, so a provider placed
-at the root of a model declares it whole without naming it.
-- Use `declare` to name explicitly an ADT that comes from another module or a library.
+The evolutions are read from the annotations of your source code, at compile time, where the companion of the ADT
+extends `Evolved`:
 
 ```scala
-package com.example.model
+@version(2)
+@renamed(since = 2, "FormerOrder")
+@postEvolution(Order.fix)
+case class Order(id: String, @added(since = 2) note: String = "none")
 
-class ModelEvolutions extends EvolutionsProvider {
-  override def declare(): Unit = {
-    Declare.declarePackage("com.example.model")
-    Declare.declarePackage            // com.example.model and its sub-packages
-    Declare.declare[org.shared.Money] // Explicit declaration of an ADT
-  }
+object Order extends Evolved[Order] {
+  private def fix(version: Int, order: Order): Order = order // A mapper private to the companion is visible here
 }
 ```
 
-List it in `src/main/resources/META-INF/services/org.apache.flinkx.api.evolution.EvolutionsProvider`, a one-line file
-holding the fully qualified name of your provider. An assembly must merge those service files rather than overwrite them
-(with sbt-assembly, `MergeStrategy.filterDistinctLines`).
+Every ADT annotated with `@version` needs this on its companion, sealed traits and Scala 3 enums included. A case
+object has no companion of its own: the sealed trait it belongs to declares it. Deriving the type information of a
+versioned ADT whose companion doesn't extend `Evolved` fails at compile time, wherever the derivation is written: in a
+`StateDescriptor` built in `open()`, in a `lazy val`, in a companion `object` or with the rest of the job graph.
 
-The mappers of `@transformed` and `@postDeserialize` are read where the ADT is declared, so they must be visible from
-there: `private[model]` is enough for a provider sitting in that package, but a mapper private to its own ADT needs
-that ADT declared from its own module, the provider then only calling it:
+A TaskManager never derives anything, so it asks the companions itself: while reading a checkpoint, before any state is
+restored, the snapshot of a former ADT initializes the companion of the class it names, which hands its evolutions
+over. The rules therefore travel in the jar rather than in the job graph, and nothing constrains where you build your
+`StateDescriptor`s.
 
-```scala
-object Order {
-  private def bump(version: Int, order: Order): Order = order.copy(note = "v" + version)
+A former class name that no class bears anymore, an ADT renamed or moved since the checkpoint, is declared by the
+companion of the class now bearing it, which the former name doesn't tell. The jars of the job are then scanned once
+for the companions extending `Evolved`, and all of them are initialized. The scan reads the class files of the jars
+listed by the class loader of the job, or the class path of the JVM when there are none, as in a MiniCluster.
 
-  // The private mapper is visible here
-  private[model] def declareEvolutions(): Unit = Declare.declare[Order]
-}
-```
+A former name that no class bears and no companion declares fails the restore with an `EvolutionNotDeclaredException`,
+rather than reading the former form as if it had never evolved. A checkpoint written by a more recent source code is
+not that case: the class is there, its declaration just doesn't reach that far, and the schema compatibility
+resolution reports it.
 
-A test guards against an ADT no provider declares — typically one added outside the declared packages:
-
-```scala
-EvolutionsCheck.undeclaredIn(new File("src/main/scala"), "com.example") shouldBe empty
-```
-
-It reads the sources rather than the compiled classes, because an incremental build recompiles neither the provider
-nor this check when a source file is added: an ADT added since the provider was last compiled would otherwise go
-unreported until the next clean build.
-
-A TaskManager never derives anything, so it loads those providers itself: the first lookup finding nothing in its
-registry runs them, which happens while reading the checkpoint, before any state is restored. The rules therefore
-travel in the jar rather than in the job graph, and nothing constrains where you build your `StateDescriptor`s — a
-descriptor created in `open()`, in a `lazy val` or held by a companion `object` is declared just as well as one built
-with the rest of the graph.
-
-A versioned ADT whose evolutions no provider declares fails with an `EvolutionNotDeclaredException`, rather than
-building a serializer without any of its rules: when its type information is derived, and again when a checkpoint
-recording that version is restored.
-A checkpoint written by a more recent source code is not that case: the declaration is there, it just doesn't reach
-that far, and the schema compatibility resolution reports it.
+In Scala 2, `Evolved` is an abstract class, as a trait takes no implicit parameter there: a companion extending
+another class cannot extend it. A mapper of the companion referenced by an annotation is reached by name once the
+companion is initialized, so it must not be `private[this]`.
 
 These declarations are held per class loader defining the ADTs. With the default child-first class loading,
 `flink-scala-api` sits in your application jar and a job has a registry entirely of its own. Putting it in the `lib`

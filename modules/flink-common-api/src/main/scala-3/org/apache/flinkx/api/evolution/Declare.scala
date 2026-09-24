@@ -10,110 +10,76 @@ import org.apache.flinkx.api.{
   added,
   deletedClasses,
   deletedFields,
-  postDeserialize,
+  postEvolution,
   renamed,
   transformed
 }
 
 import scala.quoted.*
 
-/** Declares the evolutions of an ADT from its annotations alone.
+/** Builds the [[Declaration]] of an ADT from its annotations alone.
   *
   * Reads what `TypeInformationDerivation` reads, but emits only the registration code: no field typeclass is summoned,
-  * so it compiles wherever the ADT is visible, and it can be generated.
+  * so it compiles wherever the ADT is visible, from its own companion in particular.
   */
-object Declare:
-
-  inline def declare[T]: Unit = ${ declareImpl[T] }
-
-  /** Declares every versioned ADT of the given package and of its sub-packages, nested ones included.
-    *
-    * Covers the package as the compiler sees it, dependencies contributing classes to it included. An ADT living in a
-    * package of its own is left to the provider of its module, or named by a `declare` of its own.
-    */
-  inline def declarePackage(inline packageName: String): Unit = ${ declarePackageImpl('packageName) }
-
-  /** Declares every versioned ADT of the package this call is written in, and of its sub-packages.
-    *
-    * Same as naming that package, so a provider sitting at the root of a model declares it whole.
-    */
-  inline def declarePackage: Unit = ${ declareEnclosingPackageImpl }
-
-  private def declarePackageImpl(packageName: Expr[String])(using Quotes): Expr[Unit] =
-    declarationsOf(packageName.valueOrAbort)
-
-  private def declareEnclosingPackageImpl(using Quotes): Expr[Unit] =
-    import quotes.reflect.*
-
-    var owner = Symbol.spliceOwner
-    while !owner.isNoSymbol && !owner.isPackageDef do owner = owner.owner
-    val name = if owner.isNoSymbol then "" else owner.fullName
-    // Scanning every package of the classpath forces signatures a dependency may not bring, which fails the build
-    if name.isEmpty || name == "<root>" then
-      report.errorAndAbort("declarePackage must be called from a package, as the root package cannot be scanned")
-    declarationsOf(name)
-
-  private def declarationsOf(packageName: String)(using Quotes): Expr[Unit] =
-    import quotes.reflect.*
-
-    val adts = versionedIn(packageName)
-    if adts.isEmpty then report.warning(s"No @version annotated ADT found in package '$packageName'")
-    val declarations = adts.map(adt =>
-      adtType(adt).asType match
-        case '[t] => declareImpl[t]
-    )
-    Expr.block(declarations, '{ () })
+private[evolution] object Declare:
 
   /** Whether the given symbol declares a schema version of its own. */
-  private def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
+  def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
     import q.reflect.*
     try symbol.annotations.exists(_.tpe <:< TypeRepr.of[version])
     catch { case _: Throwable => false }
   }
 
   /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. */
-  private def versionOf(using q: Quotes)(symbol: q.reflect.Symbol): Int = {
+  def versionOf(using q: Quotes)(symbol: q.reflect.Symbol): Int = {
     import q.reflect.*
-    symbol.annotations
-      .find(_.tpe <:< TypeRepr.of[version])
-      .flatMap {
-        case Apply(_, args) =>
-          args.collectFirst {
-            case Literal(IntConstant(declared))              => declared
-            case NamedArg(_, Literal(IntConstant(declared))) => declared
-          }
-        case _ => None
-      }
-      .getOrElse(0)
+    symbol.annotations.find(_.tpe <:< TypeRepr.of[version]).flatMap(intArgument(_, "current")).getOrElse(0)
   }
 
-  /** Symbols of the versioned ADTs of the given package and of its sub-packages, nested in objects or not. */
-  private def versionedIn(using q: Quotes)(packageName: String): List[q.reflect.Symbol] = {
+  /** The literal `Int` the given annotation passes to the named parameter, its first one, if it is a literal. */
+  private def intArgument(using q: Quotes)(annotation: q.reflect.Term, name: String): Option[Int] = {
     import q.reflect.*
-    val root =
-      try Symbol.requiredPackage(packageName)
-      catch { case _: Throwable => report.errorAndAbort(s"Cannot read package '$packageName': no such package") }
+    annotation match
+      case Apply(_, args) =>
+        args.collectFirst {
+          case Literal(IntConstant(value))                                         => value
+          case NamedArg(argument, Literal(IntConstant(value))) if argument == name => value
+        }
+      case _ => None
+  }
 
-    // A module holds its members in its module class, and a package its own in its declarations
-    def membersOf(owner: Symbol): List[Symbol] =
-      try owner.declaredTypes ++ owner.declaredFields.filter(_.moduleClass.exists)
-      catch { case _: Throwable => Nil }
+  def declarationImpl[T: Type](using Quotes): Expr[Declaration[T]] =
+    import quotes.reflect.*
 
-    def walk(owner: Symbol): List[Symbol] = {
-      val members = membersOf(owner).filterNot(_.name.contains("$"))
-      members.filter(isVersioned) ++ members.flatMap(member =>
-        walk(if member.isTerm then member.moduleClass else member)
+    val symbol = TypeRepr.of[T].typeSymbol
+    // A case object has no companion of its own to declare it: the sealed trait it belongs to declares it
+    val moduleChildren = if symbol.flags.is(Flags.Enum) then Nil else symbol.children.filter(_.isTerm)
+    val builders       = builderImpl[T] :: moduleChildren.map(child =>
+      child.termRef.asType match
+        case '[c] => builderImpl[c]
+    )
+    val subtypeClasses = if symbol.flags.is(Flags.Enum) then Nil else symbol.children.filterNot(_.isTerm).map(_.typeRef)
+    val classes        = subtypeClasses.map(tpe =>
+      tpe.asType match
+        case '[t] =>
+          Expr
+            .summon[scala.reflect.ClassTag[t]]
+            .map(tag => '{ $tag.runtimeClass })
+            .getOrElse(report.errorAndAbort(s"No ClassTag for ${tpe.show}"))
+    )
+    val clazz =
+      Expr.summon[scala.reflect.ClassTag[T]].getOrElse(report.errorAndAbort(s"No ClassTag for ${TypeRepr.of[T].show}"))
+    '{
+      new Declaration[T](
+        $clazz.runtimeClass.asInstanceOf[Class[T]],
+        () => Seq(${ Varargs(builders) }*),
+        () => Seq(${ Varargs(classes) }*)
       )
     }
 
-    walk(root).distinct
-  }
-
-  /** The type of the given ADT symbol, a case object being a term whose singleton type names its class. */
-  private def adtType(using q: Quotes)(symbol: q.reflect.Symbol): q.reflect.TypeRepr =
-    if symbol.isTerm then symbol.termRef else symbol.typeRef
-
-  private def declareImpl[T: Type](using Quotes): Expr[Unit] =
+  /** The code building the [[EvolutionBuilder]] of `T` from its annotations. */
+  private def builderImpl[T: Type](using Quotes): Expr[EvolutionBuilder[T]] =
     import quotes.reflect.*
 
     val symbol   = TypeRepr.of[T].typeSymbol
@@ -134,14 +100,16 @@ object Declare:
         case constructor if constructor.isNoSymbol => Nil
         case constructor                           => constructor.paramSymss.filterNot(_.exists(_.isTypeParam)).flatten
 
+    /** The subtypes of a sealed trait, a case object child being a term whose singleton type names its class. */
+    val subtypeClasses: List[Expr[Class[?]]] =
+      if isEnum then Nil
+      else children.map(child => classOfExpr(if child.isTerm then child.termRef else child.typeRef))
+
     /** Members of the ADT, in declaration order: field names, enum value names or subtype class names. */
     val memberNames: Expr[Array[String]] =
       if children.isEmpty then Expr(parametersOf(symbol).map(_.name).toArray)
       else if isEnum then Expr(children.map(_.name).toArray)
-      else
-        // A case object child is a term, whose singleton type is what names its class
-        val classNames = children.map(child => classOfExpr(if child.isTerm then child.termRef else child.typeRef))
-        '{ Array(${ Varargs(classNames) }*).map(_.getName) }
+      else '{ Array(${ Varargs(subtypeClasses) }*).map(_.getName) }
 
     def is[A: Type](term: Term): Boolean = term.tpe <:< TypeRepr.of[A]
 
@@ -177,11 +145,17 @@ object Declare:
               $builder.registerDeletedFormerClass(name, $clazz, d.since, d.throwOnInstance)
             )
           }
-        case term if is[postDeserialize[?]](term) =>
+        case term if is[postEvolution[?]](term) =>
           term.tpe.typeArgs.head.asType match
             case '[a] =>
-              val p = term.asExprOf[postDeserialize[a]]
-              '{ $builder.addPostDeserialize($p.asInstanceOf[postDeserialize[T]]) }
+              val p = term.asExprOf[postEvolution[a]]
+              // The mapper is read on first use: the companion holding it may still be initializing
+              '{
+                lazy val post = $p
+                $builder.addPostEvolution(
+                  new postEvolution[T]((v: Int, i: T) => post.mapper(v, i.asInstanceOf[a]).asInstanceOf[T])
+                )
+              }
       }
 
     def fieldAnnotations(builder: Expr[EvolutionBuilder[T]], clazz: Expr[Class[T]]): List[Expr[Unit]] =
@@ -189,13 +163,15 @@ object Declare:
         val label = Expr(parameter.name)
         annotationsOf(parameter).collect {
           case term if is[added](term) =>
+            if !parameter.flags.is(Flags.HasDefault) then
+              report.errorAndAbort(addedFieldWithoutDefault(symbol.fullName, parameter.name))
             val a = term.asExprOf[added]
             '{
               $builder.fieldEvolutions += Add(
                 $a.since,
                 $clazz,
                 $label,
-                ClassUtil.defaultFieldValue($clazz, ${ Expr(index) })
+                () => ClassUtil.defaultFieldValue($clazz, ${ Expr(index) })
               )
             }
           case term if is[renamed](term) =>
@@ -205,7 +181,16 @@ object Declare:
             (term.tpe.typeArgs.head.asType, term.tpe.typeArgs.last.asType) match
               case ('[from], '[to]) =>
                 val t = term.asExprOf[transformed[from, to]]
-                '{ val tr = $t; $builder.fieldEvolutions += Transform(tr.since, $clazz, $label, tr.mapper) }
+                intArgument(term, "since") match
+                  // The mapper is read on first use: the companion holding it may still be initializing
+                  case Some(since) =>
+                    '{
+                      lazy val tr = $t
+                      $builder.fieldEvolutions +=
+                        Transform[from, to](${ Expr(since) }, $clazz, $label, (a: from) => tr.mapper(a))
+                    }
+                  case None =>
+                    '{ val tr = $t; $builder.fieldEvolutions += Transform(tr.since, $clazz, $label, tr.mapper) }
         }
       }
 
@@ -241,13 +226,13 @@ object Declare:
         val allowed =
           if version == 0 then is[renamed](term) && hasVersionedAncestor
           else
-            is[renamed](term) || is[deletedClasses](term) || is[postDeserialize[?]](term) ||
+            is[renamed](term) || is[deletedClasses](term) || is[postEvolution[?]](term) ||
             (is[deletedFields](term) && !isCoproduct)
         if !allowed then reject(term, if version == 0 then s"${symbol.fullName} with version 0" else symbol.fullName)
       }
 
-      if symbol.annotations.count(is[postDeserialize[?]]) > 1 then
-        report.errorAndAbort(evolutionNotAllowed("postDeserialize", s"${symbol.fullName} twice"))
+      if symbol.annotations.count(is[postEvolution[?]]) > 1 then
+        report.errorAndAbort(evolutionNotAllowed("postEvolution", s"${symbol.fullName} twice"))
 
       parametersOf(symbol).filter(_.annotations.exists(isEvolved)).foreach { parameter =>
         parameter.annotations.filter(isEvolved).foreach { term =>
@@ -268,12 +253,11 @@ object Declare:
     }
 
     validate()
-    val clazz = '{ ${ classOfExpr(TypeRepr.of[T]) }.asInstanceOf[Class[T]] }
     '{
-      val declaredClass = $clazz
+      val declaredClass = ${ classOfExpr(TypeRepr.of[T]) }.asInstanceOf[Class[T]]
       val builder       = new EvolutionBuilder[T](declaredClass, ${ Expr(version) }, $memberNames)
       ${ Expr.block(classAnnotations('builder, 'declaredClass), '{ () }) }
       ${ Expr.block(fieldAnnotations('builder, 'declaredClass), '{ () }) }
       ${ Expr.block(enumValueAnnotations('builder), '{ () }) }
-      Evolutions.register(builder)
+      builder
     }
