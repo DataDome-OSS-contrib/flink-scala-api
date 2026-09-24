@@ -10,10 +10,6 @@ package object evolution {
   final case class VersionNotAllowedException(currentClass: Class[_], version: Int)
       extends FlinkRuntimeException(s"Current version of $currentClass must be >= 0, got @version($version)")
 
-  /** Exception indicating a `version` annotation is declared on a field instead of on an ADT. */
-  final case class VersionNotAllowedOnFieldException(currentClass: Class[_], currentField: String)
-      extends FlinkRuntimeException(s"@version annotation is not allowed on $currentClass.$currentField")
-
   /** Message of a misplaced evolution annotation, reported by the macros declaring the evolutions. */
   private[api] def evolutionNotAllowed(annotation: String, target: String): String =
     s"@$annotation annotation is not allowed on $target"
@@ -59,18 +55,28 @@ package object evolution {
   final case class AddedFieldWithoutDefaultException(currentClass: Class[_], currentField: String)
       extends FlinkRuntimeException(s"'$currentField' added field in $currentClass must have a default value")
 
-  /** Where the evolutions of a module come from, told by every exception reporting that they are missing. */
-  private[evolution] val declaredByProvider: String =
-    s"The evolutions of a module travel in its jar, declared by a provider listed in" +
-      s" META-INF/services/${classOf[EvolutionsProvider].getName}: check that a provider declares that class, and" +
-      s" that the assembly merges the service files instead of overwriting them"
+  /** Message of a versioned ADT whose companion doesn't extend `Evolved`, reported where its type information is
+    * derived.
+    */
+  private[api] def companionNotEvolved(adt: String): String = {
+    val name = adt.split("[.$]").last
+    s"$adt declares @version, so its companion must declare its evolutions: object $name extends Evolved[$name]"
+  }
+
+  /** Message of an `@added` field without default value, reported by the macros declaring the evolutions. */
+  private[api] def addedFieldWithoutDefault(adt: String, field: String): String =
+    s"'$field' added field in $adt must have a default value"
 
   /** Exception indicating the evolutions of `fqn` never reached the JVM needing them. */
   final case class EvolutionNotDeclaredException(fqn: String, version: Int, restoring: Boolean = true)
       extends FlinkRuntimeException(
-        (if (restoring) s"Cannot restore '$fqn': the checkpoint was written at"
-         else s"Cannot derive the type information of '$fqn': it declares") +
-          s" @version($version), but no evolution is declared for that class here. $declaredByProvider"
+        if (restoring)
+          s"Cannot restore '$fqn', written at @version($version): no class of that name exists, and no evolution" +
+            s" declares it renamed or deleted. If it was renamed, the companion of the class now bearing it must extend" +
+            s" Evolved, in a jar of the job; if it was deleted, the ADT that held it must declare it with @deletedClasses"
+        else
+          s"Cannot derive the type information of '$fqn': it declares @version($version), but its companion" +
+            s" declares no evolution. It must extend Evolved"
       )
 
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */

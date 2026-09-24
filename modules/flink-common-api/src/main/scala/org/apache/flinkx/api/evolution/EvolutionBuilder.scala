@@ -2,8 +2,8 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
 import org.apache.flinkx.api.evolution.Evolution.{DeletedClass, EnumValueEvolution}
-import org.apache.flinkx.api.evolution.EvolutionBuilder.{AdtDeclaration, ClassEvolution, postDeserializeIdentity}
-import org.apache.flinkx.api.postDeserialize
+import org.apache.flinkx.api.evolution.EvolutionBuilder.{AdtDeclaration, ClassEvolution}
+import org.apache.flinkx.api.postEvolution
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.collection.mutable
@@ -29,8 +29,8 @@ import scala.collection.mutable
   *   Field-level evolutions to apply on case class fields; empty for sealed traits
   * @param formerEnumValues
   *   Evolutions of the Scala 3 enum values, by former value name; empty for non-enum ADTs
-  * @param postDeserialize
-  *   A mapper function taking as parameters the former version and the current ADT instance after its deserialization
+  * @param postEvolution
+  *   A mapper function taking as parameters the former version and the current ADT instance restored from it
   * @tparam T
   *   The type on which the [[Evolution]] applies
   */
@@ -43,7 +43,7 @@ final class EvolutionBuilder[T](
     val deletedFormerClasses: mutable.Map[String, ClassEvolution] = mutable.Map.empty,
     val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
     val formerEnumValues: mutable.Map[String, EnumValueEvolution] = mutable.Map.empty,
-    private var postDeserialize: Option[(Int, T) => T] = None
+    private var postEvolution: Option[(Int, T) => T] = None
 ) {
 
   /** Register the mapping between a former ADT class name and the current ADT class.
@@ -80,8 +80,8 @@ final class EvolutionBuilder[T](
     deletedFormerClasses(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) =
       ClassEvolution(DeletedClass, version, throwOnInstance)
 
-  def addPostDeserialize(p: postDeserialize[T]): Unit = if (postDeserialize.isEmpty) {
-    postDeserialize = Some(p.mapper)
+  def addPostEvolution(p: postEvolution[T]): Unit = if (postEvolution.isEmpty) {
+    postEvolution = Some(p.mapper)
   } else {
     throw EvolutionNotAllowedException(p, s"$currentClass twice")
   }
@@ -134,13 +134,14 @@ final class EvolutionBuilder[T](
   private def buildEvolution(className: String, classEvolution: ClassEvolution, previousVersion: Int): Evolution[T] =
     new Evolution[T](
       className = className,
-      version = previousVersion,
+      formerVersion = previousVersion,
+      currentVersion = currentVersion,
       currentClass = classEvolution.clazz.asInstanceOf[Class[T]],
       currentMemberNames = currentMemberNames.clone(),
       fieldEvolutions = fieldEvolutions.dropWhile(_.since <= previousVersion).toArray,
       formerEnumValueToEvolution = formerEnumValues.toMap,
       throwOnInstance = classEvolution.throwOnInstance,
-      postDeserialize = postDeserialize.getOrElse(postDeserializeIdentity)
+      postEvolution = postEvolution
     )
 
 }
@@ -156,12 +157,6 @@ object EvolutionBuilder {
       val currentClass: Class[_],
       val byClassName: Map[String, Array[Evolution[_]]]
   )
-
-  // Serializable, as the Evolution holding it travels with the serializer
-  def postDeserializeIdentity[T]: (Int, T) => T = new ((Int, T) => T) with Serializable {
-    override def apply(version: Int, instance: T): T = instance
-    override def toString(): String                  = "(_, i) => i"
-  }
 
   case class ClassEvolution(clazz: Class[_], version: Int, throwOnInstance: Boolean = false)
 

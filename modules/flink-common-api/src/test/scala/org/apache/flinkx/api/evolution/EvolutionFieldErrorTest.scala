@@ -11,7 +11,7 @@ import org.apache.flinkx.api.{
   added,
   deletedClasses,
   deletedFields,
-  postDeserialize,
+  postEvolution,
   renamed,
   transformed,
   version
@@ -42,42 +42,30 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
       .map(_.map(_.getMessage).toSeq)
       .getOrElse(Seq.empty)
 
-  // Nothing declares it, so only the derivation sees the misplaced version: the macro rejects it at compile time
-  it should "throw when @version is on a case class field" in {
-    val exception = intercept[VersionNotAllowedOnFieldException] {
-      implicitly[TypeInformation[WrongVersionOnField]]
-    }
-    exception.getMessage shouldBe "@version annotation is not allowed on class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongVersionOnField.a"
-  }
-
-  // An evolution outside the version range is never applied when it should, so it is refused at derivation instead of
-  // silently sending an unchanged schema down the migration path.
+  // An evolution outside the version range is never applied when it should, so it is refused when the declaration is
+  // applied instead of silently sending an unchanged schema down the migration path.
   it should "throw when a field evolution has a since above the current version" in {
     val exception = intercept[SinceNotAllowedException] {
-      Declare.declare[WrongSinceAboveVersion]
-      Declare.declare[WrongSinceAboveVersion]
+      Evolutions.get(classOf[WrongSinceAboveVersion], 1)
     }
     exception.getMessage shouldBe "An evolution of class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSinceAboveVersion is declared since=2: it must be between 1 and the current @version(1). Raise @version or fix the since of the annotation"
   }
 
   it should "throw when a field evolution has a since below 1" in {
     val exception = intercept[SinceNotAllowedException] {
-      Declare.declare[WrongSinceBelowOne]
-      Declare.declare[WrongSinceBelowOne]
+      Evolutions.get(classOf[WrongSinceBelowOne], 1)
     }
     exception.getMessage shouldBe "An evolution of class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSinceBelowOne is declared since=0: it must be between 1 and the current @version(1). Raise @version or fix the since of the annotation"
   }
 
-  it should "throw when @added is on a case class field without default value" in {
-    val exception = intercept[AddedFieldWithoutDefaultException] {
-      Declare.declare[WrongAddedOnFieldWithoutDefaultValue]
-      Declare.declare[WrongAddedOnFieldWithoutDefaultValue]
-    }
-    exception.getMessage shouldBe "'a' added field in class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongAddedOnFieldWithoutDefaultValue must have a default value"
+  // Rejected where the declaration is read, at compile time
+  it should "not compile a declaration with @added on a case class field without default value" in {
+    assertDoesNotCompile(
+      "implicitly[org.apache.flinkx.api.evolution.Declaration[EvolutionErrorFixtures.WrongAddedOnFieldWithoutDefaultValue]]"
+    )
   }
 
   it should "throw field not found when deserializing Click v0 with wrong added field" in {
-    Declare.declare[WrongAddedField]
     val expected  = WrongAddedField("123456789")
     val exception = intercept[FieldAlreadyExistException] {
       testDeserializeFromFile("Click-v0", expected)
@@ -86,7 +74,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "throw field not found when deserializing Click v0 with wrong renamed field" in {
-    Declare.declare[WrongRenamedField]
     val expected  = WrongRenamedField("123456789")
     val exception = intercept[FieldNotFoundException] {
       testDeserializeFromFile("Click-v0", expected)
@@ -95,7 +82,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "throw field not found when deserializing Click v0 with wrong transformed field" in {
-    Declare.declare[WrongTransformedField]
     val expected  = WrongTransformedField("123456789")
     val exception = intercept[FieldNotFoundException] {
       testDeserializeFromFile("Click-v0", expected)
@@ -104,7 +90,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "ignore field not found when deserializing Click v0 with wrong deleted field" in {
-    Declare.declare[WrongDeletedField]
     val expected = WrongDeletedField("a")
     testDeserializeFromFile("Click-v0", expected)
   }
@@ -112,7 +97,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   // The field names are checked by the dry run, when the schema compatibility is resolved, and no longer on every
   // record: these assert the guidance the user gets, which resolveSchemaCompatibility only logs.
   it should "report an unused former field when dry running Click v0 evolutions" in {
-    Declare.declare[WrongFieldNotUsed]
     implicitly[TypeInformation[WrongFieldNotUsed]]
 
     dryRunFailures(ClickV0ClassName, ClickV0FieldNames) shouldBe Seq(
@@ -121,7 +105,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "report every offending field when dry running Click v0 evolutions" in {
-    Declare.declare[WrongSeveralFields]
     implicitly[TypeInformation[WrongSeveralFields]]
 
     dryRunFailures(ClickV0ClassName, ClickV0FieldNames) shouldBe Seq(
@@ -132,7 +115,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "report a missing current field when dry running Click v0 evolutions" in {
-    Declare.declare[WrongMissingField]
     implicitly[TypeInformation[WrongMissingField]]
 
     dryRunFailures(ClickV0ClassName, ClickV0FieldNames) shouldBe Seq(
@@ -143,39 +125,31 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   // The declared evolutions are replayed on the former field names when resolving the compatibility, so a missing or
   // wrong annotation refuses the restore up front instead of failing halfway through the migration.
   it should "resolve the schema compatibility of Click v0 with a wrong added field as incompatible" in {
-    Declare.declare[WrongAddedField]
     resolveSchemaCompatibilityFromFile[WrongAddedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a wrong renamed field as incompatible" in {
-    Declare.declare[WrongRenamedField]
     resolveSchemaCompatibilityFromFile[WrongRenamedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a wrong transformed field as incompatible" in {
-    Declare.declare[WrongTransformedField]
     resolveSchemaCompatibilityFromFile[WrongTransformedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with an extra field as incompatible" in {
-    Declare.declare[WrongFieldNotUsed]
     resolveSchemaCompatibilityFromFile[WrongFieldNotUsed]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a missing field as incompatible" in {
-    Declare.declare[WrongMissingField]
     resolveSchemaCompatibilityFromFile[WrongMissingField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a field type changed without annotation as incompatible" in {
-    Declare.declare[WrongUntransformedField]
     // The rename requires the evolutions, and 'fieldNotInFile' changed from Int to String without @transformed
     resolveSchemaCompatibilityFromFile[WrongUntransformedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of an evolved case class with an incompatible nested field as incompatible" in {
-    Declare.declare[AddedFieldWithoutAnnotation]
-    Declare.declare[OuterEvolvedWithNested]
     // The outer case class evolves through a rename, and its nested field type gained a field without @added
     val formerNestedSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
       evolution = Evolutions.get(classOf[AddedFieldWithoutAnnotation], 0),
@@ -198,7 +172,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   // A field added without the @added annotation has no declared default value to fill when reading a former form, even
   // when the case class declares one: the evolution has to be described rather than silently guessed.
   it should "resolve the schema compatibility of a case class with a field added without annotation as incompatible" in {
-    Declare.declare[AddedFieldWithoutAnnotation]
     val formerSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
       evolution = Evolutions.get(classOf[AddedFieldWithoutAnnotation], 0),
       version = 0,
@@ -210,6 +183,8 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     resolveSchemaCompatibilityAfterRestore[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol(
       "incompatible"
     )
+    // An unversioned ADT declares nothing: registered by hand to read what its dry run would report
+    Evolutions.register(new EvolutionBuilder(classOf[AddedFieldWithoutAnnotation], 0, Array("a", "b")))
     dryRunFailures(classOf[AddedFieldWithoutAnnotation].getName, Array("a")) shouldBe Seq(
       "'b' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$AddedFieldWithoutAnnotation. Use @added(since=<version>) annotation to indicate it has been added"
     )

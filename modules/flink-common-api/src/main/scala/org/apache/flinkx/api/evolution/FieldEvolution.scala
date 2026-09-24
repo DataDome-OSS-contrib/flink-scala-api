@@ -145,7 +145,7 @@ object FieldEvolution {
   /** Insert field `name` with the case class default value. Backs the `@added` annotation.
     *
     * @throws AddedFieldWithoutDefaultException
-    *   At construction if `default` is empty;
+    *   Deserialization time if `default` is empty;
     * @throws FieldAlreadyExistException
     *   Deserialization time if `name` is already present.
     */
@@ -154,13 +154,14 @@ object FieldEvolution {
       override val since: Int,
       currentClass: Class[_],
       name: String,
-      default: Option[T]
+      default: () => Option[T]
   ) extends FieldEvolution(since, Phase.Add) {
 
-    if (default.isEmpty) throw AddedFieldWithoutDefaultException(currentClass, name)
+    @transient private lazy val defaultValue: AnyRef =
+      default().getOrElse(throw AddedFieldWithoutDefaultException(currentClass, name)).asInstanceOf[AnyRef]
 
     override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
-      fieldValues.put(name, default.get.asInstanceOf[AnyRef]) match {
+      fieldValues.put(name, defaultValue) match {
         case Some(_) => throw FieldAlreadyExistException(currentClass, name, fieldValues.keys)
         case _       =>
       }

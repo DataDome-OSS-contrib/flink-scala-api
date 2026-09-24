@@ -4,7 +4,7 @@ import magnolia1.{CaseClass, SealedTrait}
 import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerConfigImpl}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.evolution.{Evolutions, Evolvable}
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer, nullable}
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -21,7 +21,7 @@ private[api] trait TypeInformationDerivation {
 
   def cache: TrieMap[DerivationCacheKey, TypeInformation[_]] = TypeInformationDerivation.cache
 
-  def join[T <: Product: ClassTag: TypeTag](
+  def join[T <: Product: ClassTag: TypeTag: Evolvable](
       ctx: CaseClass[TypeInformation, T]
   ): TypeInformation[T] = {
     val cacheKey = DerivationCacheKey(typeName[T], ctx.parameters.map(_.typeclass))
@@ -31,7 +31,6 @@ private[api] trait TypeInformationDerivation {
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
         val version    = Evolutions.findVersion(clazz, ctx.annotations)
         val fieldNames = ctx.parameters.map(_.label).toArray
-        Evolutions.checkNoVersionOnFields(clazz, ctx.parameters.map(p => p.label -> p.annotations))
 
         val evolution = Evolutions.get(clazz, version)
 
@@ -62,7 +61,7 @@ private[api] trait TypeInformationDerivation {
     }
   }
 
-  def split[T: ClassTag: TypeTag](ctx: SealedTrait[TypeInformation, T]): TypeInformation[T] = {
+  def split[T: ClassTag: TypeTag: Evolvable](ctx: SealedTrait[TypeInformation, T]): TypeInformation[T] = {
     val cacheKey = DerivationCacheKey(typeName[T], ctx.subtypes.map(_.typeclass))
     cache.get(cacheKey) match {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]

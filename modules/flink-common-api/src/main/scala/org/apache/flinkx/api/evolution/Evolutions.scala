@@ -5,10 +5,8 @@ import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 import org.apache.flinkx.api.evolution.EvolutionBuilder.AdtDeclaration
 import org.apache.flinkx.api.version
 
-import java.io.IOException
-import java.util.ServiceLoader
 import scala.collection.concurrent
-import scala.jdk.CollectionConverters._
+import scala.util.control.NonFatal
 
 /** Global registry and entry point for the annotation-based schema evolution feature.
   *
@@ -21,46 +19,55 @@ import scala.jdk.CollectionConverters._
   *   - `Current` describes the deserialization time with the current source code.
   *
   * Lifecycle:
-  *   - At compile time, the [[EvolutionsProvider]] of a module declares its versioned ADTs, which reads the current
-  *     annotations and [[register]]s the immutable [[Evolution]]s of each ADT class.
+  *   - The companion of a versioned ADT extends [[Evolved]], which builds a [[Declaration]] of its annotations at
+  *     compile time and hands it over here when the companion initializes.
+  *   - A lookup that finds nothing initializes the companion of the name it looks for and applies its declaration: the
+  *     snapshot of a former ADT pulls the declaration in while the checkpoint is read, before any state is restored,
+  *     wherever the state descriptor was built. Nothing else is applied: a declaration handed over is applied when its
+  *     own class is looked up, so a faulty one never gets in the way of another.
+  *   - A former name that no class bears anymore, a renamed or deleted ADT, is declared by another companion: the jars
+  *     of the job are scanned once for the companions extending [[Evolved]], and all of them are initialized.
   *   - At restore time, the ADT serializer snapshots [[get]] the evolution of the former name and version they record,
   *     and at deserialization time the restored serializers apply it.
-  *   - On a TaskManager, nothing declares anything up front: the first lookup that misses runs the providers of the
-  *     jar, which is how the declarations reach a JVM where the derivation never ran.
   *
   * Class renames and deletions are resolved through [[EvolutionBuilder.registerFormerClass]] /
   * [[EvolutionBuilder.registerDeletedFormerClass]], which translate the fully-qualified class names recorded in the
   * snapshot into the current classes (or a deletion marker).
   *
-  * Packaging: the declarations are kept per class loader defining the ADTs, so two jobs sharing this library never read
-  * each other's. With the default child-first class loading, this library lives in the application jar and a job has a
-  * registry entirely of its own; putting it in the `lib` directory of the cluster instead makes the registry itself
-  * shared, and its entries then outlive the jobs that filled them, holding their class loaders.
+  * Packaging: the declarations are kept per class loader looking them up, the one of the job, so two jobs sharing this
+  * library never read each other's. With the default child-first class loading, this library lives in the application
+  * jar and a job has a registry entirely of its own; putting it in the `lib` directory of the cluster instead makes the
+  * registry itself shared, and its entries then outlive the jobs that filled them, holding their class loaders.
   *
   * Concurrency: the Flink tasks of a TaskManager restore their state in parallel, so they declare and look up
-  * concurrently. Every registration is atomic, and the providers of a class loader are read once, the threads asking
-  * meanwhile waiting for that reading rather than taking the declaration for missing.
+  * concurrently. The declarations are applied under a lock, a thread arriving meanwhile waiting for them rather than
+  * taking a declaration for missing, and the companions are initialized outside of it, as their initialization may look
+  * up in turn.
   */
 @Internal
 object Evolutions {
 
-  // The ADTs of two jobs sharing this library are defined by two different class loaders, so their declarations are
+  // The ADTs of two jobs sharing this library are loaded by two different class loaders, so their declarations are
   // held apart: a same class name then resolves to the class of the job asking for it, and dies with it
   private val registries: concurrent.Map[ClassLoader, Registry] = concurrent.TrieMap.empty
 
-  /** Declarations of the ADTs defined by one class loader, filled by [[register]] and by the providers of its jars.
-    *
-    * Thread-safe: a declaration is read lock-free and registered atomically, and the providers are read once.
-    */
-  private final class Registry(classLoader: ClassLoader) {
+  // Every declaration a companion handed over, by companion class: a companion initializes once per JVM, so the
+  // declarations are kept for good and applied again to a registry emptied by a reset
+  private val declarations: concurrent.Map[Class[_], Declaration[_]] = concurrent.TrieMap.empty
+
+  /** Declarations of the ADTs one class loader loads, and the companions found in the jars it loads from. */
+  private final class Registry(val classLoader: ClassLoader) {
 
     private val evolutions: concurrent.Map[String, Array[Evolution[_]]] = concurrent.TrieMap.empty
 
-    // Read once, and a thread arriving meanwhile waits for that reading to complete rather than skipping it
-    private lazy val providersRead: Unit =
-      ServiceLoader.load(classOf[EvolutionsProvider], classLoader).iterator().asScala.foreach(_.declare())
+    // Applied once each: the identity of a declaration is the one of the companion that built it
+    val applied: concurrent.Map[Declaration[_], Unit] = concurrent.TrieMap.empty
 
-    def readProviders(): Unit = providersRead
+    // A declaration that fails is reported when its own class is looked up, and never blocks another ADT
+    val failed: concurrent.Map[String, Throwable] = concurrent.TrieMap.empty
+
+    // The jars are listed once: a companion initializes once, so initializing them all again is cheap
+    lazy val companions: Seq[String] = CompanionScan.companionsOf(classLoader)
 
     def declare(className: String, declared: Array[Evolution[_]]): Unit =
       evolutions.updateWith(className) {
@@ -70,10 +77,7 @@ object Evolutions {
 
     /** The evolution declared for the given former name at the given former version, if any. */
     def find(formerName: String, formerVersion: Int): Option[Evolution[_]] =
-      evolutions.get(formerName).flatMap(_.find(_.version >= formerVersion))
-
-    /** Whether anything at all is declared for the given former name, at any version. */
-    def isDeclared(formerName: String): Boolean = evolutions.contains(formerName)
+      evolutions.get(formerName).flatMap(_.find(_.formerVersion >= formerVersion))
 
     def declarations: Map[String, Array[Evolution[_]]] = evolutions.toMap
 
@@ -85,9 +89,9 @@ object Evolutions {
     private def sortDeclarations(className: String, evolutions: Array[Evolution[_]]): Array[Evolution[_]] = {
       def descr(currentClass: Class[_]) = if (isDeletedClass(currentClass)) "deleted" else s"renamed to $currentClass"
 
-      val declarations = evolutions.distinctBy(evolution => (evolution.version, evolution.currentClass))
+      val declarations = evolutions.distinctBy(evolution => (evolution.formerVersion, evolution.currentClass))
       declarations
-        .groupBy(_.version)
+        .groupBy(_.formerVersion)
         .collectFirst { case (_, sameVersion) if sameVersion.length > 1 => sameVersion }
         .foreach { conflicting =>
           val classes = conflicting.map(_.currentClass)
@@ -98,33 +102,85 @@ object Evolutions {
 
   }
 
-  /** Build the [[Evolution]]s from the given builder and register them for the deserialization phase. */
-  def register[T](builder: EvolutionBuilder[T]): Unit = register(builder.build())
+  /** Hand over the declaration of an ADT, applied by the first lookup of its class. Called by [[Evolved]] when a
+    * companion initializes.
+    *
+    * @param companion
+    *   The class of the companion object handing the declaration over
+    */
+  private[evolution] def pending(declaration: Declaration[_], companion: Class[_]): Unit =
+    declarations.put(companion, declaration)
 
-  private def register(declaration: AdtDeclaration): Unit = {
-    val registry = registryOf(declaration.currentClass.getClassLoader)
+  /** Build the [[Evolution]]s from the given builder and register them for the deserialization phase. */
+  private[evolution] def register[T](builder: EvolutionBuilder[T]): Unit =
+    register(registryOf(builder.currentClass.getClassLoader), builder.build())
+
+  private def register(registry: Registry, declaration: AdtDeclaration): Unit =
     declaration.byClassName.foreachEntry(registry.declare)
-  }
 
   /** The registry of the given class loader, created on first use. */
   private def registryOf(classLoader: ClassLoader): Registry =
     registries.getOrElseUpdate(classLoader, new Registry(classLoader))
 
-  /** The class loaders an ADT can be declared by, from the given one up to the bootstrap loader denoted by null. */
-  private def loaderChain(classLoader: ClassLoader): LazyList[ClassLoader] =
-    LazyList.iterate(classLoader)(_.getParent).takeWhile(_ != null) :+ null
+  /** Initialize the companion of the given ADT class name through the given class loader and apply the declaration it
+    * handed over to the registry of that loader, if any, then do the same with the subtypes it declares, whose own
+    * companions declare their own evolutions.
+    *
+    * The registrations run under the lock, so a concurrent lookup waits for them. The initializations run outside of
+    * it: a companion may look up while initializing, from another thread holding its class initialization lock.
+    */
+  private def declare(className: String, cl: ClassLoader): Unit = {
+    // A case object is its own companion, and an enum value is declared by its enum
+    val companion =
+      try Some(Class.forName(companionNameOf(className), true, cl))
+      catch { case _: ClassNotFoundException => None }
+    companion.flatMap(declarations.get).foreach { declaration =>
+      apply(declaration, cl).foreach(member => declare(member.getName, cl))
+    }
+  }
+
+  /** Apply the given declaration once to the registry of the given class loader, and return the subtypes it declares,
+    * to declare in turn.
+    */
+  private def apply(declaration: Declaration[_], cl: ClassLoader): Seq[Class[_]] = synchronized {
+    val registry = registryOf(cl)
+    if (registry.applied.putIfAbsent(declaration, ()).isDefined) Nil
+    else
+      try {
+        declaration.build().foreach(builder => register(registry, builder.build()))
+        declaration.memberClasses()
+      } catch {
+        case NonFatal(failure) => registry.failed.put(declaration.currentClass.getName, failure); Nil
+      }
+  }
+
+  /** The companion class of the given ADT class name: a case object is its own, an enum value is declared by its enum.
+    */
+  private def companionNameOf(className: String): String = {
+    val adtName = className.takeWhile(_ != '#')
+    if (adtName.endsWith("$")) adtName else s"$adtName$$"
+  }
+
+  /** Initialize the companions extending [[Evolved]] found in the jars of the given class loader.
+    *
+    * This is how a former name that no class bears anymore, renamed or deleted, gets declared: the companion declaring
+    * it is the only one that knows, and nothing but the jars lists the companions.
+    */
+  private def declareScannedCompanions(cl: ClassLoader): Unit =
+    registryOf(cl).companions.foreach(declare(_, cl))
 
   /** `true` if the given current class is the marker of a former class registered as deleted. */
   def isDeletedClass(currentClass: Class[_]): Boolean = currentClass == DeletedClass
 
   /** Return the [[Evolution]] declared for the given former ADT member name at the given former version, if any.
     *
-    * Unlike [[get]], never loads any class, so it also answers for the names that designate no class at all: the
-    * `<enum binary name>#<value name>` of a Scala 3 enum value, in particular. Returning `None` means nothing was
-    * declared for that name, not that the member is unknown.
+    * Unlike [[get]], never loads the class of that name, so it also answers for the names that designate no class at
+    * all: the `<enum binary name>#<value name>` of a Scala 3 enum value, in particular. Returning `None` means nothing
+    * was declared for that name, not that the member is unknown.
     *
-    * The declarations are looked up in the registry of the given class loader, then in those of its ancestors: an ADT
-    * shared by several jobs is declared by the loader defining it, which the loader of each job descends from.
+    * A lookup finding nothing initializes the companion of that name, which hands its declaration over, and applies it.
+    * The declarations are looked up in the registry of the given class loader only: the companions it initializes are
+    * the ones the job sees, so the classes they declare are the ones of the job.
     *
     * @param formerName
     *   Former fully qualified class name, or `<enum binary name>#<value name>` for a Scala 3 enum value
@@ -132,27 +188,27 @@ object Evolutions {
     *   Former schema version of the ADT declaring that member
     * @param cl
     *   Class loader the former ADT member is looked up for
+    * @throws Throwable
+    *   the failure of the declaration of that name, if declaring it failed
     */
   def find[T](formerName: String, formerVersion: Int, cl: ClassLoader): Option[Evolution[T]] =
     lookUp[T](formerName, formerVersion, cl).orElse {
-      // The providers of the jars are what a JVM that never derives an ADT declares from, so a lookup finding nothing
-      // reads them before concluding: on a TaskManager that happens while reading a savepoint, before any restore
-      registryOf(cl).readProviders()
+      // A class bearing that name is declared by its own companion
+      declare(formerName, cl)
       lookUp[T](formerName, formerVersion, cl)
     }
 
-  private def lookUp[T](formerName: String, formerVersion: Int, cl: ClassLoader): Option[Evolution[T]] =
-    loaderChain(cl)
-      .flatMap(registries.get)
-      .flatMap(_.find(formerName, formerVersion))
-      .headOption
-      .map(_.asInstanceOf[Evolution[T]])
+  private def lookUp[T](formerName: String, formerVersion: Int, cl: ClassLoader): Option[Evolution[T]] = {
+    val registry = registryOf(cl)
+    registry.failed.get(formerName).foreach(failure => throw failure)
+    registry.find(formerName, formerVersion).map(_.asInstanceOf[Evolution[T]])
+  }
 
-  /** Return the [[Evolution]] the given ADT class declares at the given version, or [[Evolution.noEvolution]]
-    * otherwise.
+  /** Return the [[Evolution]] the given ADT class declares at the given version, or [[Evolution.noEvolution]] when it
+    * declares none.
     *
     * @throws EvolutionNotDeclaredException
-    *   if the ADT declares a version no provider declares evolutions for
+    *   if the ADT declares a version but found nothing in the registry
     */
   def get[T](clazz: Class[T], currentVersion: Int): Evolution[T] =
     find[T](clazz.getName, currentVersion, clazz.getClassLoader).getOrElse {
@@ -163,46 +219,25 @@ object Evolutions {
   /** Return the [[Evolution]] associated with the given former ADT class name, or [[Evolution.noEvolution]] of the
     * class loaded by name otherwise.
     *
-    * @throws IOException
+    * A former name that no class bears anymore is declared by another companion, found by scanning the jars.
+    *
+    * @throws EvolutionNotDeclaredException
     *   if no evolution is declared for that name, and it can't be loaded either
     */
   def get[T](formerClassName: String, formerVersion: Int, cl: ClassLoader): Evolution[T] =
     if (formerClassName == null) Evolution.NoEvolution.asInstanceOf[Evolution[T]] // Snapshot written before 2.4.0
     else
       find[T](formerClassName, formerVersion, cl).getOrElse {
-        if (formerVersion > 0 && !isDeclared(formerClassName, cl)) {
-          // We are looking for a versioned ADT: finding nothing means META-INF/services are missing
-          throw EvolutionNotDeclaredException(formerClassName, formerVersion)
-        }
+        // A class that loads declares itself, through its own companion: nothing else has to be looked for
         val currentClass =
-          try Class.forName(formerClassName, false, cl).asInstanceOf[Class[T]]
-          catch { // Same behavior as org.apache.flink.util.InstantiationUtil.resolveClassByName
-            case e: ClassNotFoundException =>
-              // A class renamed or deleted since that checkpoint is resolved by the evolutions declaring it, which a
-              // version 0 checkpoint cannot tell from a class that simply left the classpath
-              throw new IOException(
-                s"Could not find class '$formerClassName' in classpath. If it was renamed or deleted," +
-                  s" its evolutions never reached this JVM. $declaredByProvider",
-                e
-              )
-          }
-        Evolution.noEvolution(currentClass, formerVersion)
+          try Some(Class.forName(formerClassName, false, cl).asInstanceOf[Class[T]])
+          catch { case _: ClassNotFoundException => None }
+        currentClass.map(Evolution.noEvolution(_, formerVersion)).getOrElse {
+          declareScannedCompanions(cl)
+          lookUp[T](formerClassName, formerVersion, cl)
+            .getOrElse(throw EvolutionNotDeclaredException(formerClassName, formerVersion))
+        }
       }
-
-  /** Every ADT name declared for the given class loader and its ancestors, reading the providers of its jars first. */
-  def declaredNames(cl: ClassLoader): Set[String] = {
-    registryOf(cl).readProviders()
-    loaderChain(cl).flatMap(registries.get).flatMap(_.declarations.keySet).toSet
-  }
-
-  /** Whether anything at all is declared for the given former ADT member name, at any version.
-    *
-    * Tells a declaration that never reached this JVM from one that doesn't cover the queried version, which is what a
-    * checkpoint written by a more recent source code looks like: that one is reported by the schema compatibility
-    * resolution rather than here.
-    */
-  private def isDeclared(formerName: String, cl: ClassLoader): Boolean =
-    loaderChain(cl).flatMap(registries.get).exists(_.isDeclared(formerName))
 
   /** Current schema version the given annotations declare for the given ADT class, 0 when they declare none.
     *
@@ -214,23 +249,16 @@ object Evolutions {
       if (declared >= 0) declared else throw VersionNotAllowedException(currentClass, declared)
     }
 
-  /** Check no field of the given ADT class declares a `version` annotation.
-    *
-    * @param fields
-    *   Field names of the ADT, with the annotations each of them declares
-    * @throws VersionNotAllowedOnFieldException
-    *   if a field declares a version
-    */
-  private[api] def checkNoVersionOnFields(currentClass: Class[_], fields: Seq[(String, Seq[Any])]): Unit =
-    fields.foreach { case (name, annotations) =>
-      if (annotations.exists(_.isInstanceOf[version])) throw VersionNotAllowedOnFieldException(currentClass, name)
-    }
-
   /** Every [[Evolution]] registered by the given class loader, by class name. */
   @VisibleForTesting
   private[api] def declaredEvolutions(cl: ClassLoader): Map[String, Array[Evolution[_]]] =
     registries.get(cl).fold(Map.empty[String, Array[Evolution[_]]])(_.declarations)
 
+  /** Names of every class declared by any class loader, such as the one Flink hands the snapshots. */
+  @VisibleForTesting
+  private[api] def declaredClassNames: Set[String] = registries.values.flatMap(_.declarations.keySet).toSet
+
+  /** Empty the registries. The declarations handed over are kept, and applied again when their class is looked up. */
   @VisibleForTesting
   private[api] def reset(): Unit = {
     org.apache.flinkx.api.auto.cache.clear()

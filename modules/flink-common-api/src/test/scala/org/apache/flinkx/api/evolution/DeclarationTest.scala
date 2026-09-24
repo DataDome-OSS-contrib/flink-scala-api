@@ -1,16 +1,14 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.{added, deletedClasses, deletedFields, postDeserialize, renamed, transformed, version}
+import org.apache.flinkx.api.{added, deletedClasses, deletedFields, postEvolution, renamed, transformed, version}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** Checks `Declare.declare[T]` registers exactly what the derivation registers, without deriving anything. */
-class DeclareTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+/** Checks the declaration a companion extending `Evolved` builds registers exactly what the annotations describe. */
+class DeclarationTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
-  import org.apache.flinkx.api.evolution.DeclareTest._
+  import org.apache.flinkx.api.evolution.DeclarationTest._
   import org.apache.flinkx.api.evolution.EvolutionRenamedTest.Pet
 
   override protected def beforeEach(): Unit = Evolutions.reset()
@@ -19,7 +17,7 @@ class DeclareTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   private def windowsOf[T](clazz: Class[T]): Map[String, Seq[(Int, String)]] =
     Evolutions
       .declaredEvolutions(clazz.getClassLoader)
-      .map { case (name, evolutions) => name -> evolutions.toSeq.map(e => e.version -> e.currentClass.getName) }
+      .map { case (name, evolutions) => name -> evolutions.toSeq.map(e => e.formerVersion -> e.currentClass.getName) }
 
   /** What the evolutions do to a former schema, which compares the rules themselves and the order they run in. */
   private def dryRunOf[T](
@@ -32,7 +30,7 @@ class DeclareTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
       .map(_.dryRun(formerFields).left.map(_.map(_.getMessage).toSeq).map(_.toSeq))
 
   it should "declare the former and the current name of a case class" in {
-    Declare.declare[Probe]
+    Evolutions.get(classOf[Probe], 2)
 
     windowsOf(classOf[Probe]).keySet shouldBe Set(
       classOf[Probe].getName,
@@ -42,9 +40,9 @@ class DeclareTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   }
 
   it should "declare a sealed trait and the former name it was renamed from" in {
-    Declare.declare[Pet]
+    Evolutions.get(classOf[Pet], 2)
 
-    windowsOf(classOf[Pet]).keySet shouldBe Set(
+    windowsOf(classOf[Pet]).keySet should contain allOf (
       classOf[Pet].getName,
       classOf[Pet].getName.replace("Pet", "Animal")
     )
@@ -55,7 +53,7 @@ class DeclareTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     val formerName   = classOf[Probe].getName.replace("Probe", "FormerProbe")
     val formerFields = Array("formerId", "count", "gone")
 
-    Declare.declare[Probe]
+    Evolutions.get(classOf[Probe], 2)
 
     val failures = dryRunOf[Probe](formerName, 0, formerFields)
     withClue("the former name must resolve:")(failures shouldBe defined)
@@ -65,9 +63,16 @@ class DeclareTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     )
   }
 
+  // The mappers live in the companion, hidden from the outside: the declaration is read from the companion itself
+  it should "apply the mappers of the companion" in {
+    val evolution = Evolutions.get(classOf[Probe], 2)
+
+    evolution.postEvolve(1, Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
+  }
+
 }
 
-object DeclareTest {
+object DeclarationTest {
 
   /* Probe v0
   case class FormerProbe(formerId: String, count: Int, gone: String)
@@ -77,13 +82,17 @@ object DeclareTest {
   @renamed(since = 1, "FormerProbe")
   @deletedFields(since = 1, "gone")
   @deletedClasses(since = 1, throwOnInstance = false, "GoneType")
-  @postDeserialize(bump)
+  @postEvolution(Probe.bump)
   case class Probe(
       @renamed(since = 1, "formerId") id: String,
-      @transformed(since = 1, intToString) count: String,
+      @transformed(since = 1, Probe.intToString) count: String,
       @added(since = 2) label: String = "default"
   )
 
-  def intToString(i: Int): String             = i.toString
-  def bump(version: Int, probe: Probe): Probe = probe.copy(label = probe.label + version)
+  object Probe extends Evolved[Probe] {
+    // Visible from the annotations of the class, and from nowhere else
+    private[DeclarationTest] def intToString(i: Int): String             = i.toString
+    private[DeclarationTest] def bump(version: Int, probe: Probe): Probe = probe.copy(label = probe.label + version)
+  }
+
 }

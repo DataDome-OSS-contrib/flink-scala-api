@@ -84,15 +84,25 @@ object ClassUtil {
   }
 
   /** Default value of the `index`-th field of the given case class, `None` when it declares none. */
-  def defaultFieldValue(currentClass: Class[_], index: Int): Option[Any] =
+  def defaultFieldValue(caseClass: Class[_], index: Int): Option[Any] =
     try {
-      val companion = Class.forName(s"${currentClass.getName}$$", true, currentClass.getClassLoader)
-      // Scala 2 names the accessor after `apply`, Scala 3 after the constructor
-      val accessorNames = Seq(s"apply$$default$$${index + 1}", s"$$lessinit$$greater$$default$$${index + 1}")
-      val accessor = accessorNames.iterator.flatMap(name => companion.getMethods.find(_.getName == name)).nextOption()
-      accessor.map(_.invoke(companion.getField("MODULE$").get(null)))
+      val methodSuffix = s"$$default$$${index + 1}"
+      val companion    = companionInstance[AnyRef](caseClass)
+      companion.getClass.getMethods
+        // Scala 2 names the accessor after `apply`, Scala 3 after the constructor
+        .find(m => m.getName == s"apply$methodSuffix" || m.getName == s"$$lessinit$$greater$methodSuffix")
+        .map(_.invoke(companion))
     } catch {
       case _: ClassNotFoundException | _: NoSuchFieldException => None
     }
+
+  /** The companion object of the given class, or the object itself when the class is the one of an object.
+    * @throws java.lang.ClassNotFoundException
+    *   if the class has no companion object
+    */
+  def companionInstance[A](clazz: Class[_]): A = {
+    val companionName = if (clazz.getName.endsWith("$")) clazz.getName else s"${clazz.getName}$$"
+    Class.forName(companionName, true, clazz.getClassLoader).getField("MODULE$").get(null).asInstanceOf[A]
+  }
 
 }

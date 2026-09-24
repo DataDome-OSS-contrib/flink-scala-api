@@ -41,7 +41,8 @@ package object api {
   /** Marker trait for every evolution annotation. */
   trait Evolved extends StaticAnnotation
 
-  /** Applies a mapper to the whole current ADT instance after its deserialization. Parameters:
+  /** Applies a mapper to the whole ADT instance restored from a former version, once the other evolutions are applied.
+    * Parameters:
     *   - the former version of the ADT;
     *   - the current ADT instance after its deserialization.
     *   - Return value: a potentially modified ADT instance.
@@ -49,13 +50,16 @@ package object api {
     * Useful for cross-field migrations that don't fit a single `@transformed`, or selecting a different sealed trait
     * subtype based on the input.
     *
+    * The mapper only applies to data written at a version below the current one: data written at the current version is
+    * read as is.
+    *
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param mapper
     *   A mapper function taking as parameters the former version and the current ADT instance after its
     *   deserialization. Read where the ADT is declared, so it must be visible from there.
     */
-  final case class postDeserialize[A](mapper: (Int, A) => A) extends Evolved {
-    override def toString: String = s"postDeserialize(<mapper>)"
+  final case class postEvolution[A](mapper: (Int, A) => A) extends Evolved {
+    override def toString: String = s"postEvolution(<mapper>)"
   }
 
   /** Marks a case class field added in a specific version. The annotated field must have a default value.
