@@ -132,13 +132,6 @@ lazy val mimaSettings = Seq(
     ProblemFilters.exclude[com.typesafe.tools.mima.core.IncompatibleMethTypeProblem](
       "org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable"
     ),
-    // Scala 3 derivation now also collects the default value of the case class fields, for @added
-    ProblemFilters.exclude[DirectMissingMethodProblem](
-      "org.apache.flinkx.api.CommonTaggedDerivation.getParams_$default$5"
-    ),
-    ProblemFilters.exclude[DirectMissingMethodProblem](
-      "org.apache.flinkx.api.CommonTaggedDerivation.getParams_$default$5$"
-    ),
     // The Scala 3 enum serializers take the schema version and the enum class instead of its companion module class
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.Scala3EnumSerializer.this"),
     ProblemFilters.exclude[IncompatibleSignatureProblem](

@@ -2,7 +2,6 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{DeletedReturnNull, DeletedThrowOnInstance, Renamed}
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
-import org.apache.flinkx.api.util.ClassUtil
 import org.apache.flinkx.api.AnnotationTrees
 
 import scala.quoted.*
@@ -161,7 +160,7 @@ private[evolution] object Declare:
                 $a.since,
                 $clazz,
                 $label,
-                () => ClassUtil.defaultFieldValue($clazz, ${ Expr(index) })
+                ${ Expr(index) }
               )
             }
           case term if is[renamed](term) =>

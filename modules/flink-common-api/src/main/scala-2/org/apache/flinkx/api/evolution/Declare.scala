@@ -178,7 +178,7 @@ private[api] object Declare {
             }
             q"""$builder.fieldEvolutions += $evolution.FieldEvolution.Add(${instanceOf(
                 a
-              )}.since, $clazz, $label, () => _root_.org.apache.flinkx.api.util.ClassUtil.defaultFieldValue($clazz, $index))"""
+              )}.since, $clazz, $label, $index)"""
           case a if is(a, Renamed) =>
             q"""val r = ${instanceOf(a)}
                 $builder.fieldEvolutions += $evolution.FieldEvolution.Rename(r.since, $clazz, r.formerName, $label)"""

@@ -96,7 +96,8 @@ object Evolutions {
           val classes = conflicting.map(_.currentClass)
           throw FormerClassConflictException(className, descr(classes(0)), descr(classes(1)))
         }
-      declarations.sorted
+      // Evolutions.get returns the first evolution whose version is at least the former version being restored
+      declarations.sortBy(_.formerVersion)
     }
 
   }
@@ -109,10 +110,6 @@ object Evolutions {
     */
   private[evolution] def pending(declaration: Declaration[_], companion: Class[_]): Unit =
     declarations.put(companion, declaration)
-
-  /** Build the [[Evolution]]s from the given builder and register them for the deserialization phase. */
-  private[evolution] def register[T](builder: EvolutionBuilder[T]): Unit =
-    register(registryOf(builder.currentClass.getClassLoader), builder.build())
 
   private def register(registry: Registry, declaration: AdtDeclaration): Unit =
     declaration.byClassName.foreachEntry(registry.declare)
@@ -129,7 +126,7 @@ object Evolutions {
     * it: a companion may look up while initializing, from another thread holding its class initialization lock.
     */
   private def declare(className: String, cl: ClassLoader): Unit = {
-    // A case object is its own companion, and an enum value is declared by its enum
+    // A case object is its own companion
     val companion =
       try Some(Class.forName(companionNameOf(className), false, cl))
       catch { case _: ClassNotFoundException => None }
@@ -156,12 +153,9 @@ object Evolutions {
       }
   }
 
-  /** The companion class of the given ADT class name: a case object is its own, an enum value is declared by its enum.
-    */
-  private def companionNameOf(className: String): String = {
-    val adtName = className.takeWhile(_ != '#')
-    if (adtName.endsWith("$")) adtName else s"$adtName$$"
-  }
+  /** The companion class of the given ADT class name, a case object being its own. */
+  private def companionNameOf(className: String): String =
+    if (className.endsWith("$")) className else s"$className$$"
 
   /** Initialize the companions extending [[Evolved]] found in the jars of the given class loader.
     *
@@ -174,22 +168,21 @@ object Evolutions {
   /** `true` if the given current class is the marker of a former class registered as deleted. */
   def isDeletedClass(currentClass: Class[_]): Boolean = currentClass == DeletedClass
 
-  /** Return the [[Evolution]] declared for the given former ADT member name at the given former version, if any.
+  /** Return the [[Evolution]] declared for the given former ADT class name at the given former version, if any.
     *
-    * Unlike [[get]], never loads the class of that name, so it also answers for the names that designate no class at
-    * all: the `<enum binary name>#<value name>` of a Scala 3 enum value, in particular. Returning `None` means nothing
-    * was declared for that name, not that the member is unknown.
+    * Unlike [[get]], never loads the class of that name, so it also answers for the names that designate no class
+    * anymore. Returning `None` means nothing was declared for that name, not that the class is unknown.
     *
     * A lookup finding nothing initializes the companion of that name, which hands its declaration over, and applies it.
     * The declarations are looked up in the registry of the given class loader only: the companions it initializes are
     * the ones the job sees, so the classes they declare are the ones of the job.
     *
     * @param formerName
-    *   Former fully qualified class name, or `<enum binary name>#<value name>` for a Scala 3 enum value
+    *   Former fully qualified class name
     * @param formerVersion
-    *   Former schema version of the ADT declaring that member
+    *   Former schema version of the ADT
     * @param cl
-    *   Class loader the former ADT member is looked up for
+    *   Class loader the former ADT is looked up for
     * @throws Throwable
     *   the failure of the declaration of that name, if declaring it failed
     */
@@ -262,9 +255,6 @@ object Evolutions {
 
   /** Empty the registries. The declarations handed over are kept, and applied again when their class is looked up. */
   @VisibleForTesting
-  private[api] def reset(): Unit = {
-    org.apache.flinkx.api.auto.cache.clear()
-    registries.clear()
-  }
+  private[api] def reset(): Unit = registries.clear()
 
 }

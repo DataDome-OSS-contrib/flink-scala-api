@@ -1,6 +1,6 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flinkx.api.EvolutionTest._
+import EvolutionTest._
 
 /** ADTs whose evolutions are declared wrongly on purpose, to check what the feature reports. */
 object EvolutionErrorFixtures {
@@ -148,74 +148,74 @@ object EvolutionErrorFixtures {
   object CorrectPostEvolutionOnSubtype       extends IsolatedEvolved[CorrectPostEvolutionOnSubtype]
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Click")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$ClickEvent")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongAddedField(@added(since = 2) a: String = "")
   object WrongAddedField extends IsolatedEvolved[WrongAddedField]
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Click")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$ClickEvent")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
   object WrongRenamedField extends IsolatedEvolved[WrongRenamedField]
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Click")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$ClickEvent")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
   object WrongTransformedField extends IsolatedEvolved[WrongTransformedField]
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Click")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedFields(since = 2, "wrongFieldName")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$ClickEvent")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongDeletedField(a: String)
   object WrongDeletedField extends IsolatedEvolved[WrongDeletedField]
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Click")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$ClickEvent")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongSeveralFields(a: String, missing: String)
   object WrongSeveralFields extends IsolatedEvolved[WrongSeveralFields]
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Click")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$ClickEvent")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongFieldNotUsed(a: String)
   object WrongFieldNotUsed extends IsolatedEvolved[WrongFieldNotUsed]
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Click")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$ClickEvent")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongMissingField(a: String, missingField: String)
   object WrongMissingField extends IsolatedEvolved[WrongMissingField]
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Event")
-  @deletedClasses(since = 1, throwOnInstance = true, "org.apache.flinkx.api.EvolutionTest$View")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Event")
+  @deletedClasses(since = 1, throwOnInstance = true, "org.apache.flinkx.api.evolution.EvolutionTest$View")
   sealed trait WrongDeletedClassesWithSubtypeInstanceThrow
   object WrongDeletedClassesWithSubtypeInstanceThrow
       extends IsolatedEvolved[WrongDeletedClassesWithSubtypeInstanceThrow]
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Purchase")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Purchase")
   case object WrongDeletedClassesWithSubtypeInstanceThrowSubtype extends WrongDeletedClassesWithSubtypeInstanceThrow
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Event")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.EvolutionTest$View")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Event")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$View")
   sealed trait WrongDeletedClassesWithSubtypeInstanceToNull
   object WrongDeletedClassesWithSubtypeInstanceToNull
       extends IsolatedEvolved[WrongDeletedClassesWithSubtypeInstanceToNull]
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.EvolutionTest$Purchase")
+  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Purchase")
   case object WrongDeletedClassesWithSubtypeInstanceToNullSubtype extends WrongDeletedClassesWithSubtypeInstanceToNull
 }

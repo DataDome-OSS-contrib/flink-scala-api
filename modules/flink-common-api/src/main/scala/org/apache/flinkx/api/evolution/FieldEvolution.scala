@@ -3,6 +3,7 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.annotation.Internal
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.FieldEvolution.{FieldIndex, Phase}
+import org.apache.flinkx.api.util.ClassUtil
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable
@@ -143,9 +144,6 @@ object FieldEvolution {
   }
 
   /** Insert field `name` with the case class default value, evaluated at each call. Backs the `@added` annotation.
-    *
-    * @throws AddedFieldWithoutDefaultException
-    *   Deserialization time if `default` gives none;
     * @throws FieldAlreadyExistException
     *   Deserialization time if `name` is already present.
     */
@@ -154,11 +152,10 @@ object FieldEvolution {
       override val since: Int,
       currentClass: Class[_],
       name: String,
-      default: () => Option[() => AnyRef]
+      fieldIndex: Int
   ) extends FieldEvolution(since, Phase.Add) {
 
-    @transient private lazy val defaultValue: () => AnyRef =
-      default().getOrElse(throw AddedFieldWithoutDefaultException(currentClass, name))
+    @transient private lazy val defaultValue: () => AnyRef = ClassUtil.defaultFieldValue(currentClass, fieldIndex)
 
     override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
       fieldValues.put(name, defaultValue()) match {

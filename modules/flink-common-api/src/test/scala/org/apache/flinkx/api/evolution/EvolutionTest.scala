@@ -1,37 +1,16 @@
-package org.apache.flinkx.api
+package org.apache.flinkx.api.evolution
 
-import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution._
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
+import org.apache.flinkx.api.serializer.CaseClassSerializer
+import org.apache.flinkx.api.{TestUtils, auto}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
 
-  import org.apache.flinkx.api.EvolutionTest._
-
-  // Schema of Click v0, as recorded in its snapshot, see the commented out fixture below
-  private val ClickV0FieldNames = Array("a", "inFileClicks", "fieldNotInFile", "identifier", "b")
-  // Former class name of Click v0, as recorded in its snapshot and declared by @renamed on the fixtures below
-  private val ClickV0ClassName = classOf[Click].getName
-
-  /** Messages of every failure the dry run of the `formerClassName` evolutions reports from the given former field
-    * names.
-    *
-    * The evolutions are registered under the former class name the snapshot records, which is where the restore looks
-    * them up: the current class name only resolves from the version of the rename onwards.
-    */
-  private def dryRunFailures(formerClassName: String, formerFieldNames: Array[String]): Seq[String] =
-    Evolutions
-      .find[Any](formerClassName, 0, getClass.getClassLoader)
-      .getOrElse(fail(s"No evolution registered for $formerClassName"))
-      .dryRun(formerFieldNames)
-      .swap
-      .map(_.map(_.getMessage))
-      .getOrElse(Seq.empty)
+  import org.apache.flinkx.api.evolution.EvolutionTest._
 
   override protected def beforeEach(): Unit = {
     auto.cache.clear()
