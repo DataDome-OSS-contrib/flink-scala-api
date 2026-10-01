@@ -5,23 +5,65 @@ import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Tran
 import org.apache.flinkx.api.AnnotationTrees
 
 import scala.quoted.*
+import scala.util.control.NonFatal
 
-/** Builds the [[Declaration]] of an ADT from its annotations alone.
+/** Builds the [[Evolutions]] of an ADT from its annotations alone.
   *
   * Reads what `TypeInformationDerivation` reads, but emits only the registration code: no field typeclass is summoned,
   * so it compiles wherever the ADT is visible, from its own companion in particular.
   */
-private[evolution] object Declare:
+private[evolution] object EvolutionMacro:
+
+  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived.
+    */
+  def evolvableImpl[T: Type](using Quotes): Expr[Evolvable[T]] =
+    import quotes.reflect.*
+
+    val symbol = TypeRepr.of[T].typeSymbol
+
+    rejectVersionedParameter(symbol)
+    // A version 0 declares nothing to evolve from, and a case object is declared by the sealed trait it belongs to
+    if versionOf(symbol) > 0 && !symbol.flags.is(Flags.Module) then
+      // An enum value is typed by its enum, which declares for it
+      val companion = Option.when(symbol.companionModule.exists)(symbol.companionModule.termRef)
+      val evolving  = Symbol.requiredClass(classOf[Evolving[?]].getName).typeRef.appliedTo(symbol.typeRef)
+      if !companion.exists(_ <:< evolving) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
+    '{ Evolvable.instance.asInstanceOf[Evolvable[T]] }
 
   /** Whether the given symbol declares a schema version of its own. */
-  def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
+  private def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
     import q.reflect.*
     try symbol.annotations.exists(_.tpe <:< TypeRepr.of[version])
-    catch { case _: Throwable => false }
+    catch { case NonFatal(_) => false }
   }
 
+  /** The value parameters of the primary constructor of the given class, none for a trait. */
+  private def parametersOf(using q: Quotes)(owner: q.reflect.Symbol): List[q.reflect.Symbol] =
+    owner.primaryConstructor match
+      case constructor if constructor.isNoSymbol => Nil
+      case constructor                           => constructor.paramSymss.filterNot(_.exists(_.isTypeParam)).flatten
+
+  /** Reject a `@version` on a parameter: a version belongs to an ADT, and scalac does not enforce annotation targets.
+    */
+  private def rejectVersionedParameter(using q: Quotes)(symbol: q.reflect.Symbol): Unit =
+    parametersOf(symbol)
+      .find(isVersioned)
+      .foreach(parameter =>
+        q.reflect.report.errorAndAbort(evolutionNotAllowed("version", s"$symbol.${parameter.name}"))
+      )
+
+  /** The class of the given type, from its class tag. */
+  private def classOfExpr(using q: Quotes)(tpe: q.reflect.TypeRepr): Expr[Class[?]] =
+    import q.reflect.*
+    tpe.asType match
+      case '[t] =>
+        Expr
+          .summon[scala.reflect.ClassTag[t]]
+          .map(tag => '{ $tag.runtimeClass })
+          .getOrElse(report.errorAndAbort(s"No ClassTag for ${tpe.show}"))
+
   /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. */
-  def versionOf(using q: Quotes)(symbol: q.reflect.Symbol): Int = {
+  private def versionOf(using q: Quotes)(symbol: q.reflect.Symbol): Int = {
     import q.reflect.*
     symbol.annotations.find(_.tpe <:< TypeRepr.of[version]).flatMap(intArgument(_, "current")).getOrElse(0)
   }
@@ -38,7 +80,7 @@ private[evolution] object Declare:
       case _ => None
   }
 
-  def declarationImpl[T: Type](using Quotes): Expr[Declaration[T]] =
+  def evolutionsImpl[T: Type](using Quotes): Expr[Evolutions[T]] =
     import quotes.reflect.*
 
     val symbol = TypeRepr.of[T].typeSymbol
@@ -49,19 +91,11 @@ private[evolution] object Declare:
         case '[c] => builderImpl[c]
     )
     val subtypeClasses = if symbol.flags.is(Flags.Enum) then Nil else symbol.children.filterNot(_.isTerm).map(_.typeRef)
-    val classes        = subtypeClasses.map(tpe =>
-      tpe.asType match
-        case '[t] =>
-          Expr
-            .summon[scala.reflect.ClassTag[t]]
-            .map(tag => '{ $tag.runtimeClass })
-            .getOrElse(report.errorAndAbort(s"No ClassTag for ${tpe.show}"))
-    )
-    val clazz =
-      Expr.summon[scala.reflect.ClassTag[T]].getOrElse(report.errorAndAbort(s"No ClassTag for ${TypeRepr.of[T].show}"))
+    val classes        = subtypeClasses.map(classOfExpr)
+    val clazz          = classOfExpr(TypeRepr.of[T])
     '{
-      new Declaration[T](
-        $clazz.runtimeClass.asInstanceOf[Class[T]],
+      new Evolutions[T](
+        $clazz.asInstanceOf[Class[T]],
         () => Seq(${ Varargs(builders) }*),
         () => Seq(${ Varargs(classes) }*)
       )
@@ -75,19 +109,6 @@ private[evolution] object Declare:
     val isEnum   = symbol.flags.is(Flags.Enum)
     val children = symbol.children
     val version  = versionOf(symbol)
-
-    def classOfExpr(tpe: TypeRepr): Expr[Class[?]] =
-      tpe.asType match
-        case '[t] =>
-          Expr
-            .summon[scala.reflect.ClassTag[t]]
-            .map(tag => '{ $tag.runtimeClass })
-            .getOrElse(report.errorAndAbort(s"No ClassTag for ${tpe.show}"))
-
-    def parametersOf(owner: Symbol): List[Symbol] =
-      owner.primaryConstructor match
-        case constructor if constructor.isNoSymbol => Nil
-        case constructor                           => constructor.paramSymss.filterNot(_.exists(_.isTypeParam)).flatten
 
     /** The subtypes of a sealed trait, a case object child being a term whose singleton type names its class. */
     val subtypeClasses: List[Expr[Class[?]]] =
@@ -201,23 +222,17 @@ private[evolution] object Declare:
       val hasVersionedAncestor = TypeRepr.of[T].baseClasses.filterNot(_ == symbol).exists(isVersioned)
       val isCoproduct          = children.nonEmpty
 
-      def reject(term: Term, target: String): Nothing =
-        report.errorAndAbort(evolutionNotAllowed(term.tpe.typeSymbol.name, target))
+      def nameOf(term: Term): String = term.tpe.typeSymbol.name
 
-      // A version belongs to an ADT, and scalac does not enforce the target of an annotation
-      parametersOf(symbol)
-        .find(isVersioned)
-        .foreach(parameter => report.errorAndAbort(evolutionNotAllowed("version", s"$symbol.${parameter.name}")))
+      def reject(term: Term, target: String): Nothing = report.errorAndAbort(evolutionNotAllowed(nameOf(term), target))
+
+      rejectVersionedParameter(symbol)
 
       def isEvolutionAnnotation(term: Term): Boolean = term.tpe <:< TypeRepr.of[EvolutionAnnotation]
 
       symbol.annotations.filter(isEvolutionAnnotation).foreach { term =>
-        val allowed =
-          if version == 0 then is[renamed](term) && hasVersionedAncestor
-          else
-            is[renamed](term) || is[deletedClasses](term) || is[postEvolution[?]](term) ||
-            (is[deletedFields](term) && !isCoproduct)
-        if !allowed then reject(term, if version == 0 then s"${symbol.fullName} with version 0" else symbol.fullName)
+        if !AnnotationRules.allowedOnAdt(nameOf(term), version, isCoproduct, hasVersionedAncestor) then
+          reject(term, AnnotationRules.target(symbol.fullName, None, version))
       }
 
       if symbol.annotations.count(is[postEvolution[?]]) > 1 then
@@ -225,25 +240,24 @@ private[evolution] object Declare:
 
       parametersOf(symbol).filter(_.annotations.exists(isEvolutionAnnotation)).foreach { parameter =>
         parameter.annotations.filter(isEvolutionAnnotation).foreach { term =>
-          val allowed =
-            version > 0 && (is[added](term) || is[renamed](term) || is[transformed[?, ?]](term))
-          val target = s"${symbol.fullName}.${parameter.name}" + (if version == 0 then " with version 0" else "")
-          if !allowed then reject(term, target)
+          if !AnnotationRules.allowedOnField(nameOf(term), version) then
+            reject(term, AnnotationRules.target(symbol.fullName, Some(parameter.name), version))
         }
       }
 
       // A subtype declares its own evolutions, which its own declaration registers
       children.filterNot(isVersioned).foreach { child =>
         child.annotations.filter(isEvolutionAnnotation).foreach { term =>
-          val allowed = isEnum && is[renamed](term) && version > 0
-          if !allowed then reject(term, child.fullName)
+          if !AnnotationRules.allowedOnUnversionedSubtype(nameOf(term), version, isEnum) then
+            reject(term, child.fullName)
         }
       }
     }
 
     validate()
+    val clazz = classOfExpr(TypeRepr.of[T])
     '{
-      val declaredClass = ${ classOfExpr(TypeRepr.of[T]) }.asInstanceOf[Class[T]]
+      val declaredClass = $clazz.asInstanceOf[Class[T]]
       val builder       = new EvolutionBuilder[T](declaredClass, ${ Expr(version) }, $memberNames)
       ${ Expr.block(classAnnotations('builder, 'declaredClass), '{ () }) }
       ${ Expr.block(fieldAnnotations('builder, 'declaredClass), '{ () }) }

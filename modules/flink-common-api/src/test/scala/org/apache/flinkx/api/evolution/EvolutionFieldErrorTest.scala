@@ -51,7 +51,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   // Rejected where the declaration is read, at compile time
   it should "not compile a declaration with @added on a case class field without default value" in {
     assertDoesNotCompile(
-      "implicitly[org.apache.flinkx.api.evolution.Declaration[EvolutionErrorFixtures.WrongAddedOnFieldWithoutDefaultValue]]"
+      "Evolutions[EvolutionErrorFixtures.WrongAddedOnFieldWithoutDefaultValue]"
     )
   }
 

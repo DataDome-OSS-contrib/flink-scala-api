@@ -7,7 +7,9 @@ object EvolutionErrorFixtures {
 
   @version(-1)
   case class WrongCurrentVersion()
-  object WrongCurrentVersion extends IsolatedEvolved[WrongCurrentVersion]
+  object WrongCurrentVersion extends IsolatedEvolving[WrongCurrentVersion] {
+    val evolutions = Evolutions[WrongCurrentVersion]
+  }
 
   @version(1)
   @added(since = 1)
@@ -50,12 +52,16 @@ object EvolutionErrorFixtures {
 
   @version(1)
   case class WrongSinceAboveVersion(@added(since = 2) a: String = "")
-  object WrongSinceAboveVersion extends IsolatedEvolved[WrongSinceAboveVersion]
+  object WrongSinceAboveVersion extends IsolatedEvolving[WrongSinceAboveVersion] {
+    val evolutions = Evolutions[WrongSinceAboveVersion]
+  }
 
   @version(1)
   @deletedFields(since = 0, "removed")
   case class WrongSinceBelowOne(a: String)
-  object WrongSinceBelowOne extends IsolatedEvolved[WrongSinceBelowOne]
+  object WrongSinceBelowOne extends IsolatedEvolving[WrongSinceBelowOne] {
+    val evolutions = Evolutions[WrongSinceBelowOne]
+  }
 
   case class WrongRenamedOnFieldWithoutVersion(@renamed(1, "a") a: String)
 
@@ -127,11 +133,15 @@ object EvolutionErrorFixtures {
 
   @version(1)
   sealed trait CorrectDeletedClassesOnSealedTraitSubtype
-  object CorrectDeletedClassesOnSealedTraitSubtype extends IsolatedEvolved[CorrectDeletedClassesOnSealedTraitSubtype]
+  object CorrectDeletedClassesOnSealedTraitSubtype extends IsolatedEvolving[CorrectDeletedClassesOnSealedTraitSubtype] {
+    val evolutions = Evolutions[CorrectDeletedClassesOnSealedTraitSubtype]
+  }
   @version(1)
   @deletedClasses(since = 1, "A")
   sealed trait CorrectDeletedClassesOnSubtype extends CorrectDeletedClassesOnSealedTraitSubtype
-  object CorrectDeletedClassesOnSubtype       extends IsolatedEvolved[CorrectDeletedClassesOnSubtype]
+  object CorrectDeletedClassesOnSubtype       extends IsolatedEvolving[CorrectDeletedClassesOnSubtype] {
+    val evolutions = Evolutions[CorrectDeletedClassesOnSubtype]
+  }
   case object CorrectDeletedClassesCaseObject extends CorrectDeletedClassesOnSubtype
 
   @version(1)
@@ -141,32 +151,40 @@ object EvolutionErrorFixtures {
 
   @version(1)
   sealed trait CorrectPostEvolutionOnSealedTraitSubtype
-  object CorrectPostEvolutionOnSealedTraitSubtype extends IsolatedEvolved[CorrectPostEvolutionOnSealedTraitSubtype]
+  object CorrectPostEvolutionOnSealedTraitSubtype extends IsolatedEvolving[CorrectPostEvolutionOnSealedTraitSubtype] {
+    val evolutions = Evolutions[CorrectPostEvolutionOnSealedTraitSubtype]
+  }
   @version(1)
   @postEvolution(updateAction)
   case class CorrectPostEvolutionOnSubtype() extends CorrectPostEvolutionOnSealedTraitSubtype
-  object CorrectPostEvolutionOnSubtype       extends IsolatedEvolved[CorrectPostEvolutionOnSubtype]
+  object CorrectPostEvolutionOnSubtype       extends IsolatedEvolving[CorrectPostEvolutionOnSubtype] {
+    val evolutions = Evolutions[CorrectPostEvolutionOnSubtype]
+  }
 
   @version(2)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongAddedField(@added(since = 2) a: String = "")
-  object WrongAddedField extends IsolatedEvolved[WrongAddedField]
+  object WrongAddedField extends IsolatedEvolving[WrongAddedField] { val evolutions = Evolutions[WrongAddedField] }
 
   @version(2)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
-  object WrongRenamedField extends IsolatedEvolved[WrongRenamedField]
+  object WrongRenamedField extends IsolatedEvolving[WrongRenamedField] {
+    val evolutions = Evolutions[WrongRenamedField]
+  }
 
   @version(2)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
-  object WrongTransformedField extends IsolatedEvolved[WrongTransformedField]
+  object WrongTransformedField extends IsolatedEvolving[WrongTransformedField] {
+    val evolutions = Evolutions[WrongTransformedField]
+  }
 
   @version(2)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
@@ -174,35 +192,45 @@ object EvolutionErrorFixtures {
   @deletedFields(since = 2, "wrongFieldName")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongDeletedField(a: String)
-  object WrongDeletedField extends IsolatedEvolved[WrongDeletedField]
+  object WrongDeletedField extends IsolatedEvolving[WrongDeletedField] {
+    val evolutions = Evolutions[WrongDeletedField]
+  }
 
   @version(1)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongSeveralFields(a: String, missing: String)
-  object WrongSeveralFields extends IsolatedEvolved[WrongSeveralFields]
+  object WrongSeveralFields extends IsolatedEvolving[WrongSeveralFields] {
+    val evolutions = Evolutions[WrongSeveralFields]
+  }
 
   @version(1)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongFieldNotUsed(a: String)
-  object WrongFieldNotUsed extends IsolatedEvolved[WrongFieldNotUsed]
+  object WrongFieldNotUsed extends IsolatedEvolving[WrongFieldNotUsed] {
+    val evolutions = Evolutions[WrongFieldNotUsed]
+  }
 
   @version(1)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongMissingField(a: String, missingField: String)
-  object WrongMissingField extends IsolatedEvolved[WrongMissingField]
+  object WrongMissingField extends IsolatedEvolving[WrongMissingField] {
+    val evolutions = Evolutions[WrongMissingField]
+  }
 
   @version(1)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Event")
   @deletedClasses(since = 1, throwOnInstance = true, "org.apache.flinkx.api.evolution.EvolutionTest$View")
   sealed trait WrongDeletedClassesWithSubtypeInstanceThrow
   object WrongDeletedClassesWithSubtypeInstanceThrow
-      extends IsolatedEvolved[WrongDeletedClassesWithSubtypeInstanceThrow]
+      extends IsolatedEvolving[WrongDeletedClassesWithSubtypeInstanceThrow] {
+    val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceThrow]
+  }
 
   @version(1)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Purchase")
@@ -213,7 +241,9 @@ object EvolutionErrorFixtures {
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$View")
   sealed trait WrongDeletedClassesWithSubtypeInstanceToNull
   object WrongDeletedClassesWithSubtypeInstanceToNull
-      extends IsolatedEvolved[WrongDeletedClassesWithSubtypeInstanceToNull]
+      extends IsolatedEvolving[WrongDeletedClassesWithSubtypeInstanceToNull] {
+    val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceToNull]
+  }
 
   @version(1)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Purchase")

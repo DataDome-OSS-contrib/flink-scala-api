@@ -15,7 +15,7 @@ object UserFixtures {
       @transformed(since = 1, intToLabel) label: String,
       @added(since = 2) note: String = "none"
   )
-  object Order extends Evolved[Order]
+  object Order extends Evolving[Order] { val evolutions = Evolutions[Order] }
 
   def intToLabel(i: Int): String              = i.toString
   def bump(version: Int, order: Order): Order = order.copy(note = order.note + version)

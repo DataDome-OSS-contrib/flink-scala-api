@@ -90,19 +90,24 @@ object ClassUtil {
     */
   def defaultFieldValue(caseClass: Class[_], index: Int): () => AnyRef = {
     val companion = companionInstance[AnyRef](caseClass)
-    val method = companion.getClass.getMethod(s"$$lessinit$$greater$$default$$${index + 1}")
+    val method    = companion.getClass.getMethod(s"$$lessinit$$greater$$default$$${index + 1}")
     () =>
       try method.invoke(companion)
       catch { case e: InvocationTargetException => throw e.getCause }
   }
 
+  /** The binary name of the companion object of the given class name, an object being its own companion. */
+  def companionName(className: String): String = if (className.endsWith("$")) className else s"$className$$"
+
   /** The companion object of the given class, or the object itself when the class is the one of an object.
     * @throws java.lang.ClassNotFoundException
     *   if the class has no companion object
     */
-  def companionInstance[A](clazz: Class[_]): A = {
-    val companionName = if (clazz.getName.endsWith("$")) clazz.getName else s"${clazz.getName}$$"
-    Class.forName(companionName, true, clazz.getClassLoader).getField("MODULE$").get(null).asInstanceOf[A]
-  }
+  def companionInstance[A](clazz: Class[_]): A =
+    Class
+      .forName(companionName(clazz.getName), true, clazz.getClassLoader)
+      .getField("MODULE$")
+      .get(null)
+      .asInstanceOf[A]
 
 }

@@ -5,4 +5,4 @@ package org.apache.flinkx.api.evolution
   * For the fixtures declaring evolutions wrongly, or claiming the former names of other fixtures on purpose: they are
   * declared when their own class is looked up, and never along with the well declared ones.
   */
-abstract class IsolatedEvolved[T](implicit declaration: Declaration[T]) extends Evolved[T]
+trait IsolatedEvolving[T] extends Evolving[T]

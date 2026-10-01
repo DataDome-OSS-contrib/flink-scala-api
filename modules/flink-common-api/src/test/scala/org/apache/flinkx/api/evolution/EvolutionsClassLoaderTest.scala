@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flinkx.api.evolution.EvolutionTest.Dog
-import org.apache.flinkx.api.evolution.DeclarationTest.Probe
+import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -64,7 +64,7 @@ class EvolutionsClassLoaderTest extends AnyFlatSpec with Matchers with BeforeAnd
       // The enclosing classes as well: the JVM checks that a nested class and its outer agree on their loader
       if (
         name.startsWith("org.apache.flinkx.api.evolution.EvolutionTest") || name.startsWith(
-          classOf[DeclarationTest].getName
+          classOf[EvolutionMacroTest].getName
         )
       ) {
         Option(findLoadedClass(name)).getOrElse(findClass(name))

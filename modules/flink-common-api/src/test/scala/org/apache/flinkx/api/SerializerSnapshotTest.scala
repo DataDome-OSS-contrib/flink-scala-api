@@ -8,7 +8,7 @@ import org.apache.flink.util.ChildFirstClassLoader
 import org.apache.flinkx.api.SerializerSnapshotTest._
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.{Evolutions, Evolved, added, version}
+import org.apache.flinkx.api.evolution.{Evolutions, Evolving, added, version}
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -225,6 +225,6 @@ object SerializerSnapshotTest {
       var sc1: SimpleClass1 = SimpleClass1("a", 1),
       @added(since = 1) var sc2: SimpleClass2 = SimpleClass2("b", 2)
   )
-  object WithDefault extends Evolved[WithDefault]
+  object WithDefault extends Evolving[WithDefault] { val evolutions = Evolutions[WithDefault] }
 
 }

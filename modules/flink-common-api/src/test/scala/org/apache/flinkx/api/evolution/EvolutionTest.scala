@@ -222,7 +222,7 @@ object EvolutionTest {
       @added(since = 3) fieldInFile: Int = 1,
       @transformed(since = 1, mapIntToString) fieldNotInFile: String
   )
-  object Click extends Evolved[Click]
+  object Click extends Evolving[Click] { val evolutions = Evolutions[Click] }
 
   @version(1)
   @renamed(since = 1, "ClickEvent")
@@ -230,7 +230,7 @@ object EvolutionTest {
       @renamed(since = 1, "sessionId") @transformed(since = 1, mapIntToString) id: String,
       date: String
   )
-  object ClickAction extends Evolved[ClickAction]
+  object ClickAction extends Evolving[ClickAction] { val evolutions = Evolutions[ClickAction] }
 
   def mapIntToString(a: Int): String                 = a.toString
   def updateClick(version: Int, click: Click): Click =
@@ -247,7 +247,7 @@ object EvolutionTest {
   @deletedClasses(since = 1, "Purchase")
   @postEvolution(updateAction)
   sealed trait Action
-  object Action extends Evolved[Action]
+  object Action extends Evolving[Action] { val evolutions = Evolutions[Action] }
 
   @version(0)
   case object Login extends Action
@@ -255,7 +255,7 @@ object EvolutionTest {
   @version(1)
   @renamed(since = 1, "View")
   case class Web(ts: Long) extends Action
-  object Web               extends Evolved[Web]
+  object Web               extends Evolving[Web] { val evolutions = Evolutions[Web] }
 
   case class Cart(items: Int) extends Action
 
@@ -268,13 +268,14 @@ object EvolutionTest {
   @version(1)
   @postEvolution(markTicket)
   case class Ticket(id: String)
-  object Ticket extends Evolved[Ticket]
+  object Ticket extends Evolving[Ticket] { val evolutions = Evolutions[Ticket] }
 
   def markTicket(version: Int, ticket: Ticket): Ticket = ticket.copy(id = s"${ticket.id}@$version")
 
   @version(1)
   case class Stamped(id: String, @added(since = 1) stamp: Int = Stamped.next())
-  object Stamped extends Evolved[Stamped] {
+  object Stamped extends Evolving[Stamped] {
+    val evolutions     = Evolutions[Stamped]
     private val stamps = new java.util.concurrent.atomic.AtomicInteger()
     def next(): Int    = stamps.incrementAndGet()
   }
@@ -286,67 +287,85 @@ object EvolutionTest {
   @deletedFields(since = 1, "inFileClicks", "identifier", "b")
   @deletedClasses(since = 1, throwOnInstance = false, "ClickEvent")
   case class WrongUntransformedField(@renamed(since = 1, "a") renamedA: String, fieldNotInFile: String)
-  object WrongUntransformedField extends IsolatedEvolved[WrongUntransformedField]
+  object WrongUntransformedField extends IsolatedEvolving[WrongUntransformedField] {
+    val evolutions = Evolutions[WrongUntransformedField]
+  }
 
   @version(1)
   case class OuterEvolvedWithNested(@renamed(since = 1, "formerNested") nested: AddedFieldWithoutAnnotation)
-  object OuterEvolvedWithNested extends Evolved[OuterEvolvedWithNested]
+  object OuterEvolvedWithNested extends Evolving[OuterEvolvedWithNested] {
+    val evolutions = Evolutions[OuterEvolvedWithNested]
+  }
 
   case class UnrelatedFormerCaseClass(a: String, removed: String)
 
   @version(1)
   @deletedFields(since = 1, "removed")
   case class UnrelatedCurrentCaseClass(a: String)
-  object UnrelatedCurrentCaseClass extends Evolved[UnrelatedCurrentCaseClass]
+  object UnrelatedCurrentCaseClass extends Evolving[UnrelatedCurrentCaseClass] {
+    val evolutions = Evolutions[UnrelatedCurrentCaseClass]
+  }
 
   // Both traits are sealed in this file, so a single case class can be a member of each of them
   @version(1)
   sealed trait SharedSubtypeTrait
-  object SharedSubtypeTrait extends Evolved[SharedSubtypeTrait]
+  object SharedSubtypeTrait extends Evolving[SharedSubtypeTrait] { val evolutions = Evolutions[SharedSubtypeTrait] }
   @version(1)
   sealed trait OtherSharedSubtypeTrait
-  object OtherSharedSubtypeTrait      extends Evolved[OtherSharedSubtypeTrait]
+  object OtherSharedSubtypeTrait extends Evolving[OtherSharedSubtypeTrait] {
+    val evolutions = Evolutions[OtherSharedSubtypeTrait]
+  }
   case class SharedSubtype(a: String) extends SharedSubtypeTrait with OtherSharedSubtypeTrait
 
   @version(1)
   @renamed(since = 1, "FormerRenamedCaseClass")
   @deletedFields(since = 1, "removed")
   case class RenamedCaseClass(a: String)
-  object RenamedCaseClass extends Evolved[RenamedCaseClass]
+  object RenamedCaseClass extends Evolving[RenamedCaseClass] { val evolutions = Evolutions[RenamedCaseClass] }
 
   // Still declared to play the former class: the snapshot records its name, which the rename resolves
   case class FormerRenamedCaseClass(a: String, removed: String)
 
   @version(2)
   sealed trait RolledBackTrait
-  object RolledBackTrait            extends Evolved[RolledBackTrait]
+  object RolledBackTrait            extends Evolving[RolledBackTrait] { val evolutions = Evolutions[RolledBackTrait] }
   case class RolledBackA(a: String) extends RolledBackTrait
   case class RolledBackB(b: Int)    extends RolledBackTrait
 
   @version(1)
   @renamed(since = 1, "SharedFormerName")
   case class FirstClaimingFormerName(a: String)
-  object FirstClaimingFormerName extends IsolatedEvolved[FirstClaimingFormerName]
+  object FirstClaimingFormerName extends IsolatedEvolving[FirstClaimingFormerName] {
+    val evolutions = Evolutions[FirstClaimingFormerName]
+  }
 
   @version(1)
   @renamed(since = 1, "SharedFormerName")
   case class SecondClaimingFormerName(a: String)
-  object SecondClaimingFormerName extends IsolatedEvolved[SecondClaimingFormerName]
+  object SecondClaimingFormerName extends IsolatedEvolving[SecondClaimingFormerName] {
+    val evolutions = Evolutions[SecondClaimingFormerName]
+  }
 
   @version(1)
   @renamed(since = 1, "ClaimedByBoth")
   case class ClaimingFormerNameByRename(a: String)
-  object ClaimingFormerNameByRename extends IsolatedEvolved[ClaimingFormerNameByRename]
+  object ClaimingFormerNameByRename extends IsolatedEvolving[ClaimingFormerNameByRename] {
+    val evolutions = Evolutions[ClaimingFormerNameByRename]
+  }
 
   @version(1)
   @deletedFields(since = 1, "removed")
   @deletedClasses(since = 1, throwOnInstance = false, "ClaimedByBoth")
   case class ClaimingFormerNameByDeletion(a: String)
-  object ClaimingFormerNameByDeletion extends IsolatedEvolved[ClaimingFormerNameByDeletion]
+  object ClaimingFormerNameByDeletion extends IsolatedEvolving[ClaimingFormerNameByDeletion] {
+    val evolutions = Evolutions[ClaimingFormerNameByDeletion]
+  }
 
   @version(1)
   sealed trait SubtypeRemovedWithoutAnnotation
-  object SubtypeRemovedWithoutAnnotation extends Evolved[SubtypeRemovedWithoutAnnotation]
+  object SubtypeRemovedWithoutAnnotation extends Evolving[SubtypeRemovedWithoutAnnotation] {
+    val evolutions = Evolutions[SubtypeRemovedWithoutAnnotation]
+  }
   case class RemainingSubtype(a: String) extends SubtypeRemovedWithoutAnnotation
   case class RemovedSubtype(b: Int)      extends SubtypeRemovedWithoutAnnotation
   /* Dog-v0
@@ -365,7 +384,7 @@ object EvolutionTest {
   @deletedFields(since = 1, "kind")
   @deletedFields(since = 2, "breed")
   case class Dog(name: String)
-  object Dog extends Evolved[Dog]
+  object Dog extends Evolving[Dog] { val evolutions = Evolutions[Dog] }
 
   /* Animal-v0
   sealed trait Animal
@@ -383,10 +402,10 @@ object EvolutionTest {
   @version(2)
   @deletedClasses(since = 1, throwOnInstance = false, "Horse")
   sealed trait Animal
-  object Animal extends Evolved[Animal]
+  object Animal extends Evolving[Animal] { val evolutions = Evolutions[Animal] }
   @version(2)
   case class Horse(legs: Int)   extends Animal
-  object Horse                  extends Evolved[Horse]
+  object Horse                  extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
   case class Lion(name: String) extends Animal
 
 }

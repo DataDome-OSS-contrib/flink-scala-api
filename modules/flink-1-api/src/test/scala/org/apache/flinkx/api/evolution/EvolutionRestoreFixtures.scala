@@ -15,7 +15,7 @@ object EvolutionRestoreFixtures {
   @renamed(since = 1, "FormerOrder")
   @postEvolution(mark)
   case class Order(id: String, total: Int)
-  object Order extends Evolved[Order]
+  object Order extends Evolving[Order] { val evolutions = Evolutions[Order] }
 
   /** Applied to every instance restored from a former version, so a restored value tells the declaration was applied.
     */
