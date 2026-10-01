@@ -89,7 +89,7 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   // A versioned ADT whose companion declares nothing would restore without any of its rules: the derivation rejects it
-  it should "not compile the derivation of a versioned ADT whose companion doesn't extend Evolved" in {
+  it should "not compile the derivation of a versioned ADT whose companion doesn't extend Evolving" in {
     assertDoesNotCompile("implicitly[TypeInformation[NeverDeclared]]")
   }
 
@@ -99,7 +99,7 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
 
     exception.getMessage shouldBe
       s"Cannot derive the type information of '${classOf[NeverDeclared].getName}': it declares @version(1), but its" +
-      s" companion declares no evolution. It must extend Evolved"
+      s" companion declares no evolution. It must extend Evolving"
   }
 
 }

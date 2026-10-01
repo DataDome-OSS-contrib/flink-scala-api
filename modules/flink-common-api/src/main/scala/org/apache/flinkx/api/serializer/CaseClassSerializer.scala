@@ -32,6 +32,7 @@ import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.isIncompatible
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.CurrentVersion
 import org.apache.flinkx.api.{NullMarker, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
@@ -212,25 +213,23 @@ object CaseClassSerializer {
 /** [[TypeSerializerSnapshot]] for [[CaseClassSerializer]]. */
 final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     serializer: Option[CaseClassSerializer[T]]
-) extends CompositeTypeSerializerSnapshot[T, CaseClassSerializer[T]] {
+) extends CompositeTypeSerializerSnapshot[T, CaseClassSerializer[T]]
+    with EvolvingSnapshot[T, ScalaCaseClassSerializerSnapshot[T]] {
 
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
-  @transient private lazy val log: Logger = LoggerFactory.getLogger(classOf[ScalaCaseClassSerializerSnapshot[_]])
-
-  private var evolution: Evolution[T]       = _
-  private var isCaseClassImmutable: Boolean = false
-  // Schema version of the case class this snapshot describes, as declared by @version at write time
-  private var caseClassVersion: Int     = 0
-  private var fieldNames: Array[String] = Array.empty
+  private[serializer] var evolution: Evolution[T] = _
+  private var isCaseClassImmutable: Boolean       = false
+  private[serializer] var adtVersion: Int         = 0
+  private var fieldNames: Array[String]           = Array.empty
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
     setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
     evolution = s.evolution
     isCaseClassImmutable = s.isCaseClassImmutable
-    caseClassVersion = s.version
+    adtVersion = s.version
     fieldNames = s.fieldNames
   }
 
@@ -242,12 +241,12 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
   override protected def createOuterSerializerWithNestedSerializers(
       nestedSerializers: Array[TypeSerializer[_]]
   ): CaseClassSerializer[T] =
-    new CaseClassSerializer[T](evolution, caseClassVersion, isCaseClassImmutable, fieldNames, nestedSerializers)
+    new CaseClassSerializer[T](evolution, adtVersion, isCaseClassImmutable, fieldNames, nestedSerializers)
 
   override protected def writeOuterSnapshot(out: DataOutputView): Unit = {
     out.writeUTF(evolution.className)
     out.writeBoolean(isCaseClassImmutable)
-    out.writeInt(caseClassVersion)
+    out.writeInt(adtVersion)
     StringArraySerializer.INSTANCE.serialize(fieldNames, out)
   }
 
@@ -255,90 +254,41 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     val caseClassName = in.readUTF()
     // If reading a version of 2 or below, don't read the boolean and set isCaseClassImmutable to false
     isCaseClassImmutable = readOuterSnapshotVersion > 2 && in.readBoolean
-    caseClassVersion = if (readOuterSnapshotVersion > 3) in.readInt else 0
-    evolution = Evolutions.get(caseClassName, caseClassVersion, cl)
+    adtVersion = if (readOuterSnapshotVersion > 3) in.readInt else 0
+    evolution = Evolutions.get(caseClassName, adtVersion, cl)
     fieldNames = if (readOuterSnapshotVersion > 3) StringArraySerializer.INSTANCE.deserialize(in) else Array.empty
   }
 
-  /** Resolves the schema compatibility including potential evolutions.
-    *
-    * When evolutions are required, the migration is checked to determine if the schema is COMPATIBLE_AFTER_MIGRATION or
-    * INCOMPATIBLE, otherwise delegates to the standard schema compatibility resolution.
-    */
-  override def resolveSchemaCompatibility(
-      oldSerializerSnapshot: TypeSerializerSnapshot[T]
-  ): TypeSerializerSchemaCompatibility[T] = oldSerializerSnapshot match {
-    case old: ScalaCaseClassSerializerSnapshot[T] if isSameClass(old) && isEvolutionRequired(old) =>
-      checkEvolutionMigration(old) match {
-        case None =>
-          TypeSerializerSchemaCompatibility.compatibleAfterMigration()
-        case Some(reason) =>
-          log.warn(s"Cannot migrate ${evolution.currentClass} from version ${old.caseClassVersion}: $reason")
-          TypeSerializerSchemaCompatibility.incompatible()
-      }
-    case old: ScalaCaseClassSerializerSnapshot[T] if isSameClass(old) =>
-      // No evolution: delegates schema compatibility to standard resolution
-      super.resolveSchemaCompatibility(old)
-    case _ => TypeSerializerSchemaCompatibility.incompatible()
-  }
+  override protected def resolveUnevolvedCompatibility(
+      old: ScalaCaseClassSerializerSnapshot[T]
+  ): TypeSerializerSchemaCompatibility[T] =
+    // No evolution: delegates schema compatibility to parent standard resolution
+    super[CompositeTypeSerializerSnapshot].resolveSchemaCompatibility(old)
 
-  /** Whether the former snapshot describes the very same case class.
-    *
-    * `old.evolution` has been resolved by `readOuterSnapshot`, so a renamed or moved former case class already carries
-    * the current one.
-    */
-  private def isSameClass(old: ScalaCaseClassSerializerSnapshot[T]): Boolean =
-    evolution.currentClass.getName == old.evolution.currentClass.getName
-
-  /** Whether reading the former schema described by `old` requires applying the declared evolutions.
-    *
-    * `old.evolution` holds the evolutions migrating the very version the former data was written at.
-    */
-  private def isEvolutionRequired(old: ScalaCaseClassSerializerSnapshot[T]): Boolean =
+  /** `old.evolution` holds the evolutions migrating the very version the former data was written at. */
+  override protected def isEvolutionRequired(old: ScalaCaseClassSerializerSnapshot[T]): Boolean =
     old.fieldNames.nonEmpty && // Keep compatibility with versions < 2.4.0
-      !old.evolution.isAvoidable(old.caseClassVersion, old.fieldNames)
+      !old.evolution.isAvoidable(old.adtVersion, old.fieldNames)
 
   /** Check the declared evolutions entirely describe the migration from the former schema:
     *   - replays evolutions on the former field names to check for exact match with current field names
     *   - resolves the compatibility of unchanged, reordered and renamed field serializers
     *   - doesn't resolve the compatibility of added, transformed or deleted fields as their lineage is broken
-    *
-    * @return
-    *   `None` if the migration is possible, the reason it isn't otherwise
     */
-  private def checkEvolutionMigration(old: ScalaCaseClassSerializerSnapshot[T]): Option[String] =
-    if (old.caseClassVersion > caseClassVersion) {
-      Some(
-        s"the former version ${old.caseClassVersion} is more recent than the current version $caseClassVersion." +
-          s" Restore from a former savepoint."
-      )
-    } else {
-      old.evolution.dryRun(old.fieldNames) match {
-        case Left(failures)      => Some(failures.mkString("\n"))
-        case Right(fieldOrigins) =>
-          val formerFieldSnapshots  = old.getNestedSerializerSnapshots
-          val currentFieldSnapshots = getNestedSerializerSnapshots
-          fieldOrigins.indices.iterator
-            .flatMap(currentIndex => fieldOrigins(currentIndex).map(currentIndex -> _))
-            .collectFirst {
-              case (currentIndex, formerIndex)
-                  if isFieldIncompatible(formerFieldSnapshots(formerIndex), currentFieldSnapshots(currentIndex)) =>
-                s"field '${fieldNames(currentIndex)}' can't be migrated from former field" +
-                  s" '${old.fieldNames(formerIndex)}'"
-            }
-      }
+  override protected def checkMigration(old: ScalaCaseClassSerializerSnapshot[T]): Option[String] =
+    old.evolution.dryRun(old.fieldNames) match {
+      case Left(failures)      => Some(failures.mkString("\n"))
+      case Right(fieldOrigins) =>
+        val formerFieldSnapshots  = old.getNestedSerializerSnapshots
+        val currentFieldSnapshots = getNestedSerializerSnapshots
+        fieldOrigins.indices.iterator
+          .flatMap(currentIndex => fieldOrigins(currentIndex).map(currentIndex -> _))
+          .collectFirst {
+            case (currentIndex, formerIndex)
+                if isIncompatible(currentFieldSnapshots(currentIndex), formerFieldSnapshots(formerIndex)) =>
+              s"field '${fieldNames(currentIndex)}' can't be migrated from former field '${old.fieldNames(formerIndex)}'"
+          }
     }
-
-  /** Resolves the compatibility of a former field against its current one, which recursively applies the evolutions
-    * declared on the field type.
-    */
-  private def isFieldIncompatible(
-      formerFieldSnapshot: TypeSerializerSnapshot[_],
-      currentFieldSnapshot: TypeSerializerSnapshot[_]
-  ) = currentFieldSnapshot
-    .asInstanceOf[TypeSerializerSnapshot[Any]]
-    .resolveSchemaCompatibility(formerFieldSnapshot.asInstanceOf[TypeSerializerSnapshot[Any]])
-    .isIncompatible
 
   override protected def resolveOuterSchemaCompatibility(
       oldSerializerSnapshot: TypeSerializerSnapshot[T]

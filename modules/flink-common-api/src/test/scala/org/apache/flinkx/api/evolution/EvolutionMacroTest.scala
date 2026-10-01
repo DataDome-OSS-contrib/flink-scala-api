@@ -4,10 +4,10 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** Checks the declaration a companion extending `Evolved` builds registers exactly what the annotations describe. */
-class DeclarationTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+/** Checks the evolutions a companion extending `Evolving` builds register exactly what the annotations describe. */
+class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
-  import org.apache.flinkx.api.evolution.DeclarationTest._
+  import org.apache.flinkx.api.evolution.EvolutionMacroTest._
   import org.apache.flinkx.api.evolution.EvolutionRenamedTest.Pet
 
   override protected def beforeEach(): Unit = Evolutions.reset()
@@ -71,7 +71,7 @@ class DeclarationTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
 }
 
-object DeclarationTest {
+object EvolutionMacroTest {
 
   /* Probe v0
   case class FormerProbe(formerId: String, count: Int, gone: String)
@@ -88,10 +88,11 @@ object DeclarationTest {
       @added(since = 2) label: String = "default"
   )
 
-  object Probe extends Evolved[Probe] {
+  object Probe extends Evolving[Probe] {
+    val evolutions = Evolutions[Probe]
     // Visible from the annotations of the class, and from nowhere else
-    private[DeclarationTest] def intToString(i: Int): String             = i.toString
-    private[DeclarationTest] def bump(version: Int, probe: Probe): Probe = probe.copy(label = probe.label + version)
+    private[EvolutionMacroTest] def intToString(i: Int): String             = i.toString
+    private[EvolutionMacroTest] def bump(version: Int, probe: Probe): Probe = probe.copy(label = probe.label + version)
   }
 
 }

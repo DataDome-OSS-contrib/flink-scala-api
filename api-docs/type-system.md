@@ -428,8 +428,8 @@ case class Dog(name: String)
 
 #### Declaring the evolutions
 
-The evolutions are read from the annotations of your source code, at compile time, where the companion of the ADT
-extends `Evolved`. The annotations and `Evolved` all come with a single import:
+The evolutions are read from the annotations of your source code, at compile time, by `Evolutions[T]` in the companion
+of the ADT, which extends `Evolving`. The annotations, `Evolving` and `Evolutions` all come with a single import:
 
 ```scala
 import org.apache.flinkx.api.evolution._
@@ -439,14 +439,16 @@ import org.apache.flinkx.api.evolution._
 @postEvolution(Order.fix)
 case class Order(id: String, @added(since = 2) note: String = "none")
 
-object Order extends Evolved[Order] {
-  private def fix(version: Int, order: Order): Order = order // A mapper private to the companion is visible here
+object Order extends Evolving[Order] {
+  val evolutions = Evolutions[Order]
+
+  private[this] def fix(version: Int, order: Order): Order = order // Only the annotations need to see the mapper
 }
 ```
 
-Every ADT annotated with `@version` needs this on its companion, sealed traits and Scala 3 enums included. A case
+Every ADT annotated with `@version` needs it on its companion, sealed traits and Scala 3 enums included. A case
 object has no companion of its own: the sealed trait it belongs to declares it. Deriving the type information of a
-versioned ADT whose companion doesn't extend `Evolved` fails at compile time, wherever the derivation is written: in a
+versioned ADT whose companion doesn't extend `Evolving` fails at compile time, wherever the derivation is written: in a
 `StateDescriptor` built in `open()`, in a `lazy val`, in a companion `object` or with the rest of the job graph.
 
 A TaskManager never derives anything, so it asks the companions itself: while reading a checkpoint, before any state is
@@ -456,17 +458,13 @@ over. The rules therefore travel in the jar rather than in the job graph, and no
 
 A former class name that no class bears anymore, an ADT renamed or moved since the checkpoint, is declared by the
 companion of the class now bearing it, which the former name doesn't tell. The jars of the job are then scanned once
-for the companions extending `Evolved`, and all of them are initialized. The scan reads the class files of the jars
+for the companions extending `Evolving`, and all of them are initialized. The scan reads the class files of the jars
 listed by the class loader of the job, or the class path of the JVM when there are none, as in a MiniCluster.
 
 A former name that no class bears and no companion declares fails the restore with an `EvolutionNotDeclaredException`,
 rather than reading the former form as if it had never evolved. A checkpoint written by a more recent source code is
 not that case: the class is there, its declaration just doesn't reach that far, and the schema compatibility
 resolution reports it.
-
-In Scala 2, `Evolved` is an abstract class, as a trait takes no implicit parameter there: a companion extending
-another class cannot extend it. A mapper of the companion referenced by an annotation is reached by name once the
-companion is initialized, so it must not be `private[this]`.
 
 These declarations are held per class loader defining the ADTs. With the default child-first class loading,
 `flink-scala-api` sits in your application jar and a job has a registry entirely of its own. Putting it in the `lib`

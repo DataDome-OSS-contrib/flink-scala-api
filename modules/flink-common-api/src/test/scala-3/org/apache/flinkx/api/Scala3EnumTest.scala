@@ -3,7 +3,7 @@ package org.apache.flinkx.api
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.evolution.{Evolved, deletedClasses, renamed, version}
+import org.apache.flinkx.api.evolution.{Evolutions, Evolving, deletedClasses, renamed, version}
 import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -164,31 +164,33 @@ object Scala3EnumTest {
     @renamed(since = 1, "PARSING_TYPE")
     case PARSING extends FailureCategory(2)
   }
-  object FailureCategory extends Evolved[FailureCategory]
+  object FailureCategory extends Evolving[FailureCategory] { val evolutions = Evolutions[FailureCategory] }
 
   @version(1)
   enum FirstUnrelatedEnum {
     case X, Y
   }
-  object FirstUnrelatedEnum extends Evolved[FirstUnrelatedEnum]
+  object FirstUnrelatedEnum extends Evolving[FirstUnrelatedEnum] { val evolutions = Evolutions[FirstUnrelatedEnum] }
 
   @version(1)
   enum SecondUnrelatedEnum {
     case X, Y
   }
-  object SecondUnrelatedEnum extends Evolved[SecondUnrelatedEnum]
+  object SecondUnrelatedEnum extends Evolving[SecondUnrelatedEnum] { val evolutions = Evolutions[SecondUnrelatedEnum] }
 
   @version(2)
   enum RolledBackEnum {
     case First, Second
   }
-  object RolledBackEnum extends Evolved[RolledBackEnum]
+  object RolledBackEnum extends Evolving[RolledBackEnum] { val evolutions = Evolutions[RolledBackEnum] }
 
   @version(1)
   enum ValueRemovedWithoutAnnotation {
     case Remaining, Removed
   }
-  object ValueRemovedWithoutAnnotation extends Evolved[ValueRemovedWithoutAnnotation]
+  object ValueRemovedWithoutAnnotation extends Evolving[ValueRemovedWithoutAnnotation] {
+    val evolutions = Evolutions[ValueRemovedWithoutAnnotation]
+  }
 
   enum Example {
     case Foo(a: String, b: Int)

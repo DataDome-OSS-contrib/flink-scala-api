@@ -10,22 +10,22 @@ import java.util.jar.JarFile
 import scala.jdk.CollectionConverters._
 import scala.util.Using
 
-/** Finds the companions extending [[Evolved]] in the jars and class directories a class loader loads from.
+/** Finds the companions extending [[Evolving]] in the jars and class directories a class loader loads from.
   *
   * Only the companions of the job need to be found, and they are all in the jars of its class loader: a companion
-  * extends [[Evolved]], which the parent loaders can't see. Flink hands a wrapper of that loader, whose URLs are the
+  * extends [[Evolving]], which the parent loaders can't see. Flink hands a wrapper of that loader, whose URLs are the
   * ones of the loader it wraps. The class path of the JVM stands in when there is none: a job running in a MiniCluster,
   * or a test, has its classes on the class path rather than in a jar of its own.
   *
-  * A class file is read only when it names [[Evolved]] in its constant pool, which a companion extending it does, and
+  * A class file is read only when it names [[Evolving]] in its constant pool, which a companion extending it does, and
   * only its header is parsed then.
   */
 private[evolution] object CompanionScan {
 
-  private val EvolvedName  = classOf[Evolved[_]].getName.replace('.', '/')
-  private val EvolvedBytes = EvolvedName.getBytes(StandardCharsets.UTF_8)
+  private val EvolvingName  = classOf[Evolving[_]].getName.replace('.', '/')
+  private val EvolvingBytes = EvolvingName.getBytes(StandardCharsets.UTF_8)
 
-  /** Binary names of the classes extending [[Evolved]] found in what the given class loader loads from. */
+  /** Binary names of the classes extending [[Evolving]] found in what the given class loader loads from. */
   def companionsOf(classLoader: ClassLoader): Seq[String] =
     rootsOf(classLoader).flatMap(companionsIn).distinct
 
@@ -69,14 +69,13 @@ private[evolution] object CompanionScan {
   /** A companion object is compiled to a class named after its type with a trailing `$`. */
   private def isCompanionFile(name: String): Boolean = name.endsWith("$.class")
 
-  /** The binary name of the given class file if it extends [[Evolved]]. */
+  /** The binary name of the given class file if it extends [[Evolving]]. */
   private def companionNamed(classFile: Array[Byte]): Option[String] =
-    if (!contains(classFile, EvolvedBytes)) None
+    if (!contains(classFile, EvolvingBytes)) None
     else {
       val reader = new ClassReader(classFile)
-      // A trait compiles to an interface, an abstract class to a superclass: Evolved is one or the other
-      val extendsEvolved = reader.getSuperName == EvolvedName || reader.getInterfaces.contains(EvolvedName)
-      if (extendsEvolved) Some(reader.getClassName.replace('/', '.')) else None
+      // A trait compiles to an interface, that the header of the class lists
+      if (reader.getInterfaces.contains(EvolvingName)) Some(reader.getClassName.replace('/', '.')) else None
     }
 
   private def contains(haystack: Array[Byte], needle: Array[Byte]): Boolean = {
