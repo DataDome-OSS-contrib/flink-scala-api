@@ -25,24 +25,32 @@ package object evolution {
   sealed trait EvolutionAnnotation extends StaticAnnotation
 
   /** Applies a mapper to the whole ADT instance restored from a former version, once the other evolutions are applied.
-    * Parameters:
-    *   - the former version of the ADT;
-    *   - the current ADT instance after its deserialization.
-    *   - Return value: a potentially modified ADT instance.
     *
     * Useful for cross-field migrations that don't fit a single `@transformed`, or selecting a different sealed trait
     * subtype based on the input.
     *
-    * The mapper only applies to data written at a version below the current one: data written at the current version is
-    * read as is.
-    *
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param mapper
-    *   A mapper function taking as parameters the former version and the current ADT instance after its
-    *   deserialization. Read where the ADT is declared, so it must be visible from there.
+    *   The mapper to apply. See [[PostEvolutionMapper.apply]] for parameters. Read where the ADT is declared, so it
+    *   must be visible from there.
     */
-  final case class postEvolution[A](mapper: (Int, A) => A) extends EvolutionAnnotation {
+  final case class postEvolution[A](mapper: PostEvolutionMapper[A]) extends EvolutionAnnotation {
     override def toString: String = s"postEvolution(<mapper>)"
+  }
+
+  /** Mapper of [[postEvolution]] applied only after evolutions. See [[PostEvolutionMapper.apply]] for parameters. */
+  trait PostEvolutionMapper[A] extends Serializable {
+
+    /** Maps the ADT instance restored from a former version.
+      *
+      * @param formerVersion
+      *   Version of the ADT the data was written at, below the current one
+      * @param instance
+      *   Current ADT instance deserialized from the former data, possibly `null` for a deleted sealed trait subtype
+      * @return
+      *   The instance to restore, possibly another one
+      */
+    def apply(formerVersion: Int, instance: A): A
   }
 
   /** Marks a case class field added in a specific version. The annotated field must have a default value.
@@ -216,10 +224,6 @@ package object evolution {
   private[api] def evolutionNotAllowed(annotation: String, target: String): String =
     s"@$annotation annotation is not allowed on $target"
 
-  /** Exception indicating `evolution` annotation is not allowed on `target`. */
-  final case class EvolutionNotAllowedException(evolution: StaticAnnotation, target: String)
-      extends FlinkRuntimeException(s"@$evolution annotation is not allowed on $target")
-
   /** Exception indicating `formerField` is not used to instantiate `currentClass`. */
   final case class FieldNotUsedException(currentClass: Class[_], formerField: String)
       extends FlinkRuntimeException(
@@ -252,10 +256,6 @@ package object evolution {
         s"An evolution of $currentClass is declared since=$formerVersion: it must be between 1 and the current" +
           s" @version($currentVersion). Raise @version or fix the since of the annotation"
       )
-
-  /** Exception indicating added `currentField` in `currentClass` must have a default value. */
-  final case class AddedFieldWithoutDefaultException(currentClass: Class[_], currentField: String)
-      extends FlinkRuntimeException(s"'$currentField' added field in $currentClass must have a default value")
 
   /** Message of a versioned ADT whose companion doesn't extend `Evolved`, reported where its type information is
     * derived.

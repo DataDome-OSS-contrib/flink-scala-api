@@ -1,10 +1,11 @@
-package org.apache.flinkx.api
+package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.DataInputViewStreamWrapper
 import org.apache.flink.util.InstantiationUtil
+import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.evolution.EvolutionTest.Animal
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,8 +17,6 @@ import java.io.FileInputStream
   */
 class EvolutionOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
 
-  import org.apache.flinkx.api.EvolutionTest._
-  import org.apache.flinkx.api.evolution.EvolutionRenamedTest
   import org.apache.flinkx.api.evolution.EvolutionRenamedTest.Pet
 
   override protected def beforeEach(): Unit = Evolutions.reset()

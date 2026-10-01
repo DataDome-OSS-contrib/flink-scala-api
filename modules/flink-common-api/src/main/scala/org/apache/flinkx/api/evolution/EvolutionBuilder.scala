@@ -42,7 +42,7 @@ final class EvolutionBuilder[T](
     val deletedFormerClasses: mutable.Map[String, ClassEvolution] = mutable.Map.empty,
     val fieldEvolutions: mutable.ArrayBuffer[FieldEvolution] = mutable.ArrayBuffer.empty,
     val formerEnumValues: mutable.Map[String, EnumValueEvolution] = mutable.Map.empty,
-    private var postEvolution: Option[(Int, T) => T] = None
+    private var postEvolution: Option[PostEvolutionMapper[T]] = None
 ) {
 
   /** Register the mapping between a former ADT class name and the current ADT class.
@@ -79,11 +79,7 @@ final class EvolutionBuilder[T](
     deletedFormerClasses(ClassUtil.resolveFormerClassName(formerClassName, currentClass)) =
       ClassEvolution(DeletedClass, version, throwOnInstance)
 
-  def addPostEvolution(p: postEvolution[T]): Unit = if (postEvolution.isEmpty) {
-    postEvolution = Some(p.mapper)
-  } else {
-    throw EvolutionNotAllowedException(p, s"$currentClass twice")
-  }
+  def addPostEvolution(p: postEvolution[T]): Unit = postEvolution = Some(p.mapper)
 
   /** Build the [[Evolution]]s to register, per class name.
     *
