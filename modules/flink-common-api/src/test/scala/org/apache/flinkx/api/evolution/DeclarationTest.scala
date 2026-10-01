@@ -1,6 +1,5 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flinkx.api.{added, deletedClasses, deletedFields, postEvolution, renamed, transformed, version}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

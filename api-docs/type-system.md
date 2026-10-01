@@ -300,7 +300,7 @@ case class ClickEvent(date: String)
 
 Current source code looks like this to reflect the evolutions:
 ```scala mdoc:reset-object
-import org.apache.flinkx.api._
+import org.apache.flinkx.api.evolution._
 
 @version(1)
 @renamed(since = 1, "Event")
@@ -406,7 +406,7 @@ case class Dog(name: String, kind: String)
 ```
 And this version 1:
 ```scala mdoc:reset-object
-import org.apache.flinkx.api._
+import org.apache.flinkx.api.evolution._
 
 @version(1)
 case class Dog(
@@ -416,7 +416,7 @@ case class Dog(
 ```
 If you want to delete `breed` field but still be able to restore from v0 and v1 checkpoints:
 ```scala mdoc:reset-object
-import org.apache.flinkx.api._
+import org.apache.flinkx.api.evolution._
 
 @version(2)
 @deletedFields(since = 1, "kind")
@@ -429,9 +429,11 @@ case class Dog(name: String)
 #### Declaring the evolutions
 
 The evolutions are read from the annotations of your source code, at compile time, where the companion of the ADT
-extends `Evolved`:
+extends `Evolved`. The annotations and `Evolved` all come with a single import:
 
 ```scala
+import org.apache.flinkx.api.evolution._
+
 @version(2)
 @renamed(since = 2, "FormerOrder")
 @postEvolution(Order.fix)

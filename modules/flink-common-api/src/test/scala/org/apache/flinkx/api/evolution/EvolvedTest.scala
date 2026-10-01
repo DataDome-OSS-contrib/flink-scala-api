@@ -6,6 +6,7 @@ import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer
 import org.apache.flinkx.api.evolution.DeclarationTest.Probe
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures.WrongSinceAboveVersion
 import org.apache.flinkx.api.evolution.EvolutionRenamedTest.{Pet, Pony}
+import org.apache.flinkx.api.evolution.EvolvedTest.{Plain, plainCompanionInitialized}
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -30,6 +31,13 @@ class EvolvedTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     withClue("the declaration must come from the companion, not from a no-op evolution:")(
       declaredNames should contain(FormerProbe)
     )
+  }
+
+  // Looking a class up must not run the initialization of a companion that declares nothing
+  it should "not initialize a companion that doesn't extend Evolved" in {
+    Evolutions.get[Plain](classOf[Plain].getName, 0, getClass.getClassLoader).currentClass shouldBe classOf[Plain]
+
+    plainCompanionInitialized shouldBe false
   }
 
   // The former name is borne by no class anymore: only the companion of the current class knows it, and only the jars
@@ -114,6 +122,17 @@ class EvolvedTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
       s"Cannot restore '$goneName', written at @version(2): no class of that name exists, and no evolution declares" +
         s" it renamed or deleted."
     )
+  }
+
+}
+
+object EvolvedTest {
+
+  @volatile var plainCompanionInitialized = false
+
+  case class Plain(id: String)
+  object Plain {
+    plainCompanionInitialized = true
   }
 
 }

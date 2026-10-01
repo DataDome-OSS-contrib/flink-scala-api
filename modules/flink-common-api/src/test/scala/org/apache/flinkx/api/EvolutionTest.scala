@@ -148,6 +148,21 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     deserializeFormerForm(formerSerializer, Ticket("t")) shouldBe Ticket("t@0")
   }
 
+  // A default value is evaluated for each restored instance, as the constructor does, not once for all of them
+  it should "evaluate the default value of an added field for each restored instance" in {
+    val formerSerializer = new CaseClassSerializer[Stamped](
+      evolution = Evolutions.get(classOf[Stamped], 0),
+      version = 0,
+      isCaseClassImmutable = true,
+      fieldNames = Array("id"),
+      paramSerializers = Array(createSerializer[String])
+    )
+
+    val first  = deserializeFormerForm(formerSerializer, Stamped("a", 0))
+    val second = deserializeFormerForm(formerSerializer, Stamped("b", 0))
+    second.stamp shouldNot be(first.stamp)
+  }
+
   // Error handling
   /* Test to serialize Dog v0 code into Dog-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize Dog v0" in {
@@ -277,6 +292,13 @@ object EvolutionTest {
   object Ticket extends Evolved[Ticket]
 
   def markTicket(version: Int, ticket: Ticket): Ticket = ticket.copy(id = s"${ticket.id}@$version")
+
+  @version(1)
+  case class Stamped(id: String, @added(since = 1) stamp: Int = Stamped.next())
+  object Stamped extends Evolved[Stamped] {
+    private val stamps = new java.util.concurrent.atomic.AtomicInteger()
+    def next(): Int    = stamps.incrementAndGet()
+  }
 
   case class AddedFieldWithoutAnnotation(a: String, b: Int = 42)
 

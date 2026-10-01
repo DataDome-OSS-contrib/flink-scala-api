@@ -3,7 +3,7 @@ package org.apache.flinkx.api
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.evolution.Evolved
+import org.apache.flinkx.api.evolution.{Evolved, deletedClasses, renamed, version}
 import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

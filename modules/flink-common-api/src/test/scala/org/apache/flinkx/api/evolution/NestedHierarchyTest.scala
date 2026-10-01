@@ -1,8 +1,7 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.{TestUtils, version}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

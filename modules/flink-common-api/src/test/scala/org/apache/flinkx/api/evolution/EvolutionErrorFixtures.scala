@@ -1,7 +1,6 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flinkx.api.EvolutionTest._
-import org.apache.flinkx.api.{added, deletedClasses, deletedFields, postEvolution, renamed, transformed, version}
 
 /** ADTs whose evolutions are declared wrongly on purpose, to check what the feature reports. */
 object EvolutionErrorFixtures {

@@ -1,21 +1,11 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flink.api.common.typeutils.TypeSerializer
-import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.EvolutionTest._
+import org.apache.flinkx.api.TestUtils
+import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
-import org.apache.flinkx.api.{
-  TestUtils,
-  added,
-  deletedClasses,
-  deletedFields,
-  postEvolution,
-  renamed,
-  transformed,
-  version
-}
+import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

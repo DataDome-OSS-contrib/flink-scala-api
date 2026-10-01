@@ -2,7 +2,7 @@ package org.apache.flinkx.api.util
 
 import org.apache.flink.util.FlinkRuntimeException
 
-import java.lang.reflect.{Field, Modifier}
+import java.lang.reflect.{Field, InvocationTargetException, Modifier}
 
 object ClassUtil {
 
@@ -83,15 +83,19 @@ object ClassUtil {
     }
   }
 
-  /** Default value of the `index`-th field of the given case class, `None` when it declares none. */
-  def defaultFieldValue(caseClass: Class[_], index: Int): Option[Any] =
+  /** Default value of the `index`-th field of the given case class at each call, `None` when it declares none. */
+  def defaultFieldValue(caseClass: Class[_], index: Int): Option[() => AnyRef] =
     try {
       val methodSuffix = s"$$default$$${index + 1}"
       val companion    = companionInstance[AnyRef](caseClass)
       companion.getClass.getMethods
         // Scala 2 names the accessor after `apply`, Scala 3 after the constructor
         .find(m => m.getName == s"apply$methodSuffix" || m.getName == s"$$lessinit$$greater$methodSuffix")
-        .map(_.invoke(companion))
+        .map(method =>
+          () =>
+            try method.invoke(companion)
+            catch { case e: InvocationTargetException => throw e.getCause }
+        )
     } catch {
       case _: ClassNotFoundException | _: NoSuchFieldException => None
     }

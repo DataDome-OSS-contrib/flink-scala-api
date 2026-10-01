@@ -8,7 +8,7 @@ import org.apache.flink.util.ChildFirstClassLoader
 import org.apache.flinkx.api.SerializerSnapshotTest._
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.{Evolutions, Evolved}
+import org.apache.flinkx.api.evolution.{Evolutions, Evolved, added, version}
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
