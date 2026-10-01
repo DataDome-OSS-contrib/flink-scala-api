@@ -39,6 +39,7 @@ package object evolution {
   }
 
   /** Mapper of [[postEvolution]] applied only after evolutions. See [[PostEvolutionMapper.apply]] for parameters. */
+  @FunctionalInterface
   trait PostEvolutionMapper[A] extends Serializable {
 
     /** Maps the ADT instance restored from a former version.
@@ -220,6 +221,15 @@ package object evolution {
   final case class VersionNotAllowedException(currentClass: Class[_], version: Int)
       extends FlinkRuntimeException(s"Current version of $currentClass must be >= 0, got @version($version)")
 
+  /** How to declare a former member, subtype or enum value, that is no longer one of the current ADT.
+    *
+    * @param renamedAs
+    *   What a rename of that member amounts to, e.g. `renamed or moved`
+    */
+  private[api] def renamedOrDeletedHint(formerName: String, renamedAs: String): String =
+    s"Use @renamed(since = <version>,\"$formerName\") to declare it $renamedAs, or" +
+      s" @deletedClasses(since = <version>,\"$formerName\") to declare it deleted"
+
   /** Message of a misplaced evolution annotation, reported by the macros declaring the evolutions. */
   private[api] def evolutionNotAllowed(annotation: String, target: String): String =
     s"@$annotation annotation is not allowed on $target"
@@ -257,12 +267,13 @@ package object evolution {
           s" @version($currentVersion). Raise @version or fix the since of the annotation"
       )
 
-  /** Message of a versioned ADT whose companion doesn't extend `Evolved`, reported where its type information is
+  /** Message of a versioned ADT whose companion doesn't extend `Evolving`, reported where its type information is
     * derived.
     */
-  private[api] def companionNotEvolved(adt: String): String = {
+  private[api] def companionNotEvolving(adt: String): String = {
     val name = adt.split("[.$]").last
-    s"$adt declares @version, so its companion must declare its evolutions: object $name extends Evolved[$name]"
+    s"$adt declares @version, so its companion must declare its evolutions:" +
+      s" object $name extends Evolving[$name] { val evolutions = Evolutions[$name] }"
   }
 
   /** Message of an `@added` field without default value, reported by the macros declaring the evolutions. */
@@ -275,10 +286,10 @@ package object evolution {
         if (restoring)
           s"Cannot restore '$fqn', written at @version($version): no class of that name exists, and no evolution" +
             s" declares it renamed or deleted. If it was renamed, the companion of the class now bearing it must extend" +
-            s" Evolved, in a jar of the job; if it was deleted, the ADT that held it must declare it with @deletedClasses"
+            s" Evolving, in a jar of the job; if it was deleted, the ADT that held it must declare it with @deletedClasses"
         else
           s"Cannot derive the type information of '$fqn': it declares @version($version), but its companion" +
-            s" declares no evolution. It must extend Evolved"
+            s" declares no evolution. It must extend Evolving"
       )
 
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */

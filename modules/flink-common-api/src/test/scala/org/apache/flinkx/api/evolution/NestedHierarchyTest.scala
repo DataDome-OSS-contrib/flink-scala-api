@@ -37,7 +37,7 @@ object NestedHierarchyTest {
 
   @version(1)
   sealed trait Top
-  object Top                 extends Evolved[Top]
+  object Top                 extends Evolving[Top] { val evolutions = Evolutions[Top] }
   sealed trait Middle        extends Top
   case class Leaf(a: String) extends Middle
   case class Direct(b: Int)  extends Top

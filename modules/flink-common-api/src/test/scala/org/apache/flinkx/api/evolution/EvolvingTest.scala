@@ -3,10 +3,10 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
-import org.apache.flinkx.api.evolution.DeclarationTest.Probe
+import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures.WrongSinceAboveVersion
 import org.apache.flinkx.api.evolution.EvolutionRenamedTest.{Pet, Pony}
-import org.apache.flinkx.api.evolution.EvolvedTest.{Plain, plainCompanionInitialized}
+import org.apache.flinkx.api.evolution.EvolvingTest.{Plain, plainCompanionInitialized}
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -15,8 +15,8 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
 import scala.jdk.CollectionConverters._
 
-/** The declarations of the companions extending `Evolved` reach a JVM that never derives them, when a lookup asks. */
-class EvolvedTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+/** The evolutions of the companions extending `Evolving` reach a JVM that never derives them, when a lookup asks. */
+class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   override protected def beforeEach(): Unit = Evolutions.reset()
 
@@ -34,7 +34,7 @@ class EvolvedTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   }
 
   // Looking a class up must not run the initialization of a companion that declares nothing
-  it should "not initialize a companion that doesn't extend Evolved" in {
+  it should "not initialize a companion that doesn't extend Evolving" in {
     Evolutions.get[Plain](classOf[Plain].getName, 0, getClass.getClassLoader).currentClass shouldBe classOf[Plain]
 
     plainCompanionInitialized shouldBe false
@@ -126,7 +126,7 @@ class EvolvedTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
 }
 
-object EvolvedTest {
+object EvolvingTest {
 
   @volatile var plainCompanionInitialized = false
 

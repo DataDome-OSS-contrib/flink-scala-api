@@ -9,6 +9,7 @@ import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{
   Unchanged
 }
 import org.apache.flinkx.api.evolution.{DeletedInstanceException, Evolution, Evolutions}
+import org.apache.flinkx.api.util.ClassUtil
 
 /** Serializer for Scala 3 enum value. */
 class Scala3EnumValueSerializer[T](
@@ -19,7 +20,7 @@ class Scala3EnumValueSerializer[T](
 
   // Parameterless enum values are held as static fields of the synthetic companion module class
   @transient private lazy val companionClass: Class[?] =
-    Class.forName(evolution.currentClass.getName + "$", false, evolution.currentClass.getClassLoader)
+    Class.forName(ClassUtil.companionName(evolution.currentClass.getName), false, evolution.currentClass.getClassLoader)
 
   /** Read the enum value declared under `valueName` from the static fields of the companion module class. */
   private def valueOf(valueName: String): T =

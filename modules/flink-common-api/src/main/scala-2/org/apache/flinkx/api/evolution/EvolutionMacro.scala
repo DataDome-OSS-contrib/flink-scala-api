@@ -3,27 +3,31 @@ package org.apache.flinkx.api.evolution
 import org.apache.flinkx.api.evolution.{evolutionNotAllowed => notAllowed}
 
 import scala.reflect.macros.blackbox
+import scala.util.control.NonFatal
 
-/** Builds the [[Declaration]] of an ADT from its annotations alone.
+/** Builds the [[Evolutions]] of an ADT from its annotations alone.
   *
   * Reads what the derivation reads, but emits only the registration code: no field typeclass is summoned, so it
   * compiles wherever the ADT is visible, from its own companion in particular.
   */
-private[api] object Declare {
+private[api] object EvolutionMacro {
 
-  def declarationImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Declaration[T]] = {
+  /** The subtypes the derivation serializes, and the intermediate sealed traits it flattened on the way. */
+  final case class Subtypes[S](serialized: List[S], intermediates: List[S])
+
+  def evolutionsImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Evolutions[T]] = {
     import c.universe._
 
     val tpe    = weakTypeOf[T]
     val symbol = tpe.typeSymbol
     // A case object has no companion of its own to declare it: the sealed trait it belongs to declares it
     val (moduleChildren, classChildren) =
-      if (symbol.isClass) subtypesOf(c)(symbol.asClass)._1.partition(_.isModuleClass) else (Nil, Nil)
+      if (symbol.isClass) subtypesOf(c)(symbol.asClass).serialized.partition(_.isModuleClass) else (Nil, Nil)
     val builders       = tpe :: moduleChildren.map(_.asType.toType)
     val subtypeClasses =
       classChildren.map(child => q"_root_.scala.reflect.classTag[${child.asType.toType}].runtimeClass")
-    c.Expr[Declaration[T]](q"""
-      new _root_.org.apache.flinkx.api.evolution.Declaration[$tpe](
+    c.Expr[Evolutions[T]](q"""
+      new _root_.org.apache.flinkx.api.evolution.Evolutions[$tpe](
         _root_.scala.reflect.classTag[$tpe].runtimeClass.asInstanceOf[_root_.java.lang.Class[$tpe]],
         () => _root_.scala.Seq[_root_.org.apache.flinkx.api.evolution.EvolutionBuilder[_]](..${builders.map(
         builderOf(c)
@@ -33,34 +37,74 @@ private[api] object Declare {
     """)
   }
 
+  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived.
+    */
+  def evolvableImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Evolvable[T]] = {
+    import c.universe._
+
+    val tpe    = weakTypeOf[T]
+    val symbol = tpe.typeSymbol
+
+    rejectVersionedParameter(c)(symbol, primaryParameters(c)(tpe))
+    // A version 0 declares nothing to evolve from, and a case object is declared by the sealed trait it belongs to
+    if (versionOf(c)(symbol) > 0 && !symbol.isModuleClass) {
+      val companion = symbol.companion
+      val evolving  = appliedType(typeOf[Evolving[_]].typeConstructor, tpe)
+      if (companion == NoSymbol || !(companion.typeSignature <:< evolving)) {
+        c.abort(c.enclosingPosition, companionNotEvolving(symbol.fullName))
+      }
+    }
+    c.Expr[Evolvable[T]](
+      q"_root_.org.apache.flinkx.api.evolution.Evolvable.instance.asInstanceOf[_root_.org.apache.flinkx.api.evolution.Evolvable[$tpe]]"
+    )
+  }
+
   /** The subtypes the derivation serializes, with the intermediate sealed traits it flattens on the way.
     *
     * Magnolia replaces a sealed subtype by its own subtypes and sorts them by name, so a declaration describing the
     * direct children instead would not match the serialized members, and an unchanged schema would be reported as
     * needing a migration.
     */
-  def subtypesOf(c: blackbox.Context)(parent: c.universe.ClassSymbol): (List[c.Symbol], List[c.Symbol]) = {
+  private def subtypesOf(c: blackbox.Context)(parent: c.universe.ClassSymbol): Subtypes[c.Symbol] = {
     val (abstractChildren, concreteChildren) = parent.knownDirectSubclasses.toList.partition(_.isAbstract)
     // Forces the signature, without which a child of the same compilation unit may not be known yet
     (concreteChildren ++ abstractChildren).foreach(_.typeSignature)
     val flattened = abstractChildren.collect {
       case child if child.asClass.isSealed => subtypesOf(c)(child.asClass)
     }
-    (
-      (concreteChildren ++ flattened.flatMap(_._1)).sortBy(_.fullName),
-      abstractChildren ++ flattened.flatMap(_._2)
+    Subtypes(
+      (concreteChildren ++ flattened.flatMap(_.serialized)).sortBy(_.fullName),
+      abstractChildren ++ flattened.flatMap(_.intermediates)
     )
   }
 
+  /** The parameters of the primary constructor of the given type, none for a trait. */
+  private def primaryParameters(c: blackbox.Context)(tpe: c.Type): List[c.Symbol] = {
+    import c.universe._
+    tpe.decls
+      .collectFirst { case method: MethodSymbol if method.isPrimaryConstructor => method }
+      .toList
+      .flatMap(_.paramLists.flatten)
+  }
+
+  /** Reject a `@version` on a parameter: a version belongs to an ADT, and scalac does not enforce annotation targets.
+    */
+  private def rejectVersionedParameter(c: blackbox.Context)(symbol: c.Symbol, parameters: List[c.Symbol]): Unit =
+    parameters
+      .find(parameter => isVersioned(c)(parameter))
+      .foreach(parameter =>
+        c.abort(c.enclosingPosition, notAllowed("version", s"$symbol.${parameter.name.decodedName.toString}"))
+      )
+
   /** Whether the given symbol declares a schema version of its own. */
-  def isVersioned(c: blackbox.Context)(symbol: c.Symbol): Boolean =
+  private def isVersioned(c: blackbox.Context)(symbol: c.Symbol): Boolean =
     try {
       symbol.info // Forces the symbol, without which its annotations are not loaded
       symbol.annotations.exists(_.tree.tpe.typeSymbol == versionSymbol(c))
-    } catch { case _: Throwable => false }
+    } catch { case NonFatal(_) => false }
 
   /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. */
-  def versionOf(c: blackbox.Context)(symbol: c.Symbol): Int =
+  private def versionOf(c: blackbox.Context)(symbol: c.Symbol): Int =
     symbol.annotations
       .find(_.tree.tpe.typeSymbol == versionSymbol(c))
       .flatMap(intArgument(c)(_, "current"))
@@ -90,13 +134,10 @@ private[api] object Declare {
     val evolution = q"_root_.org.apache.flinkx.api.evolution"
     val symbol    = tpe.typeSymbol
     // The subtypes the derivation serializes, and every sealed trait it flattened on the way, which declares nothing
-    val (children, intermediates) =
-      if (symbol.isClass) subtypesOf(c)(symbol.asClass) else (Nil, Nil)
+    val Subtypes(children, intermediates) =
+      if (symbol.isClass) subtypesOf(c)(symbol.asClass) else Subtypes[Symbol](Nil, Nil)
 
-    val parameters = tpe.decls
-      .collectFirst { case method: MethodSymbol if method.isPrimaryConstructor => method }
-      .toList
-      .flatMap(_.paramLists.flatten)
+    val parameters = primaryParameters(c)(tpe)
 
     /** Members of the ADT, in declaration order: field names or subtype class names. */
     val memberNames: Tree =
@@ -116,39 +157,15 @@ private[api] object Declare {
     val Added                                  = annotationSymbol("added")
     val Transformed                            = annotationSymbol("transformed")
 
-    def versionOf(owner: Symbol): Int = Declare.versionOf(c)(owner)
+    def versionOf(owner: Symbol): Int = EvolutionMacro.versionOf(c)(owner)
 
     def is(annotation: Annotation, annotationType: Symbol): Boolean =
       annotation.tree.tpe.typeSymbol == annotationType
 
-    def isVersioned(owner: Symbol): Boolean = Declare.isVersioned(c)(owner)
-
-    // The companion the declaration is written in, a case object being its own
-    val module: Symbol = if (symbol.isModuleClass) symbol.asClass.module else symbol.companion
-    val self           = TermName(c.freshName("self$"))
-    var selfReferenced = false
-
-    /** Replaces the references to the companion by a value reached by name once the companion is initialized.
-      *
-      * The declaration is spliced in the parent constructor call of the companion, where scalac forbids referencing the
-      * companion itself, even from a lambda: a mapper of the companion, the natural place for it, would not compile
-      * otherwise.
-      */
-    object DetachSelf extends Transformer {
-      override def transform(tree: Tree): Tree = tree match {
-        case _
-            if module != NoSymbol && tree.symbol == module && (tree.isInstanceOf[Ident] || tree.isInstanceOf[Select]) =>
-          selfReferenced = true
-          Ident(self)
-        case This(_) if module != NoSymbol && tree.symbol == module.asModule.moduleClass =>
-          selfReferenced = true
-          Ident(self)
-        case _ => super.transform(tree)
-      }
-    }
+    def isVersioned(owner: Symbol): Boolean = EvolutionMacro.isVersioned(c)(owner)
 
     /** The annotation as an expression to splice, detyped: it was typed in the context of the class declaring it. */
-    def instanceOf(annotation: Annotation): Tree = c.untypecheck(DetachSelf.transform(annotation.tree))
+    def instanceOf(annotation: Annotation): Tree = c.untypecheck(annotation.tree)
 
     def classAnnotations(builder: TermName, clazz: TermName): List[Tree] = symbol.annotations.collect {
       case a if is(a, Renamed) =>
@@ -204,31 +221,20 @@ private[api] object Declare {
       val version              = versionOf(symbol)
       val hasVersionedAncestor = tpe.baseClasses.filterNot(_ == symbol).exists(ancestor => isVersioned(ancestor))
 
-      // A version belongs to an ADT, and scalac does not enforce the target of an annotation
-      parameters
-        .find(parameter => isVersioned(parameter))
-        .foreach(parameter =>
-          c.abort(c.enclosingPosition, notAllowed("version", s"$symbol.${parameter.name.decodedName.toString}"))
-        )
+      rejectVersionedParameter(c)(symbol, parameters)
       val isCoproduct = children.nonEmpty
 
+      def nameOf(annotation: Annotation): String = annotation.tree.tpe.typeSymbol.name.decodedName.toString
+
       def reject(annotation: Annotation, target: String): Nothing =
-        c.abort(
-          c.enclosingPosition,
-          notAllowed(annotation.tree.tpe.typeSymbol.name.decodedName.toString, target)
-        )
+        c.abort(c.enclosingPosition, notAllowed(nameOf(annotation), target))
 
       def isEvolutionAnnotation(annotation: Annotation): Boolean =
         annotation.tree.tpe <:< typeOf[EvolutionAnnotation]
 
       symbol.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
-        val allowed =
-          if (version == 0) is(annotation, Renamed) && hasVersionedAncestor
-          else
-            is(annotation, Renamed) || is(annotation, DeletedClasses) || is(annotation, PostEvolution) ||
-            (is(annotation, DeletedFields) && !isCoproduct)
-        if (!allowed) {
-          reject(annotation, if (version == 0) s"${symbol.fullName} with version 0" else symbol.fullName)
+        if (!AnnotationRules.allowedOnAdt(nameOf(annotation), version, isCoproduct, hasVersionedAncestor)) {
+          reject(annotation, AnnotationRules.target(symbol.fullName, None, version))
         }
       }
 
@@ -238,16 +244,20 @@ private[api] object Declare {
 
       parameters.foreach { parameter =>
         parameter.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
-          val allowed =
-            version > 0 && (is(annotation, Added) || is(annotation, Renamed) || is(annotation, Transformed))
-          val suffix = if (version == 0) " with version 0" else ""
-          if (!allowed) reject(annotation, s"${symbol.fullName}.${parameter.name.decodedName}$suffix")
+          if (!AnnotationRules.allowedOnField(nameOf(annotation), version)) {
+            val field = parameter.name.decodedName.toString
+            reject(annotation, AnnotationRules.target(symbol.fullName, Some(field), version))
+          }
         }
       }
 
       // A subtype declares its own evolutions, which its own declaration registers
       (children ++ intermediates).filterNot(isVersioned).foreach { child =>
-        child.annotations.filter(isEvolutionAnnotation).foreach(annotation => reject(annotation, child.fullName))
+        child.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
+          if (!AnnotationRules.allowedOnUnversionedSubtype(nameOf(annotation), version, isEnum = false)) {
+            reject(annotation, child.fullName)
+          }
+        }
       }
     }
 
@@ -255,21 +265,10 @@ private[api] object Declare {
     val builder     = TermName("builder")
     val clazz       = TermName("declaredClass")
     val classOfTree = q"_root_.scala.reflect.classTag[$tpe].runtimeClass.asInstanceOf[_root_.java.lang.Class[$tpe]]"
-    // Generated before the self value below, which they tell whether it is needed
     val classDeclarations = classAnnotations(builder, clazz)
     val fieldDeclarations = fieldAnnotations(builder, clazz)
-    val selfDeclaration   =
-      if (!selfReferenced) Nil
-      else {
-        val moduleType = TypeTree(module.typeSignature)
-        List(
-          // Resolved at runtime because a reference to an object from its own parent constructor is not allowed
-          q"lazy val $self: $moduleType = _root_.org.apache.flinkx.api.util.ClassUtil.companionInstance[$moduleType]($clazz)"
-        )
-      }
     q"""{
       val $clazz = $classOfTree
-      ..$selfDeclaration
       val $builder = new $evolution.EvolutionBuilder[$tpe]($clazz, ${versionOf(symbol)}, $memberNames)
       ..$classDeclarations
       ..$fieldDeclarations

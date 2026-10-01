@@ -5,7 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** Checks the declaration of a Scala 3 enum, whose value evolutions are declared on its values. */
-class DeclarationEnumTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   import org.apache.flinkx.api.Scala3EnumTest.FailureCategory
 
