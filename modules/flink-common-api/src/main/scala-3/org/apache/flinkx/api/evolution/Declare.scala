@@ -3,17 +3,7 @@ package org.apache.flinkx.api.evolution
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{DeletedReturnNull, DeletedThrowOnInstance, Renamed}
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
 import org.apache.flinkx.api.util.ClassUtil
-import org.apache.flinkx.api.version
-import org.apache.flinkx.api.{
-  AnnotationTrees,
-  Evolved,
-  added,
-  deletedClasses,
-  deletedFields,
-  postEvolution,
-  renamed,
-  transformed
-}
+import org.apache.flinkx.api.AnnotationTrees
 
 import scala.quoted.*
 
@@ -220,9 +210,9 @@ private[evolution] object Declare:
         .find(isVersioned)
         .foreach(parameter => report.errorAndAbort(evolutionNotAllowed("version", s"$symbol.${parameter.name}")))
 
-      def isEvolved(term: Term): Boolean = term.tpe <:< TypeRepr.of[Evolved]
+      def isEvolutionAnnotation(term: Term): Boolean = term.tpe <:< TypeRepr.of[EvolutionAnnotation]
 
-      symbol.annotations.filter(isEvolved).foreach { term =>
+      symbol.annotations.filter(isEvolutionAnnotation).foreach { term =>
         val allowed =
           if version == 0 then is[renamed](term) && hasVersionedAncestor
           else
@@ -234,8 +224,8 @@ private[evolution] object Declare:
       if symbol.annotations.count(is[postEvolution[?]]) > 1 then
         report.errorAndAbort(evolutionNotAllowed("postEvolution", s"${symbol.fullName} twice"))
 
-      parametersOf(symbol).filter(_.annotations.exists(isEvolved)).foreach { parameter =>
-        parameter.annotations.filter(isEvolved).foreach { term =>
+      parametersOf(symbol).filter(_.annotations.exists(isEvolutionAnnotation)).foreach { parameter =>
+        parameter.annotations.filter(isEvolutionAnnotation).foreach { term =>
           val allowed =
             version > 0 && (is[added](term) || is[renamed](term) || is[transformed[?, ?]](term))
           val target = s"${symbol.fullName}.${parameter.name}" + (if version == 0 then " with version 0" else "")
@@ -245,7 +235,7 @@ private[evolution] object Declare:
 
       // A subtype declares its own evolutions, which its own declaration registers
       children.filterNot(isVersioned).foreach { child =>
-        child.annotations.filter(isEvolved).foreach { term =>
+        child.annotations.filter(isEvolutionAnnotation).foreach { term =>
           val allowed = isEnum && is[renamed](term) && version > 0
           if !allowed then reject(term, child.fullName)
         }

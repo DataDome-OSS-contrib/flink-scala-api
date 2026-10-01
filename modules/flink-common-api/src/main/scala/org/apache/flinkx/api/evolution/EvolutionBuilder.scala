@@ -3,7 +3,6 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.annotation.Internal
 import org.apache.flinkx.api.evolution.Evolution.{DeletedClass, EnumValueEvolution}
 import org.apache.flinkx.api.evolution.EvolutionBuilder.{AdtDeclaration, ClassEvolution}
-import org.apache.flinkx.api.postEvolution
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.collection.mutable
