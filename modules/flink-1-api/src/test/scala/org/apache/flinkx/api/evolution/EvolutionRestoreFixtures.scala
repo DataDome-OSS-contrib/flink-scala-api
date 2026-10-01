@@ -6,7 +6,6 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.functions.source.SourceFunction
 import org.apache.flink.util.Collector
-import org.apache.flinkx.api.{postEvolution, renamed, version}
 
 /** The ADT that wrote the savepoint, and the one restoring it: renamed, with a renamed field. */
 object EvolutionRestoreFixtures {

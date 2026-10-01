@@ -1,7 +1,6 @@
 package org.example
 
-import org.apache.flinkx.api.evolution.Evolved
-import org.apache.flinkx.api.{added, deletedClasses, deletedFields, postEvolution, renamed, transformed, version}
+import org.apache.flinkx.api.evolution._
 
 /** A user ADT using every evolution annotation, outside the package of the library. */
 object UserFixtures {

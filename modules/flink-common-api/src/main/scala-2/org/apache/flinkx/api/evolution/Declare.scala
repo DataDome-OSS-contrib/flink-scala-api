@@ -80,7 +80,8 @@ private[api] object Declare {
     }
   }
 
-  private def versionSymbol(c: blackbox.Context): c.Symbol = c.mirror.staticClass("org.apache.flinkx.api.version")
+  private def versionSymbol(c: blackbox.Context): c.Symbol =
+    c.mirror.staticClass("org.apache.flinkx.api.evolution.version")
 
   /** The code building the [[EvolutionBuilder]] of the given ADT type from its annotations. */
   private def builderOf(c: blackbox.Context)(tpe: c.Type): c.Tree = {
@@ -107,7 +108,7 @@ private[api] object Declare {
       }
 
     // Compared by symbol rather than by type: the generic annotations have no type tag to compare against
-    def annotationSymbol(name: String): Symbol = c.mirror.staticClass(s"org.apache.flinkx.api.$name")
+    def annotationSymbol(name: String): Symbol = c.mirror.staticClass(s"org.apache.flinkx.api.evolution.$name")
     val Renamed                                = annotationSymbol("renamed")
     val DeletedFields                          = annotationSymbol("deletedFields")
     val DeletedClasses                         = annotationSymbol("deletedClasses")
@@ -161,9 +162,9 @@ private[api] object Declare {
       case a if is(a, PostEvolution) =>
         // The mapper is read on first use: the companion holding it may still be initializing
         val post = TermName(c.freshName("post$"))
-        q"""lazy val $post = ${instanceOf(a)}.asInstanceOf[_root_.org.apache.flinkx.api.postEvolution[$tpe]]
+        q"""lazy val $post = ${instanceOf(a)}.asInstanceOf[_root_.org.apache.flinkx.api.evolution.postEvolution[$tpe]]
             $builder.addPostEvolution(
-              new _root_.org.apache.flinkx.api.postEvolution[$tpe]((v: _root_.scala.Int, i: $tpe) => $post.mapper(v, i))
+              new _root_.org.apache.flinkx.api.evolution.postEvolution[$tpe]((v: _root_.scala.Int, i: $tpe) => $post.mapper(v, i))
             )"""
     }
 
@@ -217,10 +218,10 @@ private[api] object Declare {
           notAllowed(annotation.tree.tpe.typeSymbol.name.decodedName.toString, target)
         )
 
-      def isEvolved(annotation: Annotation): Boolean =
-        annotation.tree.tpe <:< typeOf[org.apache.flinkx.api.Evolved]
+      def isEvolutionAnnotation(annotation: Annotation): Boolean =
+        annotation.tree.tpe <:< typeOf[EvolutionAnnotation]
 
-      symbol.annotations.filter(isEvolved).foreach { annotation =>
+      symbol.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
         val allowed =
           if (version == 0) is(annotation, Renamed) && hasVersionedAncestor
           else
@@ -236,7 +237,7 @@ private[api] object Declare {
       }
 
       parameters.foreach { parameter =>
-        parameter.annotations.filter(isEvolved).foreach { annotation =>
+        parameter.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
           val allowed =
             version > 0 && (is(annotation, Added) || is(annotation, Renamed) || is(annotation, Transformed))
           val suffix = if (version == 0) " with version 0" else ""
@@ -246,7 +247,7 @@ private[api] object Declare {
 
       // A subtype declares its own evolutions, which its own declaration registers
       (children ++ intermediates).filterNot(isVersioned).foreach { child =>
-        child.annotations.filter(isEvolved).foreach(annotation => reject(annotation, child.fullName))
+        child.annotations.filter(isEvolutionAnnotation).foreach(annotation => reject(annotation, child.fullName))
       }
     }
 

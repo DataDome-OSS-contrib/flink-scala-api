@@ -3,7 +3,6 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.annotation.{Internal, VisibleForTesting}
 import org.apache.flinkx.api.evolution.Evolution.DeletedClass
 import org.apache.flinkx.api.evolution.EvolutionBuilder.AdtDeclaration
-import org.apache.flinkx.api.version
 
 import scala.collection.concurrent
 import scala.util.control.NonFatal
@@ -12,7 +11,7 @@ import scala.util.control.NonFatal
   *
   * Schema evolution lets a Flink job restore from a former checkpoint whose ADT (case class, sealed trait or Scala 3
   * enum) schema differs from the one currently declared in source code. Users opt in per ADT by adding the [[version]]
-  * annotation and describe each change with [[Evolved]] annotations.
+  * annotation and describe each change with [[EvolutionAnnotation]]s.
   *
   * This schema evolution feature commonly employs the following vocabulary to qualify version, class, field, etc.:
   *   - `Former` describes the serialization time when the checkpoint was done.
@@ -132,9 +131,12 @@ object Evolutions {
   private def declare(className: String, cl: ClassLoader): Unit = {
     // A case object is its own companion, and an enum value is declared by its enum
     val companion =
-      try Some(Class.forName(companionNameOf(className), true, cl))
+      try Some(Class.forName(companionNameOf(className), false, cl))
       catch { case _: ClassNotFoundException => None }
-    companion.flatMap(declarations.get).foreach { declaration =>
+    // Only a companion extending Evolved is initialized, so that it hands its declaration over: no other one is touched
+    val evolved = companion.filter(classOf[Evolved[_]].isAssignableFrom)
+    evolved.foreach(clazz => Class.forName(clazz.getName, true, clazz.getClassLoader))
+    evolved.flatMap(declarations.get).foreach { declaration =>
       apply(declaration, cl).foreach(member => declare(member.getName, cl))
     }
   }
