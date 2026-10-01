@@ -49,21 +49,8 @@ sealed class Evolution[T] private[evolution] (
     private val fieldEvolutions: Array[FieldEvolution] = Array.empty,
     private val formerEnumValueToEvolution: Map[String, EnumValueEvolution] = Map.empty,
     private val throwOnInstance: Boolean = true,
-    private val postEvolution: Option[(Int, T) => T] = None
-) extends Ordered[Evolution[_]]
-    with Serializable {
-
-  /** Evolutions of a same class name are sorted by ascending `formerVersion`, a deletion coming first among the
-    * evolutions declared for the same version.
-    *
-    * [[Evolutions.get]] returns the first evolution whose version is at least the former version being restored, so
-    * this order makes a deleted class win over any other evolution declared for that version.
-    */
-  override def compare(that: Evolution[_]): Int = {
-    val versionComparison = formerVersion.compare(that.formerVersion)
-    if (versionComparison != 0) versionComparison
-    else that.isDeleted.compare(isDeleted) // Reversed operands to sort a deletion first
-  }
+    private val postEvolution: Option[PostEvolutionMapper[T]] = None
+) extends Serializable {
 
   /** Whether the evolution can be skipped. Returns `true` (fast path) when:
     *   - no field evolution is required from the version this evolution migrates from,

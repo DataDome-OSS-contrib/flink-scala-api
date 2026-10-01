@@ -1,6 +1,6 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flinkx.api.EvolutionTest.Dog
+import org.apache.flinkx.api.evolution.EvolutionTest.Dog
 import org.apache.flinkx.api.evolution.DeclarationTest.Probe
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -21,8 +21,8 @@ class EvolutionsClassLoaderTest extends AnyFlatSpec with Matchers with BeforeAnd
     val currentDog = classOf[Dog]
     withClue("the isolated class loader must define a class of its own:")(otherDog shouldNot be(currentDog))
 
-    Evolutions.register(new EvolutionBuilder(currentDog.asInstanceOf[Class[Any]], 1, Array("name")))
-    Evolutions.register(new EvolutionBuilder(otherDog.asInstanceOf[Class[Any]], 1, Array("name")))
+    Evolutions.get(currentDog, 2)
+    Evolutions.get(otherDog.asInstanceOf[Class[Any]], 2)
 
     Evolutions.find[Any](currentDog.getName, 0, currentDog.getClassLoader).map(_.currentClass) shouldBe Some(currentDog)
     Evolutions.find[Any](currentDog.getName, 0, otherJob).map(_.currentClass) shouldBe Some(otherDog)
@@ -62,7 +62,11 @@ class EvolutionsClassLoaderTest extends AnyFlatSpec with Matchers with BeforeAnd
   private class JobClassLoader(urls: Array[URL]) extends URLClassLoader(urls, getClass.getClassLoader) {
     override def loadClass(name: String, resolve: Boolean): Class[_] =
       // The enclosing classes as well: the JVM checks that a nested class and its outer agree on their loader
-      if (name.startsWith("org.apache.flinkx.api.EvolutionTest") || name.startsWith(classOf[DeclarationTest].getName)) {
+      if (
+        name.startsWith("org.apache.flinkx.api.evolution.EvolutionTest") || name.startsWith(
+          classOf[DeclarationTest].getName
+        )
+      ) {
         Option(findLoadedClass(name)).getOrElse(findClass(name))
       } else super.loadClass(name, resolve)
   }

@@ -83,22 +83,18 @@ object ClassUtil {
     }
   }
 
-  /** Default value of the `index`-th field of the given case class at each call, `None` when it declares none. */
-  def defaultFieldValue(caseClass: Class[_], index: Int): Option[() => AnyRef] =
-    try {
-      val methodSuffix = s"$$default$$${index + 1}"
-      val companion    = companionInstance[AnyRef](caseClass)
-      companion.getClass.getMethods
-        // Scala 2 names the accessor after `apply`, Scala 3 after the constructor
-        .find(m => m.getName == s"apply$methodSuffix" || m.getName == s"$$lessinit$$greater$methodSuffix")
-        .map(method =>
-          () =>
-            try method.invoke(companion)
-            catch { case e: InvocationTargetException => throw e.getCause }
-        )
-    } catch {
-      case _: ClassNotFoundException | _: NoSuchFieldException => None
-    }
+  /** Default value of the `index`-th field of the given case class, evaluated anew at each call.
+    *
+    * @throws java.lang.NoSuchMethodException
+    *   if the field declares no default value
+    */
+  def defaultFieldValue(caseClass: Class[_], index: Int): () => AnyRef = {
+    val companion = companionInstance[AnyRef](caseClass)
+    val method = companion.getClass.getMethod(s"$$lessinit$$greater$$default$$${index + 1}")
+    () =>
+      try method.invoke(companion)
+      catch { case e: InvocationTargetException => throw e.getCause }
+  }
 
   /** The companion object of the given class, or the object itself when the class is the one of an object.
     * @throws java.lang.ClassNotFoundException

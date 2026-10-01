@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flinkx.api.EvolutionTest._
+import EvolutionTest._
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
@@ -18,7 +18,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   // Schema of Click v0, as recorded in its snapshot
   private val ClickV0FieldNames = Array("a", "inFileClicks", "fieldNotInFile", "identifier", "b")
   // Former class name of Click v0, as recorded in its snapshot and declared by @renamed on the fixtures
-  private val ClickV0ClassName = "org.apache.flinkx.api.EvolutionTest$Click"
+  private val ClickV0ClassName = "org.apache.flinkx.api.evolution.EvolutionTest$Click"
 
   /** Messages of every failure the dry run of the `formerClassName` evolutions reports from the given former field
     * names.
@@ -173,11 +173,13 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     resolveSchemaCompatibilityAfterRestore[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol(
       "incompatible"
     )
-    // An unversioned ADT declares nothing: registered by hand to read what its dry run would report
-    Evolutions.register(new EvolutionBuilder(classOf[AddedFieldWithoutAnnotation], 0, Array("a", "b")))
-    dryRunFailures(classOf[AddedFieldWithoutAnnotation].getName, Array("a")) shouldBe Seq(
-      "'b' field missing to instantiate class org.apache.flinkx.api.EvolutionTest$AddedFieldWithoutAnnotation. Use @added(since=<version>) annotation to indicate it has been added"
-    )
+    // An unversioned ADT declares nothing: its no-op evolution still reports what its dry run would hit
+    Evolutions.get(classOf[AddedFieldWithoutAnnotation], 0).dryRun(Array("a")).swap.map(_.map(_.getMessage)) shouldBe
+      Right(
+        Seq(
+          "'b' field missing to instantiate class org.apache.flinkx.api.evolution.EvolutionTest$AddedFieldWithoutAnnotation. Use @added(since=<version>) annotation to indicate it has been added"
+        )
+      )
   }
 
 }

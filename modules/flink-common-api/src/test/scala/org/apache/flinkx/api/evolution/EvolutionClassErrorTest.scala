@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flinkx.api.EvolutionTest._
+import EvolutionTest._
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
