@@ -2,13 +2,8 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{
-  DeletedReturnNull,
-  DeletedThrowOnInstance,
-  Renamed,
-  Unchanged
-}
-import org.apache.flinkx.api.evolution.{DeletedInstanceException, Evolution, Evolutions}
+import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Renamed, Unchanged}
+import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.util.ClassUtil
 
 /** Serializer for Scala 3 enum value. */
@@ -27,10 +22,10 @@ class Scala3EnumValueSerializer[T](
     companionClass.getFields.find(_.getName == valueName).map(_.get(null)).orNull.asInstanceOf[T]
 
   @transient private lazy val enumValue: T = evolution.getEnumValueEvolution(enumValueName) match {
-    case Unchanged              => valueOf(enumValueName)
-    case Renamed(currentName)   => valueOf(currentName)
-    case DeletedThrowOnInstance => throw DeletedInstanceException(s"${evolution.currentClass.getName}#$enumValueName")
-    case DeletedReturnNull      => null.asInstanceOf[T]
+    case Unchanged                => valueOf(enumValueName)
+    case Renamed(currentName)     => valueOf(currentName)
+    case Deleted(throwOnInstance) =>
+      Evolution.deletedInstance(s"${evolution.currentClass.getName}#$enumValueName", throwOnInstance)
   }
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {}
@@ -63,14 +58,15 @@ class Scala3EnumValueSerializerSnapshot[T](
   }
 
   override def writeSnapshot(out: DataOutputView): Unit = {
-    out.writeInt(enumVersion)
     out.writeUTF(evolution.className)
+    out.writeInt(enumVersion)
     out.writeUTF(enumValueName)
   }
 
   override def readSnapshot(readVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
+    val enumClassName = in.readUTF()
     enumVersion = if (readVersion > 1) in.readInt() else 0
-    evolution = Evolutions.get(in.readUTF(), enumVersion, cl)
+    evolution = Evolutions.get(enumClassName, enumVersion, cl)
     enumValueName = in.readUTF()
   }
 

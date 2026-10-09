@@ -7,9 +7,15 @@ object EvolutionErrorFixtures {
 
   @version(-1)
   case class WrongCurrentVersion()
-  object WrongCurrentVersion extends IsolatedEvolving[WrongCurrentVersion] {
-    val evolutions = Evolutions[WrongCurrentVersion]
-  }
+
+  // Not a literal, so the macros declaring the evolutions can't read it
+  val NotLiteral: Int = 1
+
+  @version(NotLiteral)
+  case class WrongVersionNotLiteral()
+
+  @version(1)
+  case class WrongSinceNotLiteral(@added(since = NotLiteral) a: String = "")
 
   @version(1)
   @added(since = 1)
@@ -52,16 +58,10 @@ object EvolutionErrorFixtures {
 
   @version(1)
   case class WrongSinceAboveVersion(@added(since = 2) a: String = "")
-  object WrongSinceAboveVersion extends IsolatedEvolving[WrongSinceAboveVersion] {
-    val evolutions = Evolutions[WrongSinceAboveVersion]
-  }
 
   @version(1)
   @deletedFields(since = 0, "removed")
   case class WrongSinceBelowOne(a: String)
-  object WrongSinceBelowOne extends IsolatedEvolving[WrongSinceBelowOne] {
-    val evolutions = Evolutions[WrongSinceBelowOne]
-  }
 
   case class WrongRenamedOnFieldWithoutVersion(@renamed(1, "a") a: String)
 

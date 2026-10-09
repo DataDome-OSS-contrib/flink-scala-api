@@ -15,7 +15,7 @@ import org.apache.flinkx.api.serializer.CoproductSerializer.CoproductSerializerS
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.isIncompatible
 
 class CoproductSerializer[T](
-    val evolution: Evolution[T],
+    val evolution: Option[Evolution[T]],
     val version: Int,
     val subtypeClasses: Array[Class[_]],
     val subtypeFqns: Array[String],
@@ -25,8 +25,8 @@ class CoproductSerializer[T](
   require(
     // The serialized form holds the index of the subtype, so the three arrays describe the same subtypes in one order
     subtypeClasses.length == subtypeSerializers.length && subtypeFqns.length == subtypeSerializers.length,
-    s"${evolution.currentClass} has ${subtypeClasses.length} subtype classes and ${subtypeFqns.length} subtype names for" +
-      s" ${subtypeSerializers.length} subtype serializers"
+    s"${evolution.fold("The sealed trait")(_.currentClass.toString)} has ${subtypeClasses.length} subtype classes and" +
+      s" ${subtypeFqns.length} subtype names for ${subtypeSerializers.length} subtype serializers"
   )
 
   override val isImmutableType: Boolean = subtypeSerializers.forall(_.isImmutableType)
@@ -83,7 +83,7 @@ class CoproductSerializer[T](
     } else {
       // A deleted former subtype throws or reads as null through the evolution of its own serializer
       val instance = subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.postEvolve(version, instance)
+      evolution.fold(instance)(_.postEvolve(version, instance))
     }
   }
 
@@ -101,6 +101,9 @@ class CoproductSerializer[T](
 
 object CoproductSerializer {
 
+  // Last version written before 2.4.0, recording no name of the sealed trait
+  private val NoClassnameVersion = 3
+
   private val CurrentVersion = 4
 
   class CoproductSerializerSnapshot[T](
@@ -111,10 +114,10 @@ object CoproductSerializer {
     // Empty constructor is required to instantiate this class during deserialization.
     def this() = this(None)
 
-    private[serializer] var evolution: Evolution[T] = _
-    private[serializer] var adtVersion: Int         = 0
-    private var subtypeClasses: Array[Class[_]]     = Array.empty
-    private var subtypeFqns: Array[String]          = Array.empty
+    private var evolution: Option[Evolution[T]] = None
+    private[serializer] var adtVersion: Int     = 0
+    private var subtypeClasses: Array[Class[_]] = Array.empty
+    private var subtypeFqns: Array[String]      = Array.empty
 
     // An adapter is mandatory to keep the compatibility during the transition to a CompositeTypeSerializerSnapshot
     // because its readSnapshot() method is final
@@ -130,7 +133,9 @@ object CoproductSerializer {
           subtypeFqns = s.subtypeFqns
         }
 
-        override def getCurrentOuterSnapshotVersion: Int = CurrentVersion
+        // Restored from a snapshot written before 2.4.0, the serializer knows no trait name: it writes that format again
+        override def getCurrentOuterSnapshotVersion: Int =
+          if (evolution.isDefined) CurrentVersion else NoClassnameVersion
 
         override def getNestedSerializers(outerSerializer: CoproductSerializer[T]): Array[TypeSerializer[_]] =
           outerSerializer.subtypeSerializers
@@ -141,15 +146,17 @@ object CoproductSerializer {
           new CoproductSerializer[T](evolution, adtVersion, subtypeClasses, subtypeFqns, nestedSerializers)
 
         override def writeOuterSnapshot(out: DataOutputView): Unit = {
-          out.writeUTF(evolution.className)
-          out.writeInt(adtVersion)
+          evolution.foreach { e =>
+            out.writeUTF(e.className)
+            out.writeInt(adtVersion)
+          }
           StringArraySerializer.INSTANCE.serialize(subtypeFqns, out)
         }
 
         override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-          val coproductClassName = if (readOuterSnapshotVersion > 3) in.readUTF() else null
-          adtVersion = if (readOuterSnapshotVersion > 3) in.readInt() else 0
-          evolution = Evolutions.get(coproductClassName, adtVersion, cl)
+          val coproductClassName = if (readOuterSnapshotVersion > NoClassnameVersion) Some(in.readUTF()) else None
+          adtVersion = if (readOuterSnapshotVersion > NoClassnameVersion) in.readInt() else 0
+          evolution = coproductClassName.map(Evolutions.get(_, adtVersion, cl))
           subtypeFqns = StringArraySerializer.INSTANCE.deserialize(in)
           subtypeClasses = subtypeFqns.map(Evolutions.get(_, adtVersion, cl).currentClass)
         }
@@ -164,7 +171,7 @@ object CoproductSerializer {
       if (readVersion == 2) {
         val len = in.readInt()
 
-        evolution = Evolutions.get(null, 0, userCodeClassLoader)
+        evolution = None // Written before 2.4.0, without the name of the sealed trait
         adtVersion = 0
 
         subtypeFqns = (0 until len).map(_ => in.readUTF()).toArray
@@ -179,13 +186,15 @@ object CoproductSerializer {
         adapter.readSnapshot(readVersion, in, userCodeClassLoader)
       }
 
+    override private[serializer] def adtEvolution: Option[Evolution[T]] = evolution
+
     override protected def resolveUnevolvedCompatibility(
         old: CoproductSerializerSnapshot[T]
     ): TypeSerializerSchemaCompatibility[T] = adapter.resolveSchemaCompatibility(old.adapter)
 
     /** `old.evolution` holds the evolutions migrating the very version the former data was written at. */
     override protected def isEvolutionRequired(old: CoproductSerializerSnapshot[T]): Boolean =
-      evolution.currentClass != null && !old.evolution.isAvoidable(old.adtVersion, old.subtypeFqns)
+      evolution.isDefined && old.evolution.exists(!_.isAvoidable(old.adtVersion, old.subtypeFqns))
 
     /** Check every former subtype is either declared deleted, or still a member of the current sealed trait, possibly
       * under another name, and that the schema of these surviving subtypes can itself be migrated.
@@ -194,13 +203,13 @@ object CoproductSerializer {
       val currentSubtypeSnapshots = adapter.getNestedSerializerSnapshots
       val formerSubtypeSnapshots  = old.adapter.getNestedSerializerSnapshots
       old.subtypeFqns.indices.iterator
-        .filterNot(i => Evolutions.isDeletedClass(old.subtypeClasses(i)))
+        .filterNot(i => Evolution.isDeletedClass(old.subtypeClasses(i)))
         .flatMap { i =>
           val formerFqn    = old.subtypeFqns(i)
           val currentIndex = subtypeClasses.indexOf(old.subtypeClasses(i))
           if (currentIndex < 0) {
             Some(
-              s"former subtype '$formerFqn' is no longer a member of ${evolution.currentClass}. " +
+              s"former subtype '$formerFqn' is no longer a member of $adtName. " +
                 renamedOrDeletedHint(formerFqn, "renamed or moved")
             )
           } else if (isIncompatible(currentSubtypeSnapshots(currentIndex), formerSubtypeSnapshots(i))) {

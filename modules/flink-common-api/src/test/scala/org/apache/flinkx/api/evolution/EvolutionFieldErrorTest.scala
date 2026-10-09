@@ -32,22 +32,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
       .map(_.map(_.getMessage).toSeq)
       .getOrElse(Seq.empty)
 
-  // An evolution outside the version range is never applied when it should, so it is refused when the declaration is
-  // applied instead of silently sending an unchanged schema down the migration path.
-  it should "throw when a field evolution has a since above the current version" in {
-    val exception = intercept[SinceNotAllowedException] {
-      Evolutions.get(classOf[WrongSinceAboveVersion], 1)
-    }
-    exception.getMessage shouldBe "An evolution of class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSinceAboveVersion is declared since=2: it must be between 1 and the current @version(1). Raise @version or fix the since of the annotation"
-  }
-
-  it should "throw when a field evolution has a since below 1" in {
-    val exception = intercept[SinceNotAllowedException] {
-      Evolutions.get(classOf[WrongSinceBelowOne], 1)
-    }
-    exception.getMessage shouldBe "An evolution of class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSinceBelowOne is declared since=0: it must be between 1 and the current @version(1). Raise @version or fix the since of the annotation"
-  }
-
   // Rejected where the declaration is read, at compile time
   it should "not compile a declaration with @added on a case class field without default value" in {
     assertDoesNotCompile(

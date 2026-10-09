@@ -36,10 +36,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
-        // An enum value is not versioned on its own: it's a member of its enum, whose version it is serialized with
-        val annotations = if typeTag.isEnum then ctx.inheritedAnnotations else ctx.annotations
-        val version     = Evolutions.findVersion(clazz, annotations.toSeq)
-        val fieldNames  = ctx.parameters.map(_.label).toArray
+        val version    = evolvable.version
+        val fieldNames = ctx.parameters.map(_.label).toArray
 
         val evolution = Evolutions.get(clazz, version)
 
@@ -80,7 +78,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz   = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version = Evolutions.findVersion(clazz, ctx.annotations.toSeq)
+        val version = evolvable.version
         // An enum value is named by its enum, and has no class of its own to serialize
         val subtypeClasses: Array[Class[?]] =
           if typeTag.isEnum then Array.empty else ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[?]]
@@ -92,14 +90,14 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
-              evolution = evolution.asInstanceOf[Evolution[T & Product]],
+              evolution = Some(evolution.asInstanceOf[Evolution[T & Product]]),
               version = version,
               enumValueNames = memberNames,
               enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             ).asInstanceOf[TypeSerializer[T]]
           else
             new CoproductSerializer[T](
-              evolution = evolution,
+              evolution = Some(evolution),
               version = version,
               subtypeClasses = subtypeClasses,
               subtypeFqns = memberNames,

@@ -4,7 +4,7 @@ import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
-import org.apache.flinkx.api.evolution.EvolutionErrorFixtures.WrongSinceAboveVersion
+import org.apache.flinkx.api.evolution.EvolutionTest.{FirstClaimingFormerName, SecondClaimingFormerName}
 import org.apache.flinkx.api.evolution.EvolutionRenamedTest.{Pet, Pony}
 import org.apache.flinkx.api.evolution.EvolvingTest.{Plain, plainCompanionInitialized}
 import org.apache.flinkx.api.serializer.CaseClassSerializer
@@ -70,10 +70,11 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   }
 
   it should "report the failure of a declaration when its class is looked up, and leave the others alone" in {
-    intercept[SinceNotAllowedException](Evolutions.get(classOf[WrongSinceAboveVersion], 1))
+    Evolutions.get(classOf[FirstClaimingFormerName], 1)
+    intercept[FormerClassConflictException](Evolutions.get(classOf[SecondClaimingFormerName], 1))
 
     Evolutions.get(classOf[Probe], 2).currentClass shouldBe classOf[Probe]
-    intercept[SinceNotAllowedException](Evolutions.get(classOf[WrongSinceAboveVersion], 1))
+    intercept[FormerClassConflictException](Evolutions.get(classOf[SecondClaimingFormerName], 1))
   }
 
   // The tasks of a TaskManager restore their state in parallel: a lookup landing while the declarations are applied

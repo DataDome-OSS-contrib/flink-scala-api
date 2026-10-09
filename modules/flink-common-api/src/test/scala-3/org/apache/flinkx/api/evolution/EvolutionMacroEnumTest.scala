@@ -25,7 +25,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with BeforeAndAft
     val evolution = Evolutions.get(classOf[FailureCategory], 1)
 
     evolution.getEnumValueEvolution("MISSING_TYPE") shouldBe Evolution.EnumValueEvolution.Renamed("MISSING")
-    evolution.getEnumValueEvolution("OTHER_TYPE") shouldBe Evolution.EnumValueEvolution.DeletedThrowOnInstance
+    evolution.getEnumValueEvolution("OTHER_TYPE") shouldBe Evolution.EnumValueEvolution.Deleted(throwOnInstance = true)
   }
 
 }

@@ -217,10 +217,6 @@ package object evolution {
     override def toString: String = s"deletedClasses($since,${formerClassNames.mkString("\"", "\",\"", "\"")})"
   }
 
-  /** Exception indicating version of `currentClass` must be greater or equal to zero. */
-  final case class VersionNotAllowedException(currentClass: Class[_], version: Int)
-      extends FlinkRuntimeException(s"Current version of $currentClass must be >= 0, got @version($version)")
-
   /** How to declare a former member, subtype or enum value, that is no longer one of the current ADT.
     *
     * @param renamedAs
@@ -260,13 +256,6 @@ package object evolution {
         s"Cannot add '$field'. Field already exists in $clazz. Existing fields: ${fields.mkString("[\"", "\",\"", "\"]")}"
       )
 
-  /** Exception indicating an evolution of `currentClass` declares a `formerVersion` outside its version range. */
-  final case class SinceNotAllowedException(currentClass: Class[_], formerVersion: Int, currentVersion: Int)
-      extends FlinkRuntimeException(
-        s"An evolution of $currentClass is declared since=$formerVersion: it must be between 1 and the current" +
-          s" @version($currentVersion). Raise @version or fix the since of the annotation"
-      )
-
   /** Message of a versioned ADT whose companion doesn't extend `Evolving`, reported where its type information is
     * derived.
     */
@@ -275,6 +264,19 @@ package object evolution {
     s"$adt declares @version, so its companion must declare its evolutions:" +
       s" object $name extends Evolving[$name] { val evolutions = Evolutions[$name] }"
   }
+
+  /** Message of a negative `@version`, reported by the macros declaring the evolutions. */
+  private[api] def versionNotAllowed(adt: String, version: Int): String =
+    s"Current version of $adt must be >= 0, got @version($version)"
+
+  /** Message of a version that is not an integer literal, which the macros declaring the evolutions can't read. */
+  private[api] def notLiteral(annotation: String, parameter: String, target: String): String =
+    s"The $parameter of @$annotation on $target must be an integer literal"
+
+  /** Message of a field evolution declared outside the version range of its ADT. */
+  private[api] def sinceNotAllowed(adt: String, since: Int, version: Int): String =
+    s"An evolution of $adt is declared since=$since: it must be between 1 and the current @version($version)." +
+      " Raise @version or fix the since of the annotation"
 
   /** Message of an `@added` field without default value, reported by the macros declaring the evolutions. */
   private[api] def addedFieldWithoutDefault(adt: String, field: String): String =

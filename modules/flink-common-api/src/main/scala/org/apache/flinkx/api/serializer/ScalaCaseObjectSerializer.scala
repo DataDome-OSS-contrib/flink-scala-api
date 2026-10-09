@@ -2,15 +2,15 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
+import org.apache.flinkx.api.evolution.Evolution.DeletedEvolution
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
 
 class ScalaCaseObjectSerializer[T](val evolution: Evolution[T], val version: Int) extends ImmutableSerializer[T] {
 
-  @transient private lazy val caseObject: T = if (evolution.isDeleted) {
-    evolution.returnNullOrThrow
-  } else {
-    evolution.currentClass.getField("MODULE$").get(null).asInstanceOf[T]
+  @transient private lazy val caseObject: T = evolution match {
+    case deleted: DeletedEvolution[T] => deleted.deletedInstance
+    case _                            => evolution.currentClass.getField("MODULE$").get(null).asInstanceOf[T]
   }
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {}
@@ -44,13 +44,13 @@ object ScalaCaseObjectSerializer {
     }
 
     override def writeSnapshot(out: DataOutputView): Unit = {
-      out.writeInt(caseObjectVersion)
       out.writeUTF(evolution.className)
+      out.writeInt(caseObjectVersion)
     }
 
     override def readSnapshot(readVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-      caseObjectVersion = if (readVersion > 1) in.readInt() else 0
       val caseObjectClassName = in.readUTF()
+      caseObjectVersion = if (readVersion > 1) in.readInt() else 0
       evolution = Evolutions.get(caseObjectClassName, caseObjectVersion, cl)
     }
 

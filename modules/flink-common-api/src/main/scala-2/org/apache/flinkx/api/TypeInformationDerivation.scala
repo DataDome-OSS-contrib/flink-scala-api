@@ -29,7 +29,7 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
-        val version    = Evolutions.findVersion(clazz, ctx.annotations)
+        val version    = implicitly[Evolvable[T]].version
         val fieldNames = ctx.parameters.map(_.label).toArray
 
         val evolution = Evolutions.get(clazz, version)
@@ -67,14 +67,14 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version        = Evolutions.findVersion(clazz, ctx.annotations)
+        val version        = implicitly[Evolvable[T]].version
         val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
         val subtypeFqns    = subtypeClasses.map(_.getName)
 
         val evolution = Evolutions.get(clazz, version)
 
         val serializer = new CoproductSerializer[T](
-          evolution = evolution,
+          evolution = Some(evolution),
           version = version,
           subtypeClasses = subtypeClasses,
           subtypeFqns = subtypeFqns,

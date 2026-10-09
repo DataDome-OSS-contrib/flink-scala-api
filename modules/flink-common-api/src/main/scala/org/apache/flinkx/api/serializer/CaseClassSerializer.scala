@@ -30,6 +30,7 @@ import org.apache.flink.api.common.typeutils.{
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
+import org.apache.flinkx.api.evolution.Evolution.DeletedEvolution
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.isIncompatible
@@ -76,7 +77,8 @@ class CaseClassSerializer[T <: Product](
   @transient private lazy val constructor = lookupConstructor(tupleClass)
 
   // Cache to check for fast path on first record only
-  @transient private lazy val isEvolutionAvoidable = evolution.isAvoidable(version, fieldNames)
+  @transient private lazy val isEvolutionAvoidable = fieldNames.isEmpty || // Keep compatibility with versions < 2.4.0
+    evolution.isAvoidable(version, fieldNames)
 
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
@@ -160,7 +162,7 @@ class CaseClassSerializer[T <: Product](
       source.skipBytesToRead(nullPadding.length)
       null.asInstanceOf[T]
     } else {
-      val fieldValues = if (isEvolutionAvoidable || fieldNames.isEmpty) { // Keep compatibility with versions < 2.4.0
+      val fieldValues = if (isEvolutionAvoidable) {
         val fields = new Array[AnyRef](sourceArity)
         var i      = 0
         while (i < sourceArity) {
@@ -178,10 +180,9 @@ class CaseClassSerializer[T <: Product](
         evolution.applyFieldEvolutions(fieldMap)
         evolution.toFieldValues(fieldMap)
       }
-      if (evolution.isDeleted) {
-        evolution.returnNullOrThrow
-      } else {
-        evolution.postEvolve(version, createInstance(fieldValues))
+      evolution match {
+        case deleted: DeletedEvolution[T] => deleted.deletedInstance
+        case _                            => evolution.postEvolve(version, createInstance(fieldValues))
       }
     }
   }
@@ -219,10 +220,10 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
-  private[serializer] var evolution: Evolution[T] = _
-  private var isCaseClassImmutable: Boolean       = false
-  private[serializer] var adtVersion: Int         = 0
-  private var fieldNames: Array[String]           = Array.empty
+  private var evolution: Evolution[T]       = _
+  private var isCaseClassImmutable: Boolean = false
+  private[serializer] var adtVersion: Int   = 0
+  private var fieldNames: Array[String]     = Array.empty
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
@@ -258,6 +259,8 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     evolution = Evolutions.get(caseClassName, adtVersion, cl)
     fieldNames = if (readOuterSnapshotVersion > 3) StringArraySerializer.INSTANCE.deserialize(in) else Array.empty
   }
+
+  override private[serializer] def adtEvolution: Option[Evolution[T]] = Option(evolution)
 
   override protected def resolveUnevolvedCompatibility(
       old: ScalaCaseClassSerializerSnapshot[T]

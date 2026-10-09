@@ -29,6 +29,22 @@ class EvolutionMacroValidationTest extends AnyFlatSpec with Matchers {
     assertDoesNotCompile("Evolutions[EvolutionErrorFixtures.WrongAddedOnFieldWithoutVersion]")
   }
 
+  it should "reject a negative version" in {
+    assertDoesNotCompile("Evolutions[EvolutionErrorFixtures.WrongCurrentVersion]")
+  }
+
+  // The version and the since are read at compile time, where only a literal has a value
+  it should "reject a version or a since that is not an integer literal" in {
+    assertDoesNotCompile("Evolutions[EvolutionErrorFixtures.WrongVersionNotLiteral]")
+    assertDoesNotCompile("Evolutions[EvolutionErrorFixtures.WrongSinceNotLiteral]")
+  }
+
+  // An evolution outside the version range is never applied when it should
+  it should "reject a field evolution whose since is outside the version range" in {
+    assertDoesNotCompile("Evolutions[EvolutionErrorFixtures.WrongSinceAboveVersion]")
+    assertDoesNotCompile("Evolutions[EvolutionErrorFixtures.WrongSinceBelowOne]")
+  }
+
   it should "reject an added field without default value" in {
     assertDoesNotCompile("Evolutions[EvolutionErrorFixtures.WrongAddedOnFieldWithoutDefaultValue]")
   }

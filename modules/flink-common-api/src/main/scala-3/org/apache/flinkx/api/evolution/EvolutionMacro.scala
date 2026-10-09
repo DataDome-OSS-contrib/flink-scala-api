@@ -1,6 +1,5 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{DeletedReturnNull, DeletedThrowOnInstance, Renamed}
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
 import org.apache.flinkx.api.AnnotationTrees
 
@@ -28,7 +27,13 @@ private[evolution] object EvolutionMacro:
       val companion = Option.when(symbol.companionModule.exists)(symbol.companionModule.termRef)
       val evolving  = Symbol.requiredClass(classOf[Evolving[?]].getName).typeRef.appliedTo(symbol.typeRef)
       if !companion.exists(_ <:< evolving) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
-    '{ Evolvable.instance.asInstanceOf[Evolvable[T]] }
+    // An enum value case class is not versioned on its own: it's serialized with the version of its enum
+    val enumOfValue =
+      if symbol.flags.is(Flags.Enum) && symbol.flags.is(Flags.Case) then
+        TypeRepr.of[T].baseClasses.find(base => base != symbol && base.flags.is(Flags.Enum))
+      else None
+    val version = Expr(versionOf(enumOfValue.getOrElse(symbol)))
+    '{ new Evolvable[T]($version) }
 
   /** Whether the given symbol declares a schema version of its own. */
   private def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
@@ -62,10 +67,17 @@ private[evolution] object EvolutionMacro:
           .map(tag => '{ $tag.runtimeClass })
           .getOrElse(report.errorAndAbort(s"No ClassTag for ${tpe.show}"))
 
-  /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. */
+  /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. Rejects a version
+    * that is negative or not an integer literal.
+    */
   private def versionOf(using q: Quotes)(symbol: q.reflect.Symbol): Int = {
     import q.reflect.*
-    symbol.annotations.find(_.tpe <:< TypeRepr.of[version]).flatMap(intArgument(_, "current")).getOrElse(0)
+    symbol.annotations.find(_.tpe <:< TypeRepr.of[version]).fold(0) { annotation =>
+      val version = intArgument(annotation, "current")
+        .getOrElse(report.errorAndAbort(notLiteral("version", "current", symbol.fullName)))
+      if version < 0 then report.errorAndAbort(versionNotAllowed(symbol.fullName, version))
+      version
+    }
   }
 
   /** The literal `Int` the given annotation passes to the named parameter, its first one, if it is a literal. */
@@ -123,6 +135,15 @@ private[evolution] object EvolutionMacro:
 
     def is[A: Type](term: Term): Boolean = term.tpe <:< TypeRepr.of[A]
 
+    def nameOf(term: Term): String = term.tpe.typeSymbol.name
+
+    /** The literal `since` of a field evolution, rejected outside the version range of the ADT. */
+    def sinceOf(term: Term, target: String): Expr[Int] =
+      val since = intArgument(term, "since").getOrElse(report.errorAndAbort(notLiteral(nameOf(term), "since", target)))
+      // An evolution outside the version range is never applied when it should
+      if since < 1 || since > version then report.errorAndAbort(sinceNotAllowed(symbol.fullName, since, version))
+      Expr(since)
+
     /** The annotations of a symbol, read whole so that splicing them is safe. */
     def annotationsOf(owner: Symbol): List[Term] = {
       AnnotationTrees.readWhole(List(owner))
@@ -133,27 +154,22 @@ private[evolution] object EvolutionMacro:
       annotationsOf(symbol).collect {
         case term if is[renamed](term) =>
           val a = term.asExprOf[renamed]
-          '{ val r = $a; $builder.registerFormerClass(r.formerName, $clazz, r.since) }
+          '{ val r = $a; $builder.renameClass(r.formerName, r.since) }
         case term if is[deletedFields](term) =>
-          val a = term.asExprOf[deletedFields]
-          '{
-            val d = $a
-            d.formerNames.foreach(name => $builder.fieldEvolutions += Delete(d.since, $clazz, name))
-          }
+          val a     = term.asExprOf[deletedFields]
+          val since = sinceOf(term, symbol.fullName)
+          '{ $a.formerNames.foreach(name => $builder.addFieldEvolution(Delete($since, $clazz, name))) }
         case term if is[deletedClasses](term) && isEnum =>
           val a = term.asExprOf[deletedClasses]
           '{
-            val d       = $a
-            val deleted = if (d.throwOnInstance) DeletedThrowOnInstance else DeletedReturnNull
-            d.formerClassNames.foreach(name => $builder.formerEnumValues(name) = deleted)
+            val d = $a
+            d.formerClassNames.foreach(name => $builder.deleteEnumValue(name, d.throwOnInstance))
           }
         case term if is[deletedClasses](term) =>
           val a = term.asExprOf[deletedClasses]
           '{
             val d = $a
-            d.formerClassNames.foreach(name =>
-              $builder.registerDeletedFormerClass(name, $clazz, d.since, d.throwOnInstance)
-            )
+            d.formerClassNames.foreach(name => $builder.deleteClass(name, d.since, d.throwOnInstance))
           }
         case term if is[postEvolution[?]](term) =>
           term.tpe.typeArgs.head.asType match
@@ -170,37 +186,28 @@ private[evolution] object EvolutionMacro:
 
     def fieldAnnotations(builder: Expr[EvolutionBuilder[T]], clazz: Expr[Class[T]]): List[Expr[Unit]] =
       parametersOf(symbol).zipWithIndex.flatMap { case (parameter, index) =>
-        val label = Expr(parameter.name)
+        val label  = Expr(parameter.name)
+        val target = s"${symbol.fullName}.${parameter.name}"
         annotationsOf(parameter).collect {
           case term if is[added](term) =>
             if !parameter.flags.is(Flags.HasDefault) then
               report.errorAndAbort(addedFieldWithoutDefault(symbol.fullName, parameter.name))
-            val a = term.asExprOf[added]
-            '{
-              $builder.fieldEvolutions += Add(
-                $a.since,
-                $clazz,
-                $label,
-                ${ Expr(index) }
-              )
-            }
+            val since = sinceOf(term, target)
+            '{ $builder.addFieldEvolution(Add($since, $clazz, $label, ${ Expr(index) })) }
           case term if is[renamed](term) =>
-            val a = term.asExprOf[renamed]
-            '{ val r = $a; $builder.fieldEvolutions += Rename(r.since, $clazz, r.formerName, $label) }
+            val a     = term.asExprOf[renamed]
+            val since = sinceOf(term, target)
+            '{ $builder.addFieldEvolution(Rename($since, $clazz, $a.formerName, $label)) }
           case term if is[transformed[?, ?]](term) =>
             (term.tpe.typeArgs.head.asType, term.tpe.typeArgs.last.asType) match
               case ('[from], '[to]) =>
-                val t = term.asExprOf[transformed[from, to]]
-                intArgument(term, "since") match
-                  // The mapper is read on first use: the companion holding it may still be initializing
-                  case Some(since) =>
-                    '{
-                      lazy val tr = $t
-                      $builder.fieldEvolutions +=
-                        Transform[from, to](${ Expr(since) }, $clazz, $label, (a: from) => tr.mapper(a))
-                    }
-                  case None =>
-                    '{ val tr = $t; $builder.fieldEvolutions += Transform(tr.since, $clazz, $label, tr.mapper) }
+                val t     = term.asExprOf[transformed[from, to]]
+                val since = sinceOf(term, target)
+                // The mapper is read on first use: the companion holding it may still be initializing
+                '{
+                  lazy val tr = $t
+                  $builder.addFieldEvolution(Transform[from, to]($since, $clazz, $label, (a: from) => tr.mapper(a)))
+                }
         }
       }
 
@@ -213,7 +220,7 @@ private[evolution] object EvolutionMacro:
           annotationsOf(child).collect {
             case term if is[renamed](term) =>
               val a = term.asExprOf[renamed]
-              '{ $builder.formerEnumValues($a.formerName) = Renamed($valueName) }
+              '{ $builder.renameEnumValue($a.formerName, $valueName) }
           }
         }
 
@@ -221,8 +228,6 @@ private[evolution] object EvolutionMacro:
     def validate(): Unit = {
       val hasVersionedAncestor = TypeRepr.of[T].baseClasses.filterNot(_ == symbol).exists(isVersioned)
       val isCoproduct          = children.nonEmpty
-
-      def nameOf(term: Term): String = term.tpe.typeSymbol.name
 
       def reject(term: Term, target: String): Nothing = report.errorAndAbort(evolutionNotAllowed(nameOf(term), target))
 
