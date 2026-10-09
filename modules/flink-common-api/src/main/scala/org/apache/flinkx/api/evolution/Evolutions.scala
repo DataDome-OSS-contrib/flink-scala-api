@@ -1,8 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.{Internal, VisibleForTesting}
-import org.apache.flinkx.api.evolution.Evolution.DeletedClass
-import org.apache.flinkx.api.evolution.EvolutionBuilder.AdtDeclaration
+import org.apache.flinkx.api.evolution.Evolution.{DeletedEvolution, NoEvolution}
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.collection.concurrent
@@ -56,9 +55,9 @@ final class Evolutions[T](
   *   - At restore time, the ADT serializer snapshots [[get]] the evolution of the former name and version they record,
   *     and at deserialization time the restored serializers apply it.
   *
-  * Class renames and deletions are resolved through [[EvolutionBuilder.registerFormerClass]] /
-  * [[EvolutionBuilder.registerDeletedFormerClass]], which translate the fully-qualified class names recorded in the
-  * snapshot into the current classes (or a deletion marker).
+  * Class renames and deletions are resolved through [[EvolutionBuilder.renameClass]] /
+  * [[EvolutionBuilder.deleteClass]], which translate the fully-qualified class names recorded in the snapshot into the
+  * current classes (or a deletion marker).
   *
   * Packaging: the declarations are kept per class loader looking them up, the one of the job, so two jobs sharing this
   * library never read each other's. With the default child-first class loading, this library lives in the application
@@ -113,15 +112,17 @@ object Evolutions extends EvolutionsFactory {
       *   if two evolutions declared for the same version resolve to different current classes
       */
     private def sortDeclarations(className: String, evolutions: Array[Evolution[_]]): Array[Evolution[_]] = {
-      def descr(currentClass: Class[_]) = if (isDeletedClass(currentClass)) "deleted" else s"renamed to $currentClass"
+      def descr(evolution: Evolution[_]) = evolution match {
+        case _: DeletedEvolution[_] => "deleted"
+        case _                      => s"renamed to ${evolution.currentClass}"
+      }
 
       val declarations = evolutions.distinctBy(evolution => (evolution.formerVersion, evolution.currentClass))
       declarations
         .groupBy(_.formerVersion)
         .collectFirst { case (_, sameVersion) if sameVersion.length > 1 => sameVersion }
         .foreach { conflicting =>
-          val classes = conflicting.map(_.currentClass)
-          throw FormerClassConflictException(className, descr(classes(0)), descr(classes(1)))
+          throw FormerClassConflictException(className, descr(conflicting(0)), descr(conflicting(1)))
         }
       // Evolutions.get returns the first evolution whose version is at least the former version being restored
       declarations.sortBy(_.formerVersion)
@@ -145,8 +146,8 @@ object Evolutions extends EvolutionsFactory {
     catch { case _: ClassNotFoundException => } // An ADT without companion object cannot be looked up by name
   }
 
-  private def register(registry: Registry, declaration: AdtDeclaration): Unit =
-    declaration.byClassName.foreachEntry(registry.declare)
+  private def register(registry: Registry, byClassName: Map[String, Array[Evolution[_]]]): Unit =
+    byClassName.foreachEntry(registry.declare)
 
   /** The registry of the given class loader, created on first use. */
   private def registryOf(classLoader: ClassLoader): Registry =
@@ -195,9 +196,6 @@ object Evolutions extends EvolutionsFactory {
   private def declareScannedCompanions(cl: ClassLoader): Unit =
     registryOf(cl).companions.foreach(declare(_, cl))
 
-  /** `true` if the given current class is the marker of a former class registered as deleted. */
-  def isDeletedClass(currentClass: Class[_]): Boolean = currentClass == DeletedClass
-
   /** Return the [[Evolution]] declared for the given former ADT class name at the given former version, if any.
     *
     * Unlike [[get]], never loads the class of that name, so it also answers for the names that designate no class
@@ -229,7 +227,7 @@ object Evolutions extends EvolutionsFactory {
     registry.find(formerName, formerVersion).map(_.asInstanceOf[Evolution[T]])
   }
 
-  /** Return the [[Evolution]] the given ADT class declares at the given version, or [[Evolution.noEvolution]] when it
+  /** Return the [[Evolution]] the given ADT class declares at the given version, or [[Evolution.NoEvolution]] when it
     * declares none.
     *
     * @throws EvolutionNotDeclaredException
@@ -238,10 +236,10 @@ object Evolutions extends EvolutionsFactory {
   def get[T](clazz: Class[T], currentVersion: Int): Evolution[T] =
     find[T](clazz.getName, currentVersion, clazz.getClassLoader).getOrElse {
       if (currentVersion > 0) throw EvolutionNotDeclaredException(clazz.getName, currentVersion, restoring = false)
-      Evolution.noEvolution(clazz, currentVersion)
+      new NoEvolution(clazz, currentVersion)
     }
 
-  /** Return the [[Evolution]] associated with the given former ADT class name, or [[Evolution.noEvolution]] of the
+  /** Return the [[Evolution]] associated with the given former ADT class name, or [[Evolution.NoEvolution]] of the
     * class loaded by name otherwise.
     *
     * A former name that no class bears anymore is declared by another companion, found by scanning the jars.
@@ -250,28 +248,16 @@ object Evolutions extends EvolutionsFactory {
     *   if no evolution is declared for that name, and it can't be loaded either
     */
   def get[T](formerClassName: String, formerVersion: Int, cl: ClassLoader): Evolution[T] =
-    if (formerClassName == null) Evolution.NoEvolution.asInstanceOf[Evolution[T]] // Snapshot written before 2.4.0
-    else
-      find[T](formerClassName, formerVersion, cl).getOrElse {
-        // A class that loads declares itself, through its own companion: nothing else has to be looked for
-        val currentClass =
-          try Some(Class.forName(formerClassName, false, cl).asInstanceOf[Class[T]])
-          catch { case _: ClassNotFoundException => None }
-        currentClass.map(Evolution.noEvolution(_, formerVersion)).getOrElse {
-          declareScannedCompanions(cl)
-          lookUp[T](formerClassName, formerVersion, cl)
-            .getOrElse(throw EvolutionNotDeclaredException(formerClassName, formerVersion))
-        }
+    find[T](formerClassName, formerVersion, cl).getOrElse {
+      // A class that loads declares itself, through its own companion: nothing else has to be looked for
+      val currentClass =
+        try Some(Class.forName(formerClassName, false, cl).asInstanceOf[Class[T]])
+        catch { case _: ClassNotFoundException => None }
+      currentClass.map(new NoEvolution(_, formerVersion)).getOrElse {
+        declareScannedCompanions(cl)
+        lookUp[T](formerClassName, formerVersion, cl)
+          .getOrElse(throw EvolutionNotDeclaredException(formerClassName, formerVersion))
       }
-
-  /** Current schema version the given annotations declare for the given ADT class, 0 when they declare none.
-    *
-    * @throws VersionNotAllowedException
-    *   if the declared version is negative
-    */
-  private[api] def findVersion(currentClass: Class[_], annotations: Seq[Any]): Int =
-    annotations.collectFirst { case declared: version => declared.current }.fold(0) { declared =>
-      if (declared >= 0) declared else throw VersionNotAllowedException(currentClass, declared)
     }
 
   /** Every [[Evolution]] registered by the given class loader, by class name. */

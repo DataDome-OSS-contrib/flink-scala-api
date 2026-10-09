@@ -15,8 +15,13 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
 
   @transient private lazy val log: Logger = LoggerFactory.getLogger(getClass)
 
-  /** The evolution of the ADT, resolved from the class name the snapshot records. */
-  private[serializer] def evolution: Evolution[T]
+  /** The evolution of the ADT, resolved from the class name the snapshot records, if it records one: a snapshot written
+    * before 2.4.0 may not.
+    */
+  private[serializer] def adtEvolution: Option[Evolution[T]]
+
+  /** The current ADT class, for the messages. */
+  protected def adtName: String = adtEvolution.fold("the ADT")(_.currentClass.toString)
 
   /** Schema version of the ADT this snapshot describes, as declared by `@version` at write time. */
   private[serializer] def adtVersion: Int
@@ -38,10 +43,14 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
   override def resolveSchemaCompatibility(
       oldSnapshot: TypeSerializerSnapshot[T]
   ): TypeSerializerSchemaCompatibility[T] = oldSnapshot match {
-    case old: S if isSameClass(old) && isEvolutionRequired(old) => resolveEvolvingCompatibility(old)
-    case old: S if isSameClass(old)                             => resolveUnevolvedCompatibility(old)
-    case _                                                      => TypeSerializerSchemaCompatibility.incompatible()
+    case old if old.getClass eq getClass => resolveSameKindCompatibility(old.asInstanceOf[S])
+    case _                               => TypeSerializerSchemaCompatibility.incompatible()
   }
+
+  private def resolveSameKindCompatibility(old: S): TypeSerializerSchemaCompatibility[T] =
+    if (isOtherClass(old)) TypeSerializerSchemaCompatibility.incompatible()
+    else if (isEvolutionRequired(old)) resolveEvolvingCompatibility(old)
+    else resolveUnevolvedCompatibility(old)
 
   private def resolveEvolvingCompatibility(old: S): TypeSerializerSchemaCompatibility[T] = {
     val reason =
@@ -52,19 +61,16 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
         )
       } else checkMigration(old)
     reason.fold(TypeSerializerSchemaCompatibility.compatibleAfterMigration[T]()) { reason =>
-      log.warn(s"Cannot migrate ${evolution.currentClass} from version ${old.adtVersion}: $reason")
+      log.warn(s"Cannot migrate $adtName from version ${old.adtVersion}: $reason")
       TypeSerializerSchemaCompatibility.incompatible()
     }
   }
 
-  /** Whether the former snapshot describes the very same ADT.
-    *
-    * `old.evolution` has been resolved when the snapshot was read, so a renamed or moved former ADT already carries the
-    * current one. A snapshot written before 2.4.0 may record no ADT name at all, leaving nothing to compare.
-    */
-  private def isSameClass(old: S): Boolean =
-    evolution.currentClass == null || old.evolution.currentClass == null ||
-      evolution.currentClass.getName == old.evolution.currentClass.getName
+  /** Whether the former snapshot is known to describe another ADT. */
+  private def isOtherClass(old: S): Boolean = (adtEvolution, old.adtEvolution) match {
+    case (Some(current), Some(former)) => current.currentClass.getName != former.currentClass.getName
+    case _                             => false
+  }
 
 }
 
