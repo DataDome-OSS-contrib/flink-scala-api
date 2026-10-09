@@ -6,6 +6,7 @@ import scala.reflect.*
 
 import magnolia1.{CallByNeed, CaseClass, SealedTrait, Monadic}
 import magnolia1.Macro.*
+import org.apache.flinkx.api.evolution.Evolvable
 
 // Typeclass derivation providing `ClassTag` and `TypeTag` givens.
 // Copied & modified from Magnolia, since the Scala 3 version disallows adding constraints to `join` and `split`.
@@ -14,13 +15,15 @@ trait CommonTaggedDerivation[TypeClass[_]]:
 
   def join[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T]
 
   inline def derivedMirrorProduct[A](product: Mirror.ProductOf[A])(using
       ClassTag[A],
       TypeTag[A]
   ): Typeclass[A] =
+    AnnotationTrees.readWholeOf[A] // Must run before the annotations of A are spliced below
     val parameters = IArray(
       getParams_[A, product.MirroredElemLabels, product.MirroredElemTypes](
         paramAnns[A].to(Map),
@@ -125,7 +128,8 @@ trait CommonTaggedDerivation[TypeClass[_]]:
 trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
   def split[T](ctx: SealedTrait[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T]
 
   transparent inline def subtypes[T, SubtypeTuple <: Tuple](
@@ -136,6 +140,7 @@ trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
       case _: EmptyTuple =>
         Nil
       case _: (s *: tail) =>
+        AnnotationTrees.readWholeOf[s] // Must run before the annotations of the subtype are spliced below
         new SealedTrait.Subtype(
           typeInfo[s],
           IArray.from(anns[s]),
@@ -159,6 +164,7 @@ trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
         ) :: subtypes[T, tail](m, idx + 1)
 
   inline def derivedMirrorSum[A](sum: Mirror.SumOf[A])(using ClassTag[A], TypeTag[A]): Typeclass[A] =
+    AnnotationTrees.readWholeOf[A] // Must run before the annotations of A are spliced below
     val sealedTrait = SealedTrait(
       typeInfo[A],
       IArray(subtypes[A, sum.MirroredElemTypes](sum)*),
