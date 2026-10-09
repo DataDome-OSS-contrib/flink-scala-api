@@ -54,9 +54,7 @@ private[api] object EvolutionMacro {
         c.abort(c.enclosingPosition, companionNotEvolving(symbol.fullName))
       }
     }
-    c.Expr[Evolvable[T]](
-      q"_root_.org.apache.flinkx.api.evolution.Evolvable.instance.asInstanceOf[_root_.org.apache.flinkx.api.evolution.Evolvable[$tpe]]"
-    )
+    c.Expr[Evolvable[T]](q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe](${versionOf(c)(symbol)})")
   }
 
   /** The subtypes the derivation serializes, with the intermediate sealed traits it flattens on the way.
@@ -103,12 +101,16 @@ private[api] object EvolutionMacro {
       symbol.annotations.exists(_.tree.tpe.typeSymbol == versionSymbol(c))
     } catch { case NonFatal(_) => false }
 
-  /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. */
+  /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. Rejects a version
+    * that is negative or not an integer literal.
+    */
   private def versionOf(c: blackbox.Context)(symbol: c.Symbol): Int =
-    symbol.annotations
-      .find(_.tree.tpe.typeSymbol == versionSymbol(c))
-      .flatMap(intArgument(c)(_, "current"))
-      .getOrElse(0)
+    symbol.annotations.find(_.tree.tpe.typeSymbol == versionSymbol(c)).fold(0) { annotation =>
+      val version = intArgument(c)(annotation, "current")
+        .getOrElse(c.abort(c.enclosingPosition, notLiteral("version", "current", symbol.fullName)))
+      if (version < 0) c.abort(c.enclosingPosition, versionNotAllowed(symbol.fullName, version))
+      version
+    }
 
   /** The literal `Int` the given annotation passes to the named parameter, its first one, if it is a literal. */
   private def intArgument(c: blackbox.Context)(annotation: c.universe.Annotation, name: String): Option[Int] = {
@@ -157,7 +159,18 @@ private[api] object EvolutionMacro {
     val Added                                  = annotationSymbol("added")
     val Transformed                            = annotationSymbol("transformed")
 
-    def versionOf(owner: Symbol): Int = EvolutionMacro.versionOf(c)(owner)
+    val version = EvolutionMacro.versionOf(c)(symbol)
+
+    def nameOf(annotation: Annotation): String = annotation.tree.tpe.typeSymbol.name.decodedName.toString
+
+    /** The literal `since` of a field evolution, rejected outside the version range of the ADT. */
+    def sinceOf(annotation: Annotation, target: String): Int = {
+      val since = intArgument(c)(annotation, "since")
+        .getOrElse(c.abort(c.enclosingPosition, notLiteral(nameOf(annotation), "since", target)))
+      // An evolution outside the version range is never applied when it should
+      if (since < 1 || since > version) c.abort(c.enclosingPosition, sinceNotAllowed(symbol.fullName, since, version))
+      since
+    }
 
     def is(annotation: Annotation, annotationType: Symbol): Boolean =
       annotation.tree.tpe.typeSymbol == annotationType
@@ -169,13 +182,15 @@ private[api] object EvolutionMacro {
 
     def classAnnotations(builder: TermName, clazz: TermName): List[Tree] = symbol.annotations.collect {
       case a if is(a, Renamed) =>
-        q"""val r = ${instanceOf(a)}; $builder.registerFormerClass(r.formerName, $clazz, r.since)"""
+        q"""val r = ${instanceOf(a)}; $builder.renameClass(r.formerName, r.since)"""
       case a if is(a, DeletedFields) =>
-        q"""val d = ${instanceOf(a)}
-            d.formerNames.foreach(name => $builder.fieldEvolutions += $evolution.FieldEvolution.Delete(d.since, $clazz, name))"""
+        val since = sinceOf(a, symbol.fullName)
+        q"""${instanceOf(a)}.formerNames.foreach(name =>
+              $builder.addFieldEvolution($evolution.FieldEvolution.Delete($since, $clazz, name))
+            )"""
       case a if is(a, DeletedClasses) =>
         q"""val d = ${instanceOf(a)}
-            d.formerClassNames.foreach(name => $builder.registerDeletedFormerClass(name, $clazz, d.since, d.throwOnInstance))"""
+            d.formerClassNames.foreach(name => $builder.deleteClass(name, d.since, d.throwOnInstance))"""
       case a if is(a, PostEvolution) =>
         // The mapper is read on first use: the companion holding it may still be initializing
         val post = TermName(c.freshName("post$"))
@@ -187,44 +202,38 @@ private[api] object EvolutionMacro {
 
     def fieldAnnotations(builder: TermName, clazz: TermName): List[Tree] =
       parameters.zipWithIndex.flatMap { case (parameter, index) =>
-        val label = parameter.name.decodedName.toString
+        val label  = parameter.name.decodedName.toString
+        val target = s"${symbol.fullName}.$label"
         parameter.annotations.collect {
           case a if is(a, Added) =>
             if (!parameter.asTerm.isParamWithDefault) {
               c.abort(c.enclosingPosition, addedFieldWithoutDefault(symbol.fullName, label))
             }
-            q"""$builder.fieldEvolutions += $evolution.FieldEvolution.Add(${instanceOf(
-                a
-              )}.since, $clazz, $label, $index)"""
+            q"""$builder.addFieldEvolution($evolution.FieldEvolution.Add(${sinceOf(
+                a,
+                target
+              )}, $clazz, $label, $index))"""
           case a if is(a, Renamed) =>
-            q"""val r = ${instanceOf(a)}
-                $builder.fieldEvolutions += $evolution.FieldEvolution.Rename(r.since, $clazz, r.formerName, $label)"""
+            q"""$builder.addFieldEvolution(
+                  $evolution.FieldEvolution.Rename(${sinceOf(a, target)}, $clazz, ${instanceOf(a)}.formerName, $label)
+                )"""
           case a if is(a, Transformed) =>
-            intArgument(c)(a, "since") match {
-              // The mapper is read on first use: the companion holding it may still be initializing
-              case Some(since) =>
-                val List(from, to) = a.tree.tpe.typeArgs.map(TypeTree(_))
-                val mapper         = TermName(c.freshName("transform$"))
-                q"""lazy val $mapper = ${instanceOf(a)}
-                    $builder.fieldEvolutions += $evolution.FieldEvolution.Transform[$from, $to](
-                      $since, $clazz, $label, (a: $from) => $mapper.mapper(a)
-                    )"""
-              case None =>
-                q"""val t = ${instanceOf(a)}
-                    $builder.fieldEvolutions += $evolution.FieldEvolution.Transform(t.since, $clazz, $label, t.mapper)"""
-            }
+            // The mapper is read on first use: the companion holding it may still be initializing
+            val List(from, to) = a.tree.tpe.typeArgs.map(TypeTree(_))
+            val mapper         = TermName(c.freshName("transform$"))
+            q"""lazy val $mapper = ${instanceOf(a)}
+                $builder.addFieldEvolution($evolution.FieldEvolution.Transform[$from, $to](
+                  ${sinceOf(a, target)}, $clazz, $label, (a: $from) => $mapper.mapper(a)
+                ))"""
         }
       }
 
     /** Reject the evolution annotations that declare nothing where they are, before anything is generated. */
     def validate(): Unit = {
-      val version              = versionOf(symbol)
       val hasVersionedAncestor = tpe.baseClasses.filterNot(_ == symbol).exists(ancestor => isVersioned(ancestor))
 
       rejectVersionedParameter(c)(symbol, parameters)
       val isCoproduct = children.nonEmpty
-
-      def nameOf(annotation: Annotation): String = annotation.tree.tpe.typeSymbol.name.decodedName.toString
 
       def reject(annotation: Annotation, target: String): Nothing =
         c.abort(c.enclosingPosition, notAllowed(nameOf(annotation), target))
@@ -269,7 +278,7 @@ private[api] object EvolutionMacro {
     val fieldDeclarations = fieldAnnotations(builder, clazz)
     q"""{
       val $clazz = $classOfTree
-      val $builder = new $evolution.EvolutionBuilder[$tpe]($clazz, ${versionOf(symbol)}, $memberNames)
+      val $builder = new $evolution.EvolutionBuilder[$tpe]($clazz, $version, $memberNames)
       ..$classDeclarations
       ..$fieldDeclarations
       $builder

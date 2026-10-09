@@ -21,7 +21,7 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
       new CoproductSerializer.CoproductSerializerSnapshot(
         Some(
           new CoproductSerializer[ADT](
-            Evolutions.get(classOf[ADT], 0),
+            Some(Evolutions.get(classOf[ADT], 0)),
             0,
             subtypeClasses,
             subtypeClasses.map(_.getName),
@@ -70,7 +70,7 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val newSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT](
       Some(
         new CoproductSerializer[ADT](
-          Evolutions.get(classOf[ADT], 0),
+          Some(Evolutions.get(classOf[ADT], 0)),
           0,
           subtypeClasses,
           subtypeClasses.map(_.getName),
@@ -81,6 +81,44 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
 
     val compatibility = newSnapshot.resolveSchemaCompatibility(oldSnapshot)
     compatibility.isIncompatible shouldBe false
+  }
+
+  // A state restored but not accessed before the next checkpoint is snapshotted again by its restored serializer, which
+  // knows no trait name: it writes the format it was read from
+  it should "snapshot again a serializer restored from a v2 snapshot" in {
+    val subtypeClasses: Array[Class[?]]              = Array(classOf[Foo], classOf[Bar])
+    val subtypeSerializers: Array[TypeSerializer[?]] = Array(
+      implicitly[TypeSerializer[Foo]],
+      implicitly[TypeSerializer[Bar]]
+    )
+    val out = new DataOutputSerializer(1024 * 1024)
+    out.writeInt(subtypeClasses.length)
+    subtypeClasses.foreach(c => out.writeUTF(c.getName))
+    subtypeSerializers.foreach(s => TypeSerializerSnapshot.writeVersionedSnapshot(out, s.snapshotConfiguration()))
+    val oldSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT]()
+    oldSnapshot.readSnapshot(2, new DataInputDeserializer(out.getSharedBuffer), getClass.getClassLoader)
+    val restoredSerializer = oldSnapshot.restoreSerializer()
+
+    val rewritten = new DataOutputSerializer(1024 * 1024)
+    TypeSerializerSnapshot.writeVersionedSnapshot(rewritten, restoredSerializer.snapshotConfiguration())
+    val reread = TypeSerializerSnapshot.readVersionedSnapshot[ADT](
+      new DataInputDeserializer(rewritten.getSharedBuffer),
+      getClass.getClassLoader
+    )
+
+    reread.restoreSerializer() should be(restoredSerializer)
+    val currentSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT](
+      Some(
+        new CoproductSerializer[ADT](
+          Some(Evolutions.get(classOf[ADT], 0)),
+          0,
+          subtypeClasses,
+          subtypeClasses.map(_.getName),
+          subtypeSerializers
+        )
+      )
+    )
+    currentSnapshot.resolveSchemaCompatibility(reread).isIncompatible shouldBe false
   }
 
 }
