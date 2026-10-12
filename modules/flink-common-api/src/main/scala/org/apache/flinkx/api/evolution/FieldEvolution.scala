@@ -2,13 +2,13 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.FieldEvolution.{FieldIndex, Phase}
+import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, Former, Phase}
 import org.apache.flinkx.api.util.ClassUtil
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable
 
-/** A single field-level evolution step, applied to the in-flight field map during deserialization.
+/** A single field-level evolution declared between two versions, replayed on the former fields to tell how they evolve.
   *
   * Evolutions execute in sorted order by `since` then `phase`. The phases form a canonical pipeline within a version:
   * Delete → Rename → Transform → Add. This ordering enables compositions such as:
@@ -23,20 +23,14 @@ import scala.collection.mutable
 @Internal
 abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] with Serializable {
 
-  @transient private[FieldEvolution] lazy val logger: Logger = LoggerFactory.getLogger(this.getClass)
-
-  /** Mutate field-name to field-value map in place to apply this evolution step.
+  /** Mutate the given field-name to evolved-field map in place to apply this evolution.
     *
-    * Initially, the field map contains only the former fields, including:
-    *   - fields that have been deleted since
-    *   - values with their former type
+    * Initially, the fields are only the [[Former]] ones, including the fields that have been deleted since.
+    *
+    * @return
+    *   The failure the evolution hits, if any
     */
-  def apply(fieldValues: mutable.Map[String, AnyRef]): Unit
-
-  /** Mutate the field indexes in place the way [[apply]] mutates the field-value map, and return the same exceptions,
-    * without reading any data.
-    */
-  def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException]
+  def apply(fields: mutable.Map[String, EvolvedField]): Option[FlinkRuntimeException]
 
   override def compare(that: FieldEvolution): Int = {
     val sinceComparison = since.compare(that.since)
@@ -48,8 +42,52 @@ abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[
 
 object FieldEvolution {
 
+  /** Replay the given sorted field evolutions on the former field names, once for all the records written with them.
+    *
+    * @return
+    *   The first failure an evolution hits, or how every field left evolves, by field name
+    */
+  private[evolution] def replay(
+      fieldEvolutions: Array[FieldEvolution],
+      formerFieldNames: Array[String]
+  ): Either[FlinkRuntimeException, Map[String, EvolvedField]] = {
+    val fields = mutable.Map.from(formerFieldNames.zipWithIndex.map { case (name, i) =>
+      name -> (Former(i): EvolvedField)
+    })
+    // The iterator is lazy, so it stops on the first failing evolution
+    fieldEvolutions.iterator.flatMap(_.apply(fields)).nextOption().toLeft(fields.toMap)
+  }
+
   /** Index of one field, tracked while replaying the evolutions, or `None` when the lineage is broken. */
   type FieldIndex = Option[Int]
+
+  /** A current field evolved from the former fields, applied to every record read. */
+  @Internal
+  sealed trait EvolvedField {
+
+    /** Evolve the values of the former fields to their current forms. */
+    def evolve(formerValues: Array[AnyRef]): AnyRef
+
+    /** Return the index of the former field it is read from, `None` when the lineage is broken. */
+    def formerIndex: FieldIndex = None
+
+  }
+
+  /** A former field, unchanged, reordered or renamed. */
+  final case class Former(index: Int) extends EvolvedField {
+    override def evolve(formerValues: Array[AnyRef]): AnyRef = formerValues(index)
+    override def formerIndex: FieldIndex                     = Some(index)
+  }
+
+  /** A field converted by a mapper, from however it evolved before. */
+  final case class Transformed(field: EvolvedField, mapper: AnyRef => AnyRef) extends EvolvedField {
+    override def evolve(formerValues: Array[AnyRef]): AnyRef = mapper(field.evolve(formerValues))
+  }
+
+  /** An added field, given its default value evaluated anew for each record. */
+  final case class Added(default: () => AnyRef) extends EvolvedField {
+    override def evolve(formerValues: Array[AnyRef]): AnyRef = default()
+  }
 
   /** Operation phase used to order evolutions within a single version (lower rank applied first). */
   @Internal
@@ -73,23 +111,20 @@ object FieldEvolution {
       formerName: String
   ) extends FieldEvolution(since, Phase.Delete) {
 
-    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
-      fieldValues.remove(formerName)
-    }
+    @transient private lazy val logger: Logger = LoggerFactory.getLogger(this.getClass)
 
-    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] = {
-      fieldIndexes.remove(formerName) match {
-        case None => logger.warn(s"Ignoring field '$formerName' deletion: not found in $currentClass"); None
-        case _    => None
+    override def apply(fields: mutable.Map[String, EvolvedField]): Option[FlinkRuntimeException] = {
+      if (fields.remove(formerName).isEmpty) {
+        logger.warn(s"Ignoring field '$formerName' deletion: not found in $currentClass")
       }
+      None
     }
 
   }
 
   /** Move the entry under `formerName` to the new key `currentName`. Backs the `@renamed` annotation on a field.
     *
-    * @throws FieldNotFoundException
-    *   if `formerName` is not present in the field map.
+    * Fails with [[FieldNotFoundException]] if `formerName` is not present in the field map.
     */
   @Internal
   final case class Rename(
@@ -99,25 +134,17 @@ object FieldEvolution {
       currentName: String
   ) extends FieldEvolution(since, Phase.Rename) {
 
-    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
-      fieldValues.remove(formerName) match {
-        case Some(value) => fieldValues.put(currentName, value)
-        case _           => throw FieldNotFoundException(currentClass, formerName, "rename", fieldValues.keys)
-      }
-    }
-
-    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] =
-      fieldIndexes.remove(formerName) match {
-        case Some(origin) => fieldIndexes.put(currentName, origin); None
-        case _            => Some(FieldNotFoundException(currentClass, formerName, "rename", fieldIndexes.keys))
+    override def apply(fields: mutable.Map[String, EvolvedField]): Option[FlinkRuntimeException] =
+      fields.remove(formerName) match {
+        case Some(field) => fields.put(currentName, field); None
+        case _           => Some(FieldNotFoundException(currentClass, formerName, "rename", fields.keys))
       }
 
   }
 
   /** Replace the value at `name` with `mapper(value)`. Backs the `@transformed` annotation.
     *
-    * @throws FieldNotFoundException
-    *   if `name` is not present in the field map.
+    * Fails with [[FieldNotFoundException]] if `name` is not present in the field map.
     */
   @Internal
   final case class Transform[A, B](
@@ -127,25 +154,22 @@ object FieldEvolution {
       mapper: A => B
   ) extends FieldEvolution(since, Phase.Transform) {
 
-    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
-      fieldValues.get(name) match {
-        case Some(value) => fieldValues.update(name, mapper.apply(value.asInstanceOf[A]).asInstanceOf[AnyRef])
-        case _           => throw FieldNotFoundException(currentClass, name, "transform", fieldValues.keys)
-      }
-    }
-
-    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] =
-      fieldIndexes.get(name) match {
-        // The mapper converts the former value to the current type, so their serializers cannot be compared anymore
-        case Some(_) => fieldIndexes.update(name, None); None
-        case _       => Some(FieldNotFoundException(currentClass, name, "transform", fieldIndexes.keys))
+    override def apply(fields: mutable.Map[String, EvolvedField]): Option[FlinkRuntimeException] =
+      fields.get(name) match {
+        case Some(field) =>
+          fields.update(name, Transformed(field, mapper.asInstanceOf[AnyRef => AnyRef]))
+          None
+        case _ => Some(FieldNotFoundException(currentClass, name, "transform", fields.keys))
       }
 
   }
 
-  /** Insert field `name` with the case class default value, evaluated at each call. Backs the `@added` annotation.
-    * @throws FieldAlreadyExistException
-    *   Deserialization time if `name` is already present.
+  /** Insert field `name` with the case class default value, evaluated for each record. Backs the `@added` annotation.
+    *
+    * Fails with [[FieldAlreadyExistException]] if `name` is already present.
+    *
+    * @param fieldIndex
+    *   Position of the field in the constructor
     */
   @Internal
   final case class Add(
@@ -157,17 +181,12 @@ object FieldEvolution {
 
     @transient private lazy val defaultValue: () => AnyRef = ClassUtil.defaultFieldValue(currentClass, fieldIndex)
 
-    override def apply(fieldValues: mutable.Map[String, AnyRef]): Unit = {
-      fieldValues.put(name, defaultValue()) match {
-        case Some(_) => throw FieldAlreadyExistException(currentClass, name, fieldValues.keys)
-        case _       =>
-      }
-    }
-
-    override def dryRun(fieldIndexes: mutable.Map[String, FieldIndex]): Option[FlinkRuntimeException] =
-      fieldIndexes.put(name, None) match {
-        case Some(_) => Some(FieldAlreadyExistException(currentClass, name, fieldIndexes.keys))
-        case _       => None
+    override def apply(fields: mutable.Map[String, EvolvedField]): Option[FlinkRuntimeException] =
+      if (fields.contains(name)) {
+        Some(FieldAlreadyExistException(currentClass, name, fields.keys))
+      } else {
+        fields.put(name, Added(() => defaultValue()))
+        None
       }
 
   }
