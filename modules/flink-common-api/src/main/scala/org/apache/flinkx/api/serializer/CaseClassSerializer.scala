@@ -31,14 +31,13 @@ import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
 import org.apache.flinkx.api.evolution.Evolution.DeletedEvolution
+import org.apache.flinkx.api.evolution.FieldEvolution.EvolvedField
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.isIncompatible
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.CurrentVersion
 import org.apache.flinkx.api.{NullMarker, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
-
-import scala.collection.mutable
 
 /** Serializer for Case Classes. Creation and access is different from our Java Tuples so we have to treat them
   * differently. Copied from Flink 1.14 and merged with ScalaCaseClassSerializer.
@@ -79,6 +78,10 @@ class CaseClassSerializer[T <: Product](
   // Cache to check for fast path on first record only
   @transient private lazy val isEvolutionAvoidable = fieldNames.isEmpty || // Keep compatibility with versions < 2.4.0
     evolution.isAvoidable(version, fieldNames)
+
+  // Cache how to evolve from former to current fields
+  @transient private lazy val evolutionPlan: Array[EvolvedField] =
+    evolution.plan(fieldNames).fold(failures => throw failures.head, identity) // or report the failure
 
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
@@ -162,29 +165,29 @@ class CaseClassSerializer[T <: Product](
       source.skipBytesToRead(nullPadding.length)
       null.asInstanceOf[T]
     } else {
-      val fieldValues = if (isEvolutionAvoidable) {
-        val fields = new Array[AnyRef](sourceArity)
-        var i      = 0
-        while (i < sourceArity) {
-          fields(i) = fieldSerializers(i).deserialize(source)
-          i += 1
-        }
-        fields
-      } else {
-        val fieldMap = mutable.Map.empty[String, AnyRef]
-        var i        = 0
-        while (i < fieldNames.length) {
-          fieldMap.put(fieldNames(i), fieldSerializers(i).deserialize(source))
-          i += 1
-        }
-        evolution.applyFieldEvolutions(fieldMap)
-        evolution.toFieldValues(fieldMap)
+      // The former fields are read in their former order, as they were written
+      val formerValues = new Array[AnyRef](sourceArity)
+      var i            = 0
+      while (i < sourceArity) {
+        formerValues(i) = fieldSerializers(i).deserialize(source)
+        i += 1
       }
+      val currentValues = if (isEvolutionAvoidable) formerValues else evolve(formerValues)
       evolution match {
         case deleted: DeletedEvolution[T] => deleted.deletedInstance
-        case _                            => evolution.postEvolve(version, createInstance(fieldValues))
+        case _                            => evolution.postEvolve(version, createInstance(currentValues))
       }
     }
+  }
+
+  private def evolve(formerValues: Array[AnyRef]): Array[AnyRef] = {
+    val values = new Array[AnyRef](evolutionPlan.length)
+    var i      = 0
+    while (i < values.length) {
+      values(i) = evolutionPlan(i).evolve(formerValues)
+      i += 1
+    }
+    values
   }
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {

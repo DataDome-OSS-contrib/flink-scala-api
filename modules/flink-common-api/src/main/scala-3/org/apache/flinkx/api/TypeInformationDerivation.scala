@@ -34,7 +34,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         cached.asInstanceOf[TypeInformation[T]]
 
       case None =>
-        val clazz = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
+        val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
         val version    = evolvable.version
         val fieldNames = ctx.parameters.map(_.label).toArray
 

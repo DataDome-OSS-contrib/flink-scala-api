@@ -4,10 +4,8 @@ import org.apache.flink.annotation.Internal
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.Unchanged
-import org.apache.flinkx.api.evolution.FieldEvolution.FieldIndex
+import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, FieldIndex}
 import org.apache.flinkx.api.serializer.ConstructorCompat
-
-import scala.collection.mutable
 
 /** Immutable bundle of evolutions to apply on an ADT during deserialization.
   *
@@ -29,7 +27,7 @@ import scala.collection.mutable
   *   Current ADT member names, in declaration order: the field names of a case class, the fully qualified names of the
   *   subtypes of a sealed trait, or the value names of a Scala 3 enum
   * @param fieldEvolutions
-  *   Sorted field-level evolutions to apply during deserialization
+  *   Sorted field-level evolutions to replay during deserialization
   * @param formerEnumValueToEvolution
   *   Evolutions of the Scala 3 enum values, by former value name
   * @param postEvolution
@@ -50,7 +48,7 @@ sealed class Evolution[T] private[evolution] (
 ) extends Serializable {
 
   /** Whether the evolution can be skipped. Returns `true` (fast path) when:
-    *   - no field evolution is required from the version this evolution migrates from,
+    *   - no field evolution is declared from the version this evolution migrates from,
     *   - no `@postEvolution` mapper applies to the former version, and
     *   - the former member names match the current declaration order.
     *
@@ -68,53 +66,39 @@ sealed class Evolution[T] private[evolution] (
 
   private def isPostEvolved(writtenVersion: Int): Boolean = postEvolution.isDefined && writtenVersion < currentVersion
 
-  /** Apply every field evolution to the given mutable field map.
-    *
-    * @param fieldMap
-    *   Mutable field-name to field-value map to evolve, mutated in place
-    */
-  def applyFieldEvolutions(fieldMap: mutable.Map[String, AnyRef]): Unit = {
-    var i = 0
-    while (i < fieldEvolutions.length) {
-      fieldEvolutions(i).apply(fieldMap)
-      i += 1
-    }
-  }
-
   /** Return the evolution declared for the Scala 3 enum value named `formerValueName` when the data was serialized. */
   def getEnumValueEvolution(formerValueName: String): EnumValueEvolution =
     formerEnumValueToEvolution.getOrElse(formerValueName, Unchanged)
 
-  /** Convert field map to field-values array using current field-names.
-    *
-    * @param fieldMap
-    *   Field-name to field-value map
-    * @return
-    *   Array of field-values in declaration order
-    */
-  def toFieldValues(fieldMap: mutable.Map[String, AnyRef]): Array[AnyRef] = currentMemberNames.map(fieldMap)
-
-  /** Check the former schema can be migrated to the current one with the declared evolutions, without reading any data.
+  /** Plan how the current fields evolve from the former ones, based on declared field evolutions. Don't read field
+    * data.
     *
     * @param formerFieldNames
     *   Former case class field names, in declaration order
     * @return
-    *   Every failure the deserialization would hit, or the index of every current field, in declaration order
+    *   Failures the deserialization would hit, or how current fields evolve, in declaration order
     */
-  def dryRun(formerFieldNames: Array[String]): Either[Seq[FlinkRuntimeException], Array[FieldIndex]] = {
-    val fieldIndexes = mutable.Map.from(formerFieldNames.zipWithIndex.map { case (name, i) => name -> Option(i) })
-    // The iterator is lazy, so it stops on the first failing evolution
-    val failedEvolution = fieldEvolutions.iterator
-      .flatMap(_.dryRun(fieldIndexes))
-      .nextOption()
-    // Check instantiation only when there is no failed evolution
-    val failures = failedEvolution.fold(checkInstantiation(fieldIndexes.keySet))(Seq(_))
-    if (failures.nonEmpty) Left(failures) else Right(currentMemberNames.map(fieldIndexes))
-  }
+  def plan(formerFieldNames: Array[String]): Either[Seq[FlinkRuntimeException], Array[EvolvedField]] =
+    FieldEvolution.replay(fieldEvolutions, formerFieldNames) match {
+      case Left(failure) => Left(Seq(failure))
+      case Right(fields) =>
+        val failures = checkInstantiation(fields.keySet)
+        if (failures.nonEmpty) Left(failures) else Right(currentMemberNames.map(fields))
+    }
+
+  /** Check if the former schema can be migrated to the current one with the declared evolutions. Don't read field data.
+    *
+    * @param formerFieldNames
+    *   Former case class field names, in declaration order
+    * @return
+    *   Failures the deserialization would hit, or the index of current fields, in declaration order
+    */
+  def dryRun(formerFieldNames: Array[String]): Either[Seq[FlinkRuntimeException], Array[FieldIndex]] =
+    plan(formerFieldNames).map(_.map(_.formerIndex))
 
   private def checkInstantiation(fieldNames: collection.Set[String]): Seq[FlinkRuntimeException] =
-    currentMemberNames.collect { case n if !fieldNames.contains(n) => MissingFieldException(currentClass, n) } ++
-      fieldNames.collect { case n if !currentMemberNames.contains(n) => FieldNotUsedException(currentClass, n) }
+    (currentMemberNames.collect { case n if !fieldNames.contains(n) => MissingFieldException(currentClass, n) } ++
+      fieldNames.collect { case n if !currentMemberNames.contains(n) => FieldNotUsedException(currentClass, n) }).toSeq
 
 }
 
