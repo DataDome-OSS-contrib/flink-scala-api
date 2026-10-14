@@ -4,18 +4,18 @@ package org.apache.flinkx.api.evolution
   * {{{
   * @version(2)
   * @renamed(since = 2, "FormerOrder")
-  * @postEvolution(Order.fix)
   * case class Order(id: String, @added(since = 2) note: String = "none")
   *
   * object Order extends Evolving[Order] {
-  *   val evolutions = Evolutions[Order]
-  *
-  *   private[this] def fix(version: Int, order: Order): Order = order // Only the annotations need to see the mapper
+  *   lazy val evolutions = Evolutions[Order]
   * }
   * }}}
   *
   * Every ADT annotated with `@version` needs this on its companion, which the derivation of its type information checks
   * at compile time. A case object has no companion of its own: the sealed trait it belongs to declares it.
+  *
+  * The evolutions are declared in a `lazy val`, which the derivation of the type information can read even while the
+  * companion is still initializing, as when the companion derives it itself.
   *
   * The annotations are read at compile time by [[Evolutions.apply]]. The derivation of the type information reads the
   * evolutions from the companion, and the registry from every companion of the job found in its jars, which it

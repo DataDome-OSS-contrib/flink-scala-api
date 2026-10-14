@@ -5,7 +5,8 @@ import org.apache.flink.annotation.Internal
 /** Evidence that the evolutions of `T` can be declared, required to derive its type information.
   *
   * Materialized by a macro wherever the derivation of `T` is expanded: a versioned ADT whose companion doesn't extend
-  * [[Evolving]] fails the build, rather than restoring without its evolutions.
+  * [[Evolving]] fails the build, rather than restoring without its evolutions, and so does a companion declaring them
+  * in a strict `val`, which the derivation may read before it is initialized.
   *
   * @param version
   *   Current schema version of `T`, read from its `@version` at compile time. The one of its enum for an enum value
@@ -17,14 +18,8 @@ import org.apache.flink.annotation.Internal
 final class Evolvable[T](val version: Int, declaring: () => Evolutions[_]) {
 
   /** The evolution of `clazz`, the runtime class of `T`, at its current version, read from the evolutions declaring it.
-    *
-    * @throws MissingEvolutionsException
-    *   if the companion declaring them is still initializing, and hasn't built them yet
     */
-  def evolution[A](clazz: Class[A]): Evolution[A] =
-    Option(declaring())
-      .getOrElse(throw MissingEvolutionsException(clazz.getName, version))
-      .evolution(clazz, version)
+  def evolution[A](clazz: Class[A]): Evolution[A] = declaring().evolution(clazz, version)
 
 }
 

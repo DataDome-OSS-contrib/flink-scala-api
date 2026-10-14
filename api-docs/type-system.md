@@ -440,7 +440,7 @@ import org.apache.flinkx.api.evolution._
 case class Order(id: String, @added(since = 2) note: String = "none")
 
 object Order extends Evolving[Order] {
-  val evolutions = Evolutions[Order]
+  lazy val evolutions = Evolutions[Order]
 
   private[this] def fix(version: Int, order: Order): Order = order // Only the annotations need to see the mapper
 }

@@ -33,8 +33,15 @@ private[evolution] object EvolutionMacro:
       if symbol.flags.is(Flags.Enum) && symbol.flags.is(Flags.Case) then
         TypeRepr.of[T].baseClasses.find(base => base != symbol && base.flags.is(Flags.Enum))
       else None
-    val version                        = Expr(versionOf(enumOfValue.getOrElse(symbol)))
-    val declaring: Expr[Evolutions[?]] = declaringCompanion(TypeRepr.of[T]) match
+    val version   = Expr(versionOf(enumOfValue.getOrElse(symbol)))
+    val companion = declaringCompanion(TypeRepr.of[T])
+    // The derivation may run while the companion initializes, when a strict val is still null
+    companion.foreach { companion =>
+      val evolutions = companion.moduleClass.fieldMember("evolutions")
+      if evolutions.exists && !evolutions.flags.is(Flags.Lazy) then
+        report.errorAndAbort(evolutionsNotLazy(companion.fullName))
+    }
+    val declaring: Expr[Evolutions[?]] = companion match
       case Some(companion) => '{ ${ Ref(companion).asExprOf[Evolving[?]] }.evolutions }
       case None            => '{ Evolutions.none }
     '{ new Evolvable[T]($version, () => $declaring) }

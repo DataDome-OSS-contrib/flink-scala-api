@@ -18,14 +18,14 @@ object ConflictingEvolutions {
   @renamed(since = 1, "SharedFormerName")
   case class FirstClaiming(a: String)
   object FirstClaiming extends Unscanned[FirstClaiming] {
-    val evolutions = Evolutions[FirstClaiming]
+    lazy val evolutions = Evolutions[FirstClaiming]
   }
 
   @version(1)
   @renamed(since = 1, "SharedFormerName")
   case class SecondClaiming(a: String)
   object SecondClaiming extends Unscanned[SecondClaiming] {
-    val evolutions = Evolutions[SecondClaiming]
+    lazy val evolutions = Evolutions[SecondClaiming]
   }
 
 }

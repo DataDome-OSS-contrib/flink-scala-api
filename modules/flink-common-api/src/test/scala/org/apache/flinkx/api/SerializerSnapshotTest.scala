@@ -225,6 +225,6 @@ object SerializerSnapshotTest {
       var sc1: SimpleClass1 = SimpleClass1("a", 1),
       @added(since = 1) var sc2: SimpleClass2 = SimpleClass2("b", 2)
   )
-  object WithDefault extends Evolving[WithDefault] { val evolutions = Evolutions[WithDefault] }
+  object WithDefault extends Evolving[WithDefault] { lazy val evolutions = Evolutions[WithDefault] }
 
 }

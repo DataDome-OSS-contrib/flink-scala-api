@@ -52,8 +52,16 @@ private[api] object EvolutionMacro {
         c.abort(c.enclosingPosition, companionNotEvolving(symbol.fullName))
       }
     }
-    val declaring = declaringCompanion(c)(tpe).fold[Tree](q"_root_.org.apache.flinkx.api.evolution.Evolutions.none") {
-      companion => q"${internal.gen.mkAttributedRef(companion)}.evolutions"
+    val companion = declaringCompanion(c)(tpe)
+    // The derivation may run while the companion initializes, when a strict val is still null
+    companion.foreach { companion =>
+      val evolutions = companion.typeSignature.member(TermName("evolutions"))
+      if (evolutions.isTerm && evolutions.asTerm.isStable && !evolutions.asTerm.isLazy) {
+        c.abort(c.enclosingPosition, evolutionsNotLazy(companion.fullName))
+      }
+    }
+    val declaring = companion.fold[Tree](q"_root_.org.apache.flinkx.api.evolution.Evolutions.none") { companion =>
+      q"${internal.gen.mkAttributedRef(companion)}.evolutions"
     }
     c.Expr[Evolvable[T]](
       q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe](${versionOf(c)(symbol)}, () => $declaring)"
