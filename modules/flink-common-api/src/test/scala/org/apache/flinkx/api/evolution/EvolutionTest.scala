@@ -349,21 +349,6 @@ object EvolutionTest {
   }
 
   @version(1)
-  @renamed(since = 1, "ClaimedByBoth")
-  case class ClaimingFormerNameByRename(a: String)
-  object ClaimingFormerNameByRename extends IsolatedEvolving[ClaimingFormerNameByRename] {
-    lazy val evolutions = Evolutions[ClaimingFormerNameByRename]
-  }
-
-  @version(1)
-  @deletedFields(since = 1, "removed")
-  @deletedClasses(since = 1, throwOnInstance = false, "ClaimedByBoth")
-  case class ClaimingFormerNameByDeletion(a: String)
-  object ClaimingFormerNameByDeletion extends IsolatedEvolving[ClaimingFormerNameByDeletion] {
-    lazy val evolutions = Evolutions[ClaimingFormerNameByDeletion]
-  }
-
-  @version(1)
   sealed trait SubtypeRemovedWithoutAnnotation
   object SubtypeRemovedWithoutAnnotation extends Evolving[SubtypeRemovedWithoutAnnotation] {
     lazy val evolutions = Evolutions[SubtypeRemovedWithoutAnnotation]
