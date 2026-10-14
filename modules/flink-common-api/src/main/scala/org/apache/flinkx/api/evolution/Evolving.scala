@@ -17,10 +17,9 @@ package org.apache.flinkx.api.evolution
   * Every ADT annotated with `@version` needs this on its companion, which the derivation of its type information checks
   * at compile time. A case object has no companion of its own: the sealed trait it belongs to declares it.
   *
-  * The annotations are read at compile time by [[Evolutions.apply]], and the evolutions are handed over to the registry
-  * when the companion initializes: a snapshot naming the ADT initializes its companion to get them, so they are
-  * available wherever the state descriptor was built, on the TaskManager restoring the state as on the client deriving
-  * the type information.
+  * The annotations are read at compile time by [[Evolutions.apply]]. The derivation of the type information reads the
+  * evolutions from the companion, and the registry from every companion of the job found in its jars, which it
+  * initializes on first use: they are available wherever the state is restored, whatever the job derived.
   */
 trait Evolving[T] {
 

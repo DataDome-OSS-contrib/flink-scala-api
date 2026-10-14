@@ -461,7 +461,7 @@ companion of the class now bearing it, which the former name doesn't tell. The j
 for the companions extending `Evolving`, and all of them are initialized. The scan reads the class files of the jars
 listed by the class loader of the job, or the class path of the JVM when there are none, as in a MiniCluster.
 
-A former name that no class bears and no companion declares fails the restore with an `EvolutionNotDeclaredException`,
+A former name that no class bears and no companion declares fails the restore with a `MissingEvolutionException`,
 rather than reading the former form as if it had never evolved. A checkpoint written by a more recent source code is
 not that case: the class is there, its declaration just doesn't reach that far, and the schema compatibility
 resolution reports it.

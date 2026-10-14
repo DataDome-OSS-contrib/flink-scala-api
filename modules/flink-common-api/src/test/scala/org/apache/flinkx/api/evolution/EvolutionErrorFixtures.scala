@@ -48,6 +48,17 @@ object EvolutionErrorFixtures {
   @version(1)
   case class NeverDeclared(a: String)
 
+  /** Derives its type information while initializing, before declaring the evolutions the derivation reads. */
+  @version(1)
+  case class DerivedBeforeDeclared(a: String)
+  object DerivedBeforeDeclared extends IsolatedEvolving[DerivedBeforeDeclared] {
+    import org.apache.flink.api.common.typeinfo.TypeInformation
+    import org.apache.flinkx.api.auto._
+
+    val typeInfo: TypeInformation[DerivedBeforeDeclared] = implicitly[TypeInformation[DerivedBeforeDeclared]]
+    val evolutions                                       = Evolutions[DerivedBeforeDeclared]
+  }
+
   @version(1)
   case class WrongVersionOnField(@version(1) a: String)
 

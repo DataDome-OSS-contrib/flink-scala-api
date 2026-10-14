@@ -1,6 +1,5 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.api.common.typeinfo.TypeInformation
 import EvolutionTest._
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
@@ -25,8 +24,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     */
   private def dryRunFailures(formerClassName: String, formerFieldNames: Array[String]): Seq[String] =
     Evolutions
-      .find[Any](formerClassName, 0, getClass.getClassLoader)
-      .getOrElse(fail(s"No evolution registered for $formerClassName"))
+      .get[Any](formerClassName, 0, getClass.getClassLoader)
       .dryRun(formerFieldNames)
       .swap
       .map(_.map(_.getMessage).toSeq)
@@ -40,6 +38,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "throw field not found when deserializing Click v0 with wrong added field" in {
+    Evolutions.declareInstead(WrongAddedField.evolutions)
     val expected  = WrongAddedField("123456789")
     val exception = intercept[FieldAlreadyExistException] {
       testDeserializeFromFile("Click-v0", expected)
@@ -48,6 +47,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "throw field not found when deserializing Click v0 with wrong renamed field" in {
+    Evolutions.declareInstead(WrongRenamedField.evolutions)
     val expected  = WrongRenamedField("123456789")
     val exception = intercept[FieldNotFoundException] {
       testDeserializeFromFile("Click-v0", expected)
@@ -56,6 +56,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "throw field not found when deserializing Click v0 with wrong transformed field" in {
+    Evolutions.declareInstead(WrongTransformedField.evolutions)
     val expected  = WrongTransformedField("123456789")
     val exception = intercept[FieldNotFoundException] {
       testDeserializeFromFile("Click-v0", expected)
@@ -64,6 +65,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "ignore field not found when deserializing Click v0 with wrong deleted field" in {
+    Evolutions.declareInstead(WrongDeletedField.evolutions)
     val expected = WrongDeletedField("a")
     testDeserializeFromFile("Click-v0", expected)
   }
@@ -71,7 +73,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   // The field names are checked by the dry run, when the schema compatibility is resolved, and no longer on every
   // record: these assert the guidance the user gets, which resolveSchemaCompatibility only logs.
   it should "report an unused former field when dry running Click v0 evolutions" in {
-    implicitly[TypeInformation[WrongFieldNotUsed]]
+    Evolutions.declareInstead(WrongFieldNotUsed.evolutions)
 
     dryRunFailures(ClickV0ClassName, ClickV0FieldNames) shouldBe Seq(
       "'b' field not used to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongFieldNotUsed. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
@@ -79,7 +81,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "report every offending field when dry running Click v0 evolutions" in {
-    implicitly[TypeInformation[WrongSeveralFields]]
+    Evolutions.declareInstead(WrongSeveralFields.evolutions)
 
     dryRunFailures(ClickV0ClassName, ClickV0FieldNames) shouldBe Seq(
       "'missing' field missing to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSeveralFields. Use @added(since=<version>) annotation to indicate it has been added",
@@ -89,7 +91,7 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "report a missing current field when dry running Click v0 evolutions" in {
-    implicitly[TypeInformation[WrongMissingField]]
+    Evolutions.declareInstead(WrongMissingField.evolutions)
 
     dryRunFailures(ClickV0ClassName, ClickV0FieldNames) shouldBe Seq(
       "'missingField' field missing to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongMissingField. Use @added(since=<version>) annotation to indicate it has been added"
@@ -99,27 +101,33 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   // The declared evolutions are replayed on the former field names when resolving the compatibility, so a missing or
   // wrong annotation refuses the restore up front instead of failing halfway through the migration.
   it should "resolve the schema compatibility of Click v0 with a wrong added field as incompatible" in {
+    Evolutions.declareInstead(WrongAddedField.evolutions)
     resolveSchemaCompatibilityFromFile[WrongAddedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a wrong renamed field as incompatible" in {
+    Evolutions.declareInstead(WrongRenamedField.evolutions)
     resolveSchemaCompatibilityFromFile[WrongRenamedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a wrong transformed field as incompatible" in {
+    Evolutions.declareInstead(WrongTransformedField.evolutions)
     resolveSchemaCompatibilityFromFile[WrongTransformedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with an extra field as incompatible" in {
+    Evolutions.declareInstead(WrongFieldNotUsed.evolutions)
     resolveSchemaCompatibilityFromFile[WrongFieldNotUsed]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a missing field as incompatible" in {
+    Evolutions.declareInstead(WrongMissingField.evolutions)
     resolveSchemaCompatibilityFromFile[WrongMissingField]("Click-v0") shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a field type changed without annotation as incompatible" in {
     // The rename requires the evolutions, and 'fieldNotInFile' changed from Int to String without @transformed
+    Evolutions.declareInstead(WrongUntransformedField.evolutions)
     resolveSchemaCompatibilityFromFile[WrongUntransformedField]("Click-v0") shouldBe Symbol("incompatible")
   }
 

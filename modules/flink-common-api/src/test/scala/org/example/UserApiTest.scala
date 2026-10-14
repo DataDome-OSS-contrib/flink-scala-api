@@ -13,8 +13,8 @@ class UserApiTest extends AnyFlatSpec with Matchers {
     implicitly[TypeInformation[UserFixtures.Order]] shouldNot be(null)
 
     val formerName = classOf[UserFixtures.Order].getName.replace("Order", "FormerOrder")
-    Evolutions.find[UserFixtures.Order](formerName, 0, getClass.getClassLoader).map(_.currentClass) shouldBe
-      Some(classOf[UserFixtures.Order])
+    Evolutions.get[UserFixtures.Order](formerName, 0, getClass.getClassLoader).currentClass shouldBe
+      classOf[UserFixtures.Order]
   }
 
 }

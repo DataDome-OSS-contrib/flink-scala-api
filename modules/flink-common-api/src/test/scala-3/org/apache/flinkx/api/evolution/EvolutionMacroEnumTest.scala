@@ -12,9 +12,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with BeforeAndAft
   override protected def beforeEach(): Unit = Evolutions.reset()
 
   it should "declare the enum and the former name it was renamed from" in {
-    Evolutions.get(classOf[FailureCategory], 1)
-
-    Evolutions.declaredEvolutions(classOf[FailureCategory].getClassLoader).keySet shouldBe Set(
+    FailureCategory.evolutions.byClassName.map(_._1).toSet shouldBe Set(
       classOf[FailureCategory].getName,
       classOf[FailureCategory].getName.replace("FailureCategory", "FailureType")
     )

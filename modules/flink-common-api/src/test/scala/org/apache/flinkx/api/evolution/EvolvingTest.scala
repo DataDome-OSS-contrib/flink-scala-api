@@ -4,8 +4,7 @@ import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
-import org.apache.flinkx.api.evolution.EvolutionTest.{FirstClaimingFormerName, SecondClaimingFormerName}
-import org.apache.flinkx.api.evolution.EvolutionRenamedTest.{Pet, Pony}
+import org.apache.flinkx.api.evolution.EvolutionRenamedTest.{Horse, Pet, Pony}
 import org.apache.flinkx.api.evolution.EvolvingTest.{Plain, plainCompanionInitialized}
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.scalatest.BeforeAndAfterEach
@@ -52,29 +51,32 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     Evolutions.reset()
     Evolutions.get(classOf[Probe], 2)
 
-    Evolutions.find[Probe](FormerProbe, 0, getClass.getClassLoader).map(_.currentClass) shouldBe Some(classOf[Probe])
+    Evolutions.get[Probe](FormerProbe, 0, getClass.getClassLoader).currentClass shouldBe classOf[Probe]
   }
 
-  // A declaration is applied when its own class is looked up, not before: the others stay out of the way
-  it should "apply only the declaration of the class looked up" in {
+  // Any companion may declare the former name looked up: all of them are declared on the first lookup
+  it should "declare every companion of the jars on the first lookup" in {
     Evolutions.get(classOf[Probe], 2)
 
-    declaredNames should not contain classOf[Pet].getName
+    declaredNames should contain(classOf[Pet].getName)
   }
 
-  // A renamed subtype is declared by its own companion, which nothing names but the trait declaring it as a member
-  it should "declare the subtypes of a sealed trait along with it" in {
-    Evolutions.get(classOf[Pet], 2)
-
-    declaredNames should contain(classOf[Pony].getName.replace("Pony", "Horse"))
+  // The former name of a renamed subtype may be borne by another class now: only the companion of the renamed subtype
+  // knows it stands for that subtype in the former data
+  it should "resolve the former name of a subtype now borne by another class" in {
+    Evolutions.get[Pet](classOf[Horse].getName, 0, getClass.getClassLoader).currentClass shouldBe classOf[Pony]
   }
 
-  it should "report the failure of a declaration when its class is looked up, and leave the others alone" in {
-    Evolutions.get(classOf[FirstClaimingFormerName], 1)
-    intercept[FormerClassConflictException](Evolutions.get(classOf[SecondClaimingFormerName], 1))
-
-    Evolutions.get(classOf[Probe], 2).currentClass shouldBe classOf[Probe]
-    intercept[FormerClassConflictException](Evolutions.get(classOf[SecondClaimingFormerName], 1))
+  // A job declaring its evolutions wrongly must not restore any state: every lookup reports the same failure
+  it should "fail every lookup with the failure of a declaration" in {
+    ConflictingScan.on = true
+    try {
+      val failure = intercept[FormerClassConflictException](Evolutions.get(classOf[Probe], 2))
+      intercept[FormerClassConflictException](Evolutions.get(classOf[Probe], 2)) shouldBe theSameInstanceAs(failure)
+    } finally {
+      ConflictingScan.on = false
+      Evolutions.reset()
+    }
   }
 
   // The tasks of a TaskManager restore their state in parallel: a lookup landing while the declarations are applied
@@ -112,7 +114,7 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     val out = new DataOutputSerializer(1024)
     TypeSerializerSnapshot.writeVersionedSnapshot(out, serializer.snapshotConfiguration())
 
-    val exception = intercept[EvolutionNotDeclaredException] {
+    val exception = intercept[MissingEvolutionException] {
       TypeSerializerSnapshot.readVersionedSnapshot(
         new DataInputDeserializer(out.getSharedBuffer),
         getClass.getClassLoader
@@ -120,7 +122,7 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     }
 
     exception.getMessage should startWith(
-      s"Cannot restore '$goneName', written at @version(2): no class of that name exists, and no evolution declares" +
+      s"Cannot restore '$goneName' written at @version(2): no class of that name exists, and no evolution declares" +
         s" it renamed or deleted."
     )
   }
