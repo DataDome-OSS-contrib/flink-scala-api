@@ -2,6 +2,7 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.util.ClassUtil
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -31,6 +32,13 @@ class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils with 
     resolveSchemaCompatibility(serializer) shouldBe Symbol("compatibleAsIs")
   }
 
+  // The derivation flattens the intermediate sealed traits: a case object below one is declared by the trait above it
+  it should "resolve the former name of a case object below an intermediate sealed trait" in {
+    val formerName = ClassUtil.resolveFormerClassName("FormerNested", Nested.getClass)
+
+    Evolutions.get[Top](formerName, 0, getClass.getClassLoader).currentClass shouldBe Nested.getClass
+  }
+
 }
 
 object NestedHierarchyTest {
@@ -40,5 +48,8 @@ object NestedHierarchyTest {
   object Top                 extends Evolving[Top] { lazy val evolutions = Evolutions[Top] }
   sealed trait Middle        extends Top
   case class Leaf(a: String) extends Middle
-  case class Direct(b: Int)  extends Top
+  @version(1)
+  @renamed(since = 1, "FormerNested")
+  case object Nested        extends Middle
+  case class Direct(b: Int) extends Top
 }

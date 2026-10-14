@@ -118,8 +118,11 @@ private[evolution] object EvolutionMacro:
     import quotes.reflect.*
 
     val symbol = TypeRepr.of[T].typeSymbol
-    // A case object has no companion of its own to declare it: the sealed trait it belongs to declares it
-    val moduleChildren = if symbol.flags.is(Flags.Enum) then Nil else symbol.children.filter(_.isTerm)
+    // A case object has no companion of its own to declare it: the sealed traits above it declare it
+    def caseObjectsBelow(owner: Symbol): List[Symbol] =
+      if owner.flags.is(Flags.Enum) then Nil
+      else owner.children.flatMap(child => if child.isTerm then List(child) else caseObjectsBelow(child))
+    val moduleChildren = caseObjectsBelow(symbol).distinct
     val builders       = builderImpl[T] :: moduleChildren.map(child =>
       child.termRef.asType match
         case '[c] => builderImpl[c]
