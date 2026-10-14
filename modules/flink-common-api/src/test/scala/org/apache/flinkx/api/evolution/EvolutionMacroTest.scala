@@ -82,7 +82,7 @@ object EvolutionMacroTest {
   )
 
   object Probe extends Evolving[Probe] {
-    val evolutions = Evolutions[Probe]
+    lazy val evolutions = Evolutions[Probe]
     // Visible from the annotations of the class, and from nowhere else
     private[EvolutionMacroTest] def intToString(i: Int): String             = i.toString
     private[EvolutionMacroTest] def bump(version: Int, probe: Probe): Probe = probe.copy(label = probe.label + version)

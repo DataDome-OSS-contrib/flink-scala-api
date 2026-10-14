@@ -56,7 +56,14 @@ object EvolutionErrorFixtures {
     import org.apache.flinkx.api.auto._
 
     val typeInfo: TypeInformation[DerivedBeforeDeclared] = implicitly[TypeInformation[DerivedBeforeDeclared]]
-    val evolutions                                       = Evolutions[DerivedBeforeDeclared]
+    lazy val evolutions                                  = Evolutions[DerivedBeforeDeclared]
+  }
+
+  /** Declares its evolutions in a strict val, which a derivation running while it initializes would read as null. */
+  @version(1)
+  case class EagerlyDeclared(a: String)
+  object EagerlyDeclared extends IsolatedEvolving[EagerlyDeclared] {
+    val evolutions = Evolutions[EagerlyDeclared]
   }
 
   @version(1)
@@ -145,13 +152,13 @@ object EvolutionErrorFixtures {
   @version(1)
   sealed trait CorrectDeletedClassesOnSealedTraitSubtype
   object CorrectDeletedClassesOnSealedTraitSubtype extends IsolatedEvolving[CorrectDeletedClassesOnSealedTraitSubtype] {
-    val evolutions = Evolutions[CorrectDeletedClassesOnSealedTraitSubtype]
+    lazy val evolutions = Evolutions[CorrectDeletedClassesOnSealedTraitSubtype]
   }
   @version(1)
   @deletedClasses(since = 1, "A")
   sealed trait CorrectDeletedClassesOnSubtype extends CorrectDeletedClassesOnSealedTraitSubtype
   object CorrectDeletedClassesOnSubtype       extends IsolatedEvolving[CorrectDeletedClassesOnSubtype] {
-    val evolutions = Evolutions[CorrectDeletedClassesOnSubtype]
+    lazy val evolutions = Evolutions[CorrectDeletedClassesOnSubtype]
   }
   case object CorrectDeletedClassesCaseObject extends CorrectDeletedClassesOnSubtype
 
@@ -163,13 +170,13 @@ object EvolutionErrorFixtures {
   @version(1)
   sealed trait CorrectPostEvolutionOnSealedTraitSubtype
   object CorrectPostEvolutionOnSealedTraitSubtype extends IsolatedEvolving[CorrectPostEvolutionOnSealedTraitSubtype] {
-    val evolutions = Evolutions[CorrectPostEvolutionOnSealedTraitSubtype]
+    lazy val evolutions = Evolutions[CorrectPostEvolutionOnSealedTraitSubtype]
   }
   @version(1)
   @postEvolution(updateAction)
   case class CorrectPostEvolutionOnSubtype() extends CorrectPostEvolutionOnSealedTraitSubtype
   object CorrectPostEvolutionOnSubtype       extends IsolatedEvolving[CorrectPostEvolutionOnSubtype] {
-    val evolutions = Evolutions[CorrectPostEvolutionOnSubtype]
+    lazy val evolutions = Evolutions[CorrectPostEvolutionOnSubtype]
   }
 
   @version(2)
@@ -177,7 +184,7 @@ object EvolutionErrorFixtures {
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongAddedField(@added(since = 2) a: String = "")
-  object WrongAddedField extends IsolatedEvolving[WrongAddedField] { val evolutions = Evolutions[WrongAddedField] }
+  object WrongAddedField extends IsolatedEvolving[WrongAddedField] { lazy val evolutions = Evolutions[WrongAddedField] }
 
   @version(2)
   @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
@@ -185,7 +192,7 @@ object EvolutionErrorFixtures {
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
   object WrongRenamedField extends IsolatedEvolving[WrongRenamedField] {
-    val evolutions = Evolutions[WrongRenamedField]
+    lazy val evolutions = Evolutions[WrongRenamedField]
   }
 
   @version(2)
@@ -194,7 +201,7 @@ object EvolutionErrorFixtures {
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
   object WrongTransformedField extends IsolatedEvolving[WrongTransformedField] {
-    val evolutions = Evolutions[WrongTransformedField]
+    lazy val evolutions = Evolutions[WrongTransformedField]
   }
 
   @version(2)
@@ -204,7 +211,7 @@ object EvolutionErrorFixtures {
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongDeletedField(a: String)
   object WrongDeletedField extends IsolatedEvolving[WrongDeletedField] {
-    val evolutions = Evolutions[WrongDeletedField]
+    lazy val evolutions = Evolutions[WrongDeletedField]
   }
 
   @version(1)
@@ -213,7 +220,7 @@ object EvolutionErrorFixtures {
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongSeveralFields(a: String, missing: String)
   object WrongSeveralFields extends IsolatedEvolving[WrongSeveralFields] {
-    val evolutions = Evolutions[WrongSeveralFields]
+    lazy val evolutions = Evolutions[WrongSeveralFields]
   }
 
   @version(1)
@@ -222,7 +229,7 @@ object EvolutionErrorFixtures {
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongFieldNotUsed(a: String)
   object WrongFieldNotUsed extends IsolatedEvolving[WrongFieldNotUsed] {
-    val evolutions = Evolutions[WrongFieldNotUsed]
+    lazy val evolutions = Evolutions[WrongFieldNotUsed]
   }
 
   @version(1)
@@ -231,7 +238,7 @@ object EvolutionErrorFixtures {
   @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongMissingField(a: String, missingField: String)
   object WrongMissingField extends IsolatedEvolving[WrongMissingField] {
-    val evolutions = Evolutions[WrongMissingField]
+    lazy val evolutions = Evolutions[WrongMissingField]
   }
 
   @version(1)
@@ -240,7 +247,7 @@ object EvolutionErrorFixtures {
   sealed trait WrongDeletedClassesWithSubtypeInstanceThrow
   object WrongDeletedClassesWithSubtypeInstanceThrow
       extends IsolatedEvolving[WrongDeletedClassesWithSubtypeInstanceThrow] {
-    val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceThrow]
+    lazy val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceThrow]
   }
 
   @version(1)
@@ -253,7 +260,7 @@ object EvolutionErrorFixtures {
   sealed trait WrongDeletedClassesWithSubtypeInstanceToNull
   object WrongDeletedClassesWithSubtypeInstanceToNull
       extends IsolatedEvolving[WrongDeletedClassesWithSubtypeInstanceToNull] {
-    val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceToNull]
+    lazy val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceToNull]
   }
 
   @version(1)

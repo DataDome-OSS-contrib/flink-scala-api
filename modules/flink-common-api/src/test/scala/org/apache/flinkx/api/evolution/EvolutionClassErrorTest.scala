@@ -93,16 +93,14 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     assertDoesNotCompile("implicitly[TypeInformation[NeverDeclared]]")
   }
 
-  // The derivation reads the evolutions from the companion: deriving there before declaring them would read none
-  it should "throw when a companion derives its type information before declaring its evolutions" in {
-    val exception = intercept[ExceptionInInitializerError](DerivedBeforeDeclared.typeInfo).getCause
+  // The derivation reads the evolutions from the companion, possibly while it initializes: they are built on demand
+  it should "derive the type information in the companion before the line declaring its evolutions" in {
+    DerivedBeforeDeclared.typeInfo.getTypeClass shouldBe classOf[DerivedBeforeDeclared]
+  }
 
-    val fqn = classOf[DerivedBeforeDeclared].getName
-    exception shouldBe an[MissingEvolutionsException]
-    exception.getMessage shouldBe
-      s"Cannot derive the type information of '$fqn' at @version(1): its companion declares Evolving but" +
-      s" `val evolutions = Evolutions[$fqn]` is not initialized yet. `evolutions` must be declared before deriving" +
-      s" its type information in the companion"
+  // A strict val would still be null when the derivation runs in the companion before it: the derivation rejects it
+  it should "not compile the derivation of an ADT whose companion declares its evolutions in a strict val" in {
+    assertDoesNotCompile("implicitly[TypeInformation[EagerlyDeclared]]")
   }
 
 }

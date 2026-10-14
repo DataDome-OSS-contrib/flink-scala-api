@@ -262,7 +262,15 @@ package object evolution {
   private[api] def companionNotEvolving(adt: String): String = {
     val name = adt.split("[.$]").last
     s"$adt declares @version, so its companion must declare its evolutions:" +
-      s" object $name extends Evolving[$name] { val evolutions = Evolutions[$name] }"
+      s" object $name extends Evolving[$name] { lazy val evolutions = Evolutions[$name] }"
+  }
+
+  /** Message of a companion declaring its evolutions in a strict `val`, reported where the type information is derived.
+    */
+  private[api] def evolutionsNotLazy(adt: String): String = {
+    val name = adt.split("[.$]").last
+    s"The companion of $adt must declare its evolutions lazily, since the derivation of a type information may read" +
+      s" them while the companion initializes: lazy val evolutions = Evolutions[$name]"
   }
 
   /** Message of a negative `@version`, reported by the macros declaring the evolutions. */
@@ -288,14 +296,6 @@ package object evolution {
         s"Cannot restore '$fqn' written at @version($version): no class of that name exists, and no evolution" +
           s" declares it renamed or deleted. If it was renamed, the companion of the class now bearing it must" +
           s" extend Evolving; if it was deleted, the ADT that held it must declare it with @deletedClasses"
-      )
-
-  /** Exception indicating the `evolutions` on Evolving companion are not properly declared. */
-  final case class MissingEvolutionsException(fqn: String, version: Int)
-      extends FlinkRuntimeException(
-        s"Cannot derive the type information of '$fqn' at @version($version): its companion declares Evolving but" +
-          s" `val evolutions = Evolutions[$fqn]` is not initialized yet. `evolutions` must be declared before" +
-          s" deriving its type information in the companion"
       )
 
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */

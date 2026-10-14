@@ -65,19 +65,19 @@ object EvolutionRenamedTest {
   @version(2)
   @renamed(since = 1, "Animal")
   sealed trait Pet
-  object Pet extends Evolving[Pet] { val evolutions = Evolutions[Pet] }
+  object Pet extends Evolving[Pet] { lazy val evolutions = Evolutions[Pet] }
   @version(1)
   @renamed(since = 1, "Horse")
   case class Pony(
       @renamed(since = 1, "name") nickname: String
   ) extends Pet
-  object Pony extends Evolving[Pony] { val evolutions = Evolutions[Pony] }
+  object Pony extends Evolving[Pony] { lazy val evolutions = Evolutions[Pony] }
   @version(1)
   @renamed(since = 1, "Lion")
   @renamed(since = 2, "Cat")
   case class Horse(
       @renamed(since = 1, "name") nickname: String
   ) extends Pet
-  object Horse extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
+  object Horse extends Evolving[Horse] { lazy val evolutions = Evolutions[Horse] }
 
 }
