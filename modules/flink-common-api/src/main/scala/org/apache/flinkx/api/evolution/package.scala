@@ -32,7 +32,7 @@ package object evolution {
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     * @param mapper
     *   The mapper to apply. See [[PostEvolutionMapper.apply]] for parameters. Read where the ADT is declared, so it
-    *   must be visible from there.
+    *   must be visible from there. Must be serializable.
     */
   final case class postEvolution[A](mapper: PostEvolutionMapper[A]) extends EvolutionAnnotation {
     override def toString: String = s"postEvolution(<mapper>)"
@@ -130,7 +130,7 @@ package object evolution {
     *   Version in which the type-change occurred
     * @param mapper
     *   Function converting the former value to the current type. Read where the ADT is declared, so it must be visible
-    *   from there.
+    *   from there. Must be serializable.
     */
   final case class transformed[A, B](since: Int, mapper: A => B) extends EvolutionAnnotation {
     override def toString: String = s"transformed($since,<mapper>)"
@@ -282,16 +282,20 @@ package object evolution {
   private[api] def addedFieldWithoutDefault(adt: String, field: String): String =
     s"'$field' added field in $adt must have a default value"
 
-  /** Exception indicating the evolutions of `fqn` never reached the JVM needing them. */
-  final case class EvolutionNotDeclaredException(fqn: String, version: Int, restoring: Boolean = true)
+  /** Exception indicating the evolution of `fqn` is not properly declared. */
+  final case class MissingEvolutionException(fqn: String, version: Int)
       extends FlinkRuntimeException(
-        if (restoring)
-          s"Cannot restore '$fqn', written at @version($version): no class of that name exists, and no evolution" +
-            s" declares it renamed or deleted. If it was renamed, the companion of the class now bearing it must extend" +
-            s" Evolving, in a jar of the job; if it was deleted, the ADT that held it must declare it with @deletedClasses"
-        else
-          s"Cannot derive the type information of '$fqn': it declares @version($version), but its companion" +
-            s" declares no evolution. It must extend Evolving"
+        s"Cannot restore '$fqn' written at @version($version): no class of that name exists, and no evolution" +
+          s" declares it renamed or deleted. If it was renamed, the companion of the class now bearing it must" +
+          s" extend Evolving; if it was deleted, the ADT that held it must declare it with @deletedClasses"
+      )
+
+  /** Exception indicating the `evolutions` on Evolving companion are not properly declared. */
+  final case class MissingEvolutionsException(fqn: String, version: Int)
+      extends FlinkRuntimeException(
+        s"Cannot derive the type information of '$fqn' at @version($version): its companion declares Evolving but" +
+          s" `val evolutions = Evolutions[$fqn]` is not initialized yet. `evolutions` must be declared before" +
+          s" deriving its type information in the companion"
       )
 
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */

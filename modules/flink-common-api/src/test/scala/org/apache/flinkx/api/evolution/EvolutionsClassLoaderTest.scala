@@ -21,11 +21,8 @@ class EvolutionsClassLoaderTest extends AnyFlatSpec with Matchers with BeforeAnd
     val currentDog = classOf[Dog]
     withClue("the isolated class loader must define a class of its own:")(otherDog shouldNot be(currentDog))
 
-    Evolutions.get(currentDog, 2)
-    Evolutions.get(otherDog.asInstanceOf[Class[Any]], 2)
-
-    Evolutions.find[Any](currentDog.getName, 0, currentDog.getClassLoader).map(_.currentClass) shouldBe Some(currentDog)
-    Evolutions.find[Any](currentDog.getName, 0, otherJob).map(_.currentClass) shouldBe Some(otherDog)
+    Evolutions.get[Any](currentDog.getName, 0, currentDog.getClassLoader).currentClass shouldBe currentDog
+    Evolutions.get[Any](currentDog.getName, 0, otherJob).currentClass shouldBe otherDog
   }
 
   // The companions of the two jobs hand over two declarations for one class name: each job must get its own

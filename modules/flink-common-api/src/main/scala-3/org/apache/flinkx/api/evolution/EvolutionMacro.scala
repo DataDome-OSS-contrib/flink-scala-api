@@ -13,7 +13,8 @@ import scala.util.control.NonFatal
   */
 private[evolution] object EvolutionMacro:
 
-  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived.
+  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived,
+    * and hand the evolutions it declares over to the derivation.
     */
   def evolvableImpl[T: Type](using Quotes): Expr[Evolvable[T]] =
     import quotes.reflect.*
@@ -32,8 +33,22 @@ private[evolution] object EvolutionMacro:
       if symbol.flags.is(Flags.Enum) && symbol.flags.is(Flags.Case) then
         TypeRepr.of[T].baseClasses.find(base => base != symbol && base.flags.is(Flags.Enum))
       else None
-    val version = Expr(versionOf(enumOfValue.getOrElse(symbol)))
-    '{ new Evolvable[T]($version) }
+    val version                        = Expr(versionOf(enumOfValue.getOrElse(symbol)))
+    val declaring: Expr[Evolutions[?]] = declaringCompanion(TypeRepr.of[T]) match
+      case Some(companion) => '{ ${ Ref(companion).asExprOf[Evolving[?]] }.evolutions }
+      case None            => '{ Evolutions.none }
+    '{ new Evolvable[T]($version, () => $declaring) }
+
+  /** The companion declaring the evolutions of the given type, if it extends [[Evolving]]: its own, or the one of the
+    * nearest sealed trait or enum it belongs to for a case object or an enum value, which have no companion of their
+    * own.
+    */
+  private def declaringCompanion(using q: Quotes)(tpe: q.reflect.TypeRepr): Option[q.reflect.Symbol] =
+    import q.reflect.*
+    def evolving(owner: Symbol) =
+      Option.when(owner.companionModule.exists)(owner.companionModule).filter(_.termRef <:< TypeRepr.of[Evolving[?]])
+    val symbol = tpe.typeSymbol
+    evolving(symbol).orElse(tpe.baseClasses.filter(_ != symbol).collectFirst(Function.unlift(evolving)))
 
   /** Whether the given symbol declares a schema version of its own. */
   private def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
@@ -102,16 +117,8 @@ private[evolution] object EvolutionMacro:
       child.termRef.asType match
         case '[c] => builderImpl[c]
     )
-    val subtypeClasses = if symbol.flags.is(Flags.Enum) then Nil else symbol.children.filterNot(_.isTerm).map(_.typeRef)
-    val classes        = subtypeClasses.map(classOfExpr)
-    val clazz          = classOfExpr(TypeRepr.of[T])
-    '{
-      new Evolutions[T](
-        $clazz.asInstanceOf[Class[T]],
-        () => Seq(${ Varargs(builders) }*),
-        () => Seq(${ Varargs(classes) }*)
-      )
-    }
+    val clazz = classOfExpr(TypeRepr.of[T])
+    '{ new Evolutions[T]($clazz.asInstanceOf[Class[T]], () => Seq(${ Varargs(builders) }*)) }
 
   /** The code building the [[EvolutionBuilder]] of `T` from its annotations. */
   private def builderImpl[T: Type](using Quotes): Expr[EvolutionBuilder[T]] =

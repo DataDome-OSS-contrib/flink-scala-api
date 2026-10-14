@@ -21,23 +21,21 @@ private[api] object EvolutionMacro {
     val tpe    = weakTypeOf[T]
     val symbol = tpe.typeSymbol
     // A case object has no companion of its own to declare it: the sealed trait it belongs to declares it
-    val (moduleChildren, classChildren) =
-      if (symbol.isClass) subtypesOf(c)(symbol.asClass).serialized.partition(_.isModuleClass) else (Nil, Nil)
-    val builders       = tpe :: moduleChildren.map(_.asType.toType)
-    val subtypeClasses =
-      classChildren.map(child => q"_root_.scala.reflect.classTag[${child.asType.toType}].runtimeClass")
+    val moduleChildren =
+      if (symbol.isClass) subtypesOf(c)(symbol.asClass).serialized.filter(_.isModuleClass) else Nil
+    val builders = tpe :: moduleChildren.map(_.asType.toType)
     c.Expr[Evolutions[T]](q"""
       new _root_.org.apache.flinkx.api.evolution.Evolutions[$tpe](
         _root_.scala.reflect.classTag[$tpe].runtimeClass.asInstanceOf[_root_.java.lang.Class[$tpe]],
         () => _root_.scala.Seq[_root_.org.apache.flinkx.api.evolution.EvolutionBuilder[_]](..${builders.map(
         builderOf(c)
-      )}),
-        () => _root_.scala.Seq[_root_.java.lang.Class[_]](..$subtypeClasses)
+      )})
       )
     """)
   }
 
-  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived.
+  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived,
+    * and hand the evolutions it declares over to the derivation.
     */
   def evolvableImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Evolvable[T]] = {
     import c.universe._
@@ -54,7 +52,26 @@ private[api] object EvolutionMacro {
         c.abort(c.enclosingPosition, companionNotEvolving(symbol.fullName))
       }
     }
-    c.Expr[Evolvable[T]](q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe](${versionOf(c)(symbol)})")
+    val declaring = declaringCompanion(c)(tpe).fold[Tree](q"_root_.org.apache.flinkx.api.evolution.Evolutions.none") {
+      companion => q"${internal.gen.mkAttributedRef(companion)}.evolutions"
+    }
+    c.Expr[Evolvable[T]](
+      q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe](${versionOf(c)(symbol)}, () => $declaring)"
+    )
+  }
+
+  /** The companion declaring the evolutions of the given type, if it extends [[Evolving]]: its own, or the one of the
+    * nearest sealed trait it belongs to for a case object, which has no companion of its own.
+    */
+  private def declaringCompanion(c: blackbox.Context)(tpe: c.Type): Option[c.Symbol] = {
+    import c.universe._
+    def evolving(companion: Symbol) = companion != NoSymbol && companion.typeSignature <:< typeOf[Evolving[_]]
+    val symbol                      = tpe.typeSymbol
+    if (!symbol.isModuleClass) Some(symbol.companion).filter(evolving)
+    else
+      tpe.baseClasses.drop(1).collectFirst {
+        case base if base.asClass.isSealed && evolving(base.companion) => base.companion
+      }
   }
 
   /** The subtypes the derivation serializes, with the intermediate sealed traits it flattens on the way.

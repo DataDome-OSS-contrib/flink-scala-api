@@ -12,11 +12,11 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   override protected def beforeEach(): Unit = Evolutions.reset()
 
-  /** The windows registered for an ADT, as names, versions and current classes. */
-  private def windowsOf[T](clazz: Class[T]): Map[String, Seq[(Int, String)]] =
-    Evolutions
-      .declaredEvolutions(clazz.getClassLoader)
-      .map { case (name, evolutions) => name -> evolutions.toSeq.map(e => e.formerVersion -> e.currentClass.getName) }
+  /** The windows an ADT declares, as names, versions and current classes. */
+  private def windowsOf(evolutions: Evolutions[_]): Map[String, Seq[(Int, String)]] =
+    evolutions.byClassName.map { case (name, declared) =>
+      name -> declared.toSeq.map(e => e.formerVersion -> e.currentClass.getName)
+    }.toMap
 
   /** What the evolutions do to a former schema, which compares the rules themselves and the order they run in. */
   private def dryRunOf[T](
@@ -24,14 +24,11 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
       formerVersion: Int,
       formerFields: Array[String]
   ): Option[Either[Seq[String], Seq[Option[Int]]]] =
-    Evolutions
-      .find[T](formerName, formerVersion, getClass.getClassLoader)
+    Option(Evolutions.get[T](formerName, formerVersion, getClass.getClassLoader))
       .map(_.dryRun(formerFields).left.map(_.map(_.getMessage).toSeq).map(_.toSeq))
 
   it should "declare the former and the current name of a case class" in {
-    Evolutions.get(classOf[Probe], 2)
-
-    windowsOf(classOf[Probe]).keySet shouldBe Set(
+    windowsOf(Probe.evolutions).keySet shouldBe Set(
       classOf[Probe].getName,
       classOf[Probe].getName.replace("Probe", "FormerProbe"),
       classOf[Probe].getName.replace("Probe", "GoneType") // Declared deleted, so it resolves to the marker
@@ -39,9 +36,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   }
 
   it should "declare a sealed trait and the former name it was renamed from" in {
-    Evolutions.get(classOf[Pet], 2)
-
-    windowsOf(classOf[Pet]).keySet should contain allOf (
+    windowsOf(Pet.evolutions).keySet should contain allOf (
       classOf[Pet].getName,
       classOf[Pet].getName.replace("Pet", "Animal")
     )
@@ -51,8 +46,6 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   it should "apply the same field evolutions as the derivation" in {
     val formerName   = classOf[Probe].getName.replace("Probe", "FormerProbe")
     val formerFields = Array("formerId", "count", "gone")
-
-    Evolutions.get(classOf[Probe], 2)
 
     val failures = dryRunOf[Probe](formerName, 0, formerFields)
     withClue("the former name must resolve:")(failures shouldBe defined)

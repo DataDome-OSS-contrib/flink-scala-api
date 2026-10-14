@@ -5,7 +5,7 @@ import org.apache.flink.core.memory.DataInputViewStreamWrapper
 import org.apache.flink.util.InstantiationUtil
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.evolution.EvolutionTest.Animal
+import org.apache.flinkx.api.evolution.EvolutionTest.{Action, Animal, Cart, Click}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -36,6 +36,12 @@ class EvolutionOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUtil
     val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader)
     input.readInt() // Snapshot size
     restoredSnapshot.restoreSerializer().deserialize(input)
+  }
+
+  // The job graph ships the evolutions with the serializers, so the mappers the macros generate must be serializable
+  it should "ship the serializers of ADTs declaring @transformed and @postEvolution to a TaskManager" in {
+    roundtrip(shipToTaskManager(createSerializer[Click]), Click("id", Nil, 7, "5"))
+    roundtrip(shipToTaskManager(createSerializer[Action]), Cart(2))
   }
 
   // The former names of the trait, of its subtype and of its field are only known from the annotations of the current
