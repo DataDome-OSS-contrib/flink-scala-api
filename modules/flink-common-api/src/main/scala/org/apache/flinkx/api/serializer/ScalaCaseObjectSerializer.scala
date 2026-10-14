@@ -56,11 +56,12 @@ object ScalaCaseObjectSerializer {
 
     override def getCurrentVersion: Int = CurrentVersion
 
-    /** Compatible when the same case object is serialized. */
+    /** Compatible when the same case object is serialized, possibly under a former name. */
     override def resolveSchemaCompatibility(
         restoredSnapshot: TypeSerializerSnapshot[T]
     ): TypeSerializerSchemaCompatibility[T] = restoredSnapshot match {
-      case restored: ScalaCaseObjectSerializerSnapshot[_] if restored.clazz.getName == clazz.getName =>
+      case restored: ScalaCaseObjectSerializerSnapshot[_]
+          if restored.evolution.currentClass.getName == evolution.currentClass.getName =>
         TypeSerializerSchemaCompatibility.compatibleAsIs()
       case _ =>
         TypeSerializerSchemaCompatibility.incompatible()

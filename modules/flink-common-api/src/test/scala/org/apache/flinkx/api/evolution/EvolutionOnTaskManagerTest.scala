@@ -10,8 +10,6 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.io.FileInputStream
-
 /** Reproduces what a TaskManager does with a serializer: it is Java-deserialized from the job graph into a JVM where
   * the derivation never ran, so the [[Evolutions]] registry only holds what the companions declare when asked.
   */
@@ -32,7 +30,7 @@ class EvolutionOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUtil
 
   /** Restore the former serializer from the checkpoint and read the former data with it, as a TaskManager does. */
   private def restoreFromFile[T](fileName: String): T = {
-    val input            = new DataInputViewStreamWrapper(new FileInputStream(snapshotPath(fileName)))
+    val input            = new DataInputViewStreamWrapper(snapshotInput(fileName))
     val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader)
     input.readInt() // Snapshot size
     restoredSnapshot.restoreSerializer().deserialize(input)

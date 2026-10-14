@@ -72,15 +72,23 @@ class Scala3EnumValueSerializerSnapshot[T](
 
   override def getCurrentVersion: Int = Scala3EnumValueSerializerSnapshot.CurrentVersion
 
-  /** Compatible when the same enum value is serialized. */
+  /** Compatible when the same enum value is serialized, possibly under a former name. */
   override def resolveSchemaCompatibility(
       restoredSnapshot: TypeSerializerSnapshot[T]
   ): TypeSerializerSchemaCompatibility[T] = restoredSnapshot match {
     case restored: Scala3EnumValueSerializerSnapshot[?]
-        if restored.companionClass.getName == companionClass.getName && restored.enumValueName == enumValueName =>
+        if restored.evolution.currentClass.getName == evolution.currentClass.getName &&
+          restored.currentValueName.contains(enumValueName) =>
       TypeSerializerSchemaCompatibility.compatibleAsIs()
     case _ =>
       TypeSerializerSchemaCompatibility.incompatible()
+  }
+
+  /** The current name of the enum value this snapshot records, none if it is deleted. */
+  private def currentValueName: Option[String] = evolution.getEnumValueEvolution(enumValueName) match {
+    case Unchanged            => Some(enumValueName)
+    case Renamed(currentName) => Some(currentName)
+    case Deleted(_)           => None
   }
 
   override def restoreSerializer(): TypeSerializer[T] =

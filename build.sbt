@@ -234,6 +234,32 @@ lazy val mimaSettings = Seq(
     // The ADT serializers take the schema version and the former member names required by the schema evolution feature
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CaseClassSerializer.this"),
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CoproductSerializer.this"),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.this"
+    ),
+    ProblemFilters.exclude[IncompatibleMethTypeProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer#ScalaCaseObjectSerializerSnapshot.this"
+    ),
+    // The case object snapshot holds the evolution of the case object instead of its class
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer#ScalaCaseObjectSerializerSnapshot.clazz"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer#ScalaCaseObjectSerializerSnapshot.clazz_="
+    ),
+    // The derivation of an ADT reads its evolutions from an implicit Evolvable
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.CommonTaggedDerivation.join"),
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("org.apache.flinkx.api.CommonTaggedDerivation.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TaggedDerivation.split"),
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("org.apache.flinkx.api.TaggedDerivation.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TypeInformationDerivation.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TypeInformationDerivation.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.auto.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.auto.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.semiauto.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.semiauto.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializers.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializers.split"),
     // Former class names are now resolved by Evolutions.resolveFormerClass, which also maps the deleted ones
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.util.ClassUtil.resolveClassByName"),
     // Case class field names are held in an Array, as the serializers and their snapshots do
@@ -242,11 +268,17 @@ lazy val mimaSettings = Seq(
     ),
     // The Scala 3 enum serializers take the schema version and the enum class instead of its companion module class
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.Scala3EnumSerializer.this"),
-    ProblemFilters.exclude[IncompatibleSignatureProblem](
+    ProblemFilters.exclude[DirectMissingMethodProblem](
       "org.apache.flinkx.api.serializer.Scala3EnumValueSerializer.this"
     ),
-    ProblemFilters.exclude[IncompatibleSignatureProblem](
+    ProblemFilters.exclude[DirectMissingMethodProblem](
       "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.this"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.enumValueName"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.enumValueName_="
     ),
     ProblemFilters.exclude[DirectMissingMethodProblem](
       "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.companionClass"

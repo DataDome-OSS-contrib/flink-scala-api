@@ -23,8 +23,13 @@ import scala.reflect.ClassTag
 
 trait TestUtils extends Matchers with Inspectors {
 
-  protected def snapshotPath(fileName: String): String =
-    getClass.getResource("/").toURI.resolve(s"../../../src/test/resources/$fileName.snapshot").getPath
+  /** Read the snapshot file of the given name from the test resources. */
+  protected def snapshotInput(fileName: String): InputStream =
+    new ByteArrayInputStream(getClass.getResourceAsStream(s"/$fileName.snapshot").readAllBytes())
+
+  // sbt runs the forked tests from the root of the build
+  private def snapshotPath(fileName: String): String =
+    s"modules/flink-common-api/src/test/resources/$fileName.snapshot"
 
   def serializeToFile[T](fileName: String, data: T)(implicit ser: TypeSerializer[T]): Unit = {
     val output = new DataOutputViewStreamWrapper(new FileOutputStream(snapshotPath(fileName)))
@@ -42,7 +47,7 @@ trait TestUtils extends Matchers with Inspectors {
       expected: T,
       assertion: (T, T) => Assertion = (_: T) shouldBe (_: T)
   )(implicit classTag: ClassTag[T]): Unit = {
-    val input            = new DataInputViewStreamWrapper(new FileInputStream(snapshotPath(fileName)))
+    val input            = new DataInputViewStreamWrapper(snapshotInput(fileName))
     val totalsize        = input.available()
     val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, classTag.runtimeClass.getClassLoader)
     val snapSize         = totalsize - input.available()
@@ -63,7 +68,7 @@ trait TestUtils extends Matchers with Inspectors {
     *   Name of the snapshot file, without its extension
     */
   def restoreSerializerFromFile[T](fileName: String)(implicit classTag: ClassTag[T]): TypeSerializer[T] = {
-    val input = new DataInputViewStreamWrapper(new FileInputStream(snapshotPath(fileName)))
+    val input = new DataInputViewStreamWrapper(snapshotInput(fileName))
     try
       TypeSerializerSnapshot
         .readVersionedSnapshot[T](input, classTag.runtimeClass.getClassLoader)

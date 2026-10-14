@@ -10,8 +10,6 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.io.FileInputStream
-
 /** Reproduces what a TaskManager does with an enum serializer: it is Java-deserialized from the job graph into a JVM
   * where the derivation never ran, so the [[Evolutions]] registry only holds what the companions declare when asked.
   */
@@ -25,7 +23,7 @@ class Scala3EnumOnTaskManagerTest extends AnyFlatSpec with Matchers with TestUti
     Evolutions.reset() // Fresh TaskManager JVM: the derivation never ran here
     InstantiationUtil.deserializeObject[TypeSerializer[FailureCategory]](jobGraphBytes, getClass.getClassLoader)
 
-    val input = new DataInputViewStreamWrapper(new FileInputStream(snapshotPath("Failure-Type-PARSING_TYPE-v0")))
+    val input            = new DataInputViewStreamWrapper(snapshotInput("Failure-Type-PARSING_TYPE-v0"))
     val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[FailureCategory](input, getClass.getClassLoader)
     input.readInt() // Snapshot size
     restoredSnapshot.restoreSerializer().deserialize(input) shouldBe FailureCategory.PARSING
