@@ -19,4 +19,15 @@ object UserFixtures {
 
   def intToLabel(i: Int): String              = i.toString
   def bump(version: Int, order: Order): Order = order.copy(note = order.note + version)
+
+  /** Its mappers are private to the package, the narrowest scope the annotations of the ADT can see. */
+  @version(1)
+  @postEvolution(Invoice.stamp)
+  case class Invoice(@transformed(since = 1, Invoice.toAmount) amount: String)
+  object Invoice extends Evolving[Invoice] {
+    lazy val evolutions = Evolutions[Invoice]
+
+    private[example] def toAmount(cents: Int): String                   = s"$cents cents"
+    private[example] def stamp(version: Int, invoice: Invoice): Invoice = Invoice(s"${invoice.amount} since v$version")
+  }
 }

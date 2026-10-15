@@ -51,7 +51,7 @@ object EvolutionErrorFixtures {
   /** Derives its type information while initializing, before declaring the evolutions the derivation reads. */
   @version(1)
   case class DerivedBeforeDeclared(a: String)
-  object DerivedBeforeDeclared extends IsolatedEvolving[DerivedBeforeDeclared] {
+  object DerivedBeforeDeclared extends Evolving[DerivedBeforeDeclared] {
     import org.apache.flink.api.common.typeinfo.TypeInformation
     import org.apache.flinkx.api.auto._
 
@@ -62,7 +62,7 @@ object EvolutionErrorFixtures {
   /** Declares its evolutions in a strict val, which a derivation running while it initializes would read as null. */
   @version(1)
   case class EagerlyDeclared(a: String)
-  object EagerlyDeclared extends IsolatedEvolving[EagerlyDeclared] {
+  object EagerlyDeclared extends Evolving[EagerlyDeclared] {
     val evolutions = Evolutions[EagerlyDeclared]
   }
 
@@ -151,13 +151,13 @@ object EvolutionErrorFixtures {
 
   @version(1)
   sealed trait CorrectDeletedClassesOnSealedTraitSubtype
-  object CorrectDeletedClassesOnSealedTraitSubtype extends IsolatedEvolving[CorrectDeletedClassesOnSealedTraitSubtype] {
+  object CorrectDeletedClassesOnSealedTraitSubtype extends Evolving[CorrectDeletedClassesOnSealedTraitSubtype] {
     lazy val evolutions = Evolutions[CorrectDeletedClassesOnSealedTraitSubtype]
   }
   @version(1)
   @deletedClasses(since = 1, "A")
   sealed trait CorrectDeletedClassesOnSubtype extends CorrectDeletedClassesOnSealedTraitSubtype
-  object CorrectDeletedClassesOnSubtype       extends IsolatedEvolving[CorrectDeletedClassesOnSubtype] {
+  object CorrectDeletedClassesOnSubtype       extends Evolving[CorrectDeletedClassesOnSubtype] {
     lazy val evolutions = Evolutions[CorrectDeletedClassesOnSubtype]
   }
   case object CorrectDeletedClassesCaseObject extends CorrectDeletedClassesOnSubtype
@@ -169,101 +169,61 @@ object EvolutionErrorFixtures {
 
   @version(1)
   sealed trait CorrectPostEvolutionOnSealedTraitSubtype
-  object CorrectPostEvolutionOnSealedTraitSubtype extends IsolatedEvolving[CorrectPostEvolutionOnSealedTraitSubtype] {
+  object CorrectPostEvolutionOnSealedTraitSubtype extends Evolving[CorrectPostEvolutionOnSealedTraitSubtype] {
     lazy val evolutions = Evolutions[CorrectPostEvolutionOnSealedTraitSubtype]
   }
   @version(1)
   @postEvolution(updateAction)
   case class CorrectPostEvolutionOnSubtype() extends CorrectPostEvolutionOnSealedTraitSubtype
-  object CorrectPostEvolutionOnSubtype       extends IsolatedEvolving[CorrectPostEvolutionOnSubtype] {
+  object CorrectPostEvolutionOnSubtype       extends Evolving[CorrectPostEvolutionOnSubtype] {
     lazy val evolutions = Evolutions[CorrectPostEvolutionOnSubtype]
   }
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongAddedField(@added(since = 2) a: String = "")
-  object WrongAddedField extends IsolatedEvolving[WrongAddedField] { lazy val evolutions = Evolutions[WrongAddedField] }
+  object WrongAddedField extends Evolving[WrongAddedField] { lazy val evolutions = Evolutions[WrongAddedField] }
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
-  object WrongRenamedField extends IsolatedEvolving[WrongRenamedField] {
+  object WrongRenamedField extends Evolving[WrongRenamedField] {
     lazy val evolutions = Evolutions[WrongRenamedField]
   }
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
-  object WrongTransformedField extends IsolatedEvolving[WrongTransformedField] {
+  object WrongTransformedField extends Evolving[WrongTransformedField] {
     lazy val evolutions = Evolutions[WrongTransformedField]
   }
 
   @version(2)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   @deletedFields(since = 2, "wrongFieldName")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongDeletedField(a: String)
-  object WrongDeletedField extends IsolatedEvolving[WrongDeletedField] {
+  object WrongDeletedField extends Evolving[WrongDeletedField] {
     lazy val evolutions = Evolutions[WrongDeletedField]
   }
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongSeveralFields(a: String, missing: String)
-  object WrongSeveralFields extends IsolatedEvolving[WrongSeveralFields] {
+  object WrongSeveralFields extends Evolving[WrongSeveralFields] {
     lazy val evolutions = Evolutions[WrongSeveralFields]
   }
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongFieldNotUsed(a: String)
-  object WrongFieldNotUsed extends IsolatedEvolving[WrongFieldNotUsed] {
+  object WrongFieldNotUsed extends Evolving[WrongFieldNotUsed] {
     lazy val evolutions = Evolutions[WrongFieldNotUsed]
   }
 
   @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Click")
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$ClickEvent")
   case class WrongMissingField(a: String, missingField: String)
-  object WrongMissingField extends IsolatedEvolving[WrongMissingField] {
+  object WrongMissingField extends Evolving[WrongMissingField] {
     lazy val evolutions = Evolutions[WrongMissingField]
   }
-
-  @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Event")
-  @deletedClasses(since = 1, throwOnInstance = true, "org.apache.flinkx.api.evolution.EvolutionTest$View")
-  sealed trait WrongDeletedClassesWithSubtypeInstanceThrow
-  object WrongDeletedClassesWithSubtypeInstanceThrow
-      extends IsolatedEvolving[WrongDeletedClassesWithSubtypeInstanceThrow] {
-    lazy val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceThrow]
-  }
-
-  @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Purchase")
-  case object WrongDeletedClassesWithSubtypeInstanceThrowSubtype extends WrongDeletedClassesWithSubtypeInstanceThrow
-
-  @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Event")
-  @deletedClasses(since = 1, throwOnInstance = false, "org.apache.flinkx.api.evolution.EvolutionTest$View")
-  sealed trait WrongDeletedClassesWithSubtypeInstanceToNull
-  object WrongDeletedClassesWithSubtypeInstanceToNull
-      extends IsolatedEvolving[WrongDeletedClassesWithSubtypeInstanceToNull] {
-    lazy val evolutions = Evolutions[WrongDeletedClassesWithSubtypeInstanceToNull]
-  }
-
-  @version(1)
-  @renamed(since = 1, "org.apache.flinkx.api.evolution.EvolutionTest$Purchase")
-  case object WrongDeletedClassesWithSubtypeInstanceToNullSubtype extends WrongDeletedClassesWithSubtypeInstanceToNull
 }

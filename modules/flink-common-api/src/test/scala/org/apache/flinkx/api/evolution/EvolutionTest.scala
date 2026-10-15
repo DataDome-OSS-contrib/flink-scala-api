@@ -283,11 +283,9 @@ object EvolutionTest {
   case class AddedFieldWithoutAnnotation(a: String, b: Int = 42)
 
   @version(1)
-  @renamed(since = 1, "Click")
   @deletedFields(since = 1, "inFileClicks", "identifier", "b")
-  @deletedClasses(since = 1, throwOnInstance = false, "ClickEvent")
   case class WrongUntransformedField(@renamed(since = 1, "a") renamedA: String, fieldNotInFile: String)
-  object WrongUntransformedField extends IsolatedEvolving[WrongUntransformedField] {
+  object WrongUntransformedField extends Evolving[WrongUntransformedField] {
     lazy val evolutions = Evolutions[WrongUntransformedField]
   }
 
@@ -337,15 +335,17 @@ object EvolutionTest {
   @version(1)
   @renamed(since = 1, "SharedFormerName")
   case class FirstClaimingFormerName(a: String)
-  object FirstClaimingFormerName extends IsolatedEvolving[FirstClaimingFormerName] {
-    lazy val evolutions = Evolutions[FirstClaimingFormerName]
+  object FirstClaimingFormerName extends Evolving[FirstClaimingFormerName] {
+    def evolutions: Evolutions[FirstClaimingFormerName] =
+      ConflictingScan.evolutionsOf(classOf[FirstClaimingFormerName], Evolutions[FirstClaimingFormerName])
   }
 
   @version(1)
   @renamed(since = 1, "SharedFormerName")
   case class SecondClaimingFormerName(a: String)
-  object SecondClaimingFormerName extends IsolatedEvolving[SecondClaimingFormerName] {
-    lazy val evolutions = Evolutions[SecondClaimingFormerName]
+  object SecondClaimingFormerName extends Evolving[SecondClaimingFormerName] {
+    def evolutions: Evolutions[SecondClaimingFormerName] =
+      ConflictingScan.evolutionsOf(classOf[SecondClaimingFormerName], Evolutions[SecondClaimingFormerName])
   }
 
   @version(1)

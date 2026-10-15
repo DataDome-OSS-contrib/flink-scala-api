@@ -4,10 +4,13 @@ package org.apache.flinkx.api.evolution
   * {{{
   * @version(2)
   * @renamed(since = 2, "FormerOrder")
+  * @postEvolution(Order.fix)
   * case class Order(id: String, @added(since = 2) note: String = "none")
   *
   * object Order extends Evolving[Order] {
   *   lazy val evolutions = Evolutions[Order]
+  *
+  *   private[example] def fix(version: Int, order: Order): Order = order // Visible where Order is declared
   * }
   * }}}
   *

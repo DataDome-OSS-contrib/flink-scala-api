@@ -264,7 +264,7 @@ private[api] object EvolutionMacro {
         c.abort(c.enclosingPosition, notAllowed(nameOf(annotation), target))
 
       def isEvolutionAnnotation(annotation: Annotation): Boolean =
-        annotation.tree.tpe <:< typeOf[EvolutionAnnotation]
+        annotation.tree.tpe.baseClasses.contains(typeOf[EvolutionAnnotation].typeSymbol)
 
       symbol.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
         if (!AnnotationRules.allowedOnAdt(nameOf(annotation), version, isCoproduct, hasVersionedAncestor)) {

@@ -322,7 +322,7 @@ lazy val `flink` = (projectMatrix in file("modules/flink-common-api"))
   )
 
 lazy val `flink-1-api` = (projectMatrix in file("modules/flink-1-api"))
-  .dependsOn(`flink`)
+  .dependsOn(`flink` % "compile->compile;test->test")
   .settings(commonSettings)
   .settings(mimaSettings)
   .customRow(
@@ -336,7 +336,7 @@ lazy val `flink-1-api` = (projectMatrix in file("modules/flink-1-api"))
   )
 
 lazy val `flink-2-api` = (projectMatrix in file("modules/flink-2-api"))
-  .dependsOn(`flink`)
+  .dependsOn(`flink` % "compile->compile;test->test")
   .settings(commonSettings)
   .settings(mimaSettings)
   .customRow(
