@@ -23,27 +23,27 @@ class ConstructorCompatTest extends AnyFlatSpec with Matchers {
 
   it should "lookup constructor with only default values" in {
     val constructor = ConstructorCompatImpl.lookupConstructor(classOf[DefaultValues])
-    constructor.apply(Array.empty) shouldBe a[DefaultValues]
+    constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[DefaultValues]
   }
 
   it should "lookup constructor with an apply in the case class" in {
     val constructor = ConstructorCompatImpl.lookupConstructor(classOf[ApplyInCaseClass])
-    constructor.apply(Array.empty) shouldBe a[ApplyInCaseClass]
+    constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[ApplyInCaseClass]
   }
 
   it should "lookup constructor with an apply in the companion object" in {
     val constructor = ConstructorCompatImpl.lookupConstructor(classOf[ApplyInObject])
-    constructor.apply(Array.empty) shouldBe a[ApplyInObject]
+    constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[ApplyInObject]
   }
 
   it should "lookup constructor with the longest apply in the companion object" in {
     val constructor = ConstructorCompatImpl.lookupConstructor(classOf[LongestApplyInObject])
-    constructor.apply(Array.empty) shouldBe a[LongestApplyInObject]
+    constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[LongestApplyInObject]
   }
 
   it should "lookup constructor with a secondary constructor" in {
     val constructor = ConstructorCompatImpl.lookupConstructor(classOf[SecondaryConstructor])
-    constructor.apply(Array.empty) shouldBe a[SecondaryConstructor]
+    constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[SecondaryConstructor]
   }
 
   /* Commented out failing test in CI: not throwing as expected with JDK 17
@@ -56,15 +56,14 @@ class ConstructorCompatTest extends AnyFlatSpec with Matchers {
   }
    */
 
-  it should "append defaults in parameter order for 10 or more parameters" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[TenParameters])
-    constructor.apply((1 to 9).map(_.asInstanceOf[AnyRef]).toArray) shouldBe TenParameters(1, 2, 3, 4, 5, 6, 7, 8, 9)
-  }
-
-  it should "append several defaults in parameter order past the 9th parameter" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[TwelveParameters])
-    constructor.apply((1 to 9).map(_.asInstanceOf[AnyRef]).toArray) shouldBe
-      TwelveParameters(1, 2, 3, 4, 5, 6, 7, 8, 9)
+  // The constructor lookup no longer fills the missing arguments with the case class default values: a field added to
+  // a case class has to be declared with the @added annotation, which is what supplies its default value.
+  it should "throw when an argument is missing, even for a parameter having a default value" in {
+    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[DefaultValues])
+    val exception   = intercept[IllegalArgumentException] {
+      constructor.apply(Array.empty)
+    }
+    exception.getMessage should startWith("wrong number of arguments")
   }
 
   it should "lookup apply with an enum case class" in {
@@ -112,34 +111,6 @@ object ConstructorCompatTest {
   case class LongestSecondaryConstructor(a: Int = 1, b: String = "b") {
     def this(a: Int, b: String, c: String) = this(a, b + c)
   }
-
-  case class TenParameters(
-      p1: Int = 0,
-      p2: Int = 0,
-      p3: Int = 0,
-      p4: Int = 0,
-      p5: Int = 0,
-      p6: Int = 0,
-      p7: Int = 0,
-      p8: Int = 0,
-      p9: Int = 0,
-      p10: String = "ten"
-  )
-
-  case class TwelveParameters(
-      p1: Int = 0,
-      p2: Int = 0,
-      p3: Int = 0,
-      p4: Int = 0,
-      p5: Int = 0,
-      p6: Int = 0,
-      p7: Int = 0,
-      p8: Int = 0,
-      p9: Int = 0,
-      p10: String = "ten",
-      p11: Option[String] = Some("eleven"),
-      p12: Boolean = true
-  )
 
   enum EnumWithCaseClass {
     case EnumCaseClass(a: String, b: Int)

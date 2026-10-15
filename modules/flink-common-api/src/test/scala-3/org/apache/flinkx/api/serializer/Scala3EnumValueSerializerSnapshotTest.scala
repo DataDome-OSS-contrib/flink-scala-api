@@ -2,6 +2,7 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
+import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshotTest.Failure
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -31,7 +32,7 @@ class Scala3EnumValueSerializerSnapshotTest extends AnyFlatSpec with Matchers {
   }
 
   private def enumValueSerializer(enumValueName: String) =
-    new Scala3EnumValueSerializer[Failure](Failure.getClass, enumValueName)
+    new Scala3EnumValueSerializer[Failure](Evolutions.get(classOf[Failure], 0), 0, enumValueName)
 
 }
 
