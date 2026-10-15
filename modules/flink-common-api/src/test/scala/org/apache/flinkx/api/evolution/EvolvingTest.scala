@@ -5,7 +5,7 @@ import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
 import org.apache.flinkx.api.evolution.EvolutionRenamedTest.{Horse, Pet, Pony}
-import org.apache.flinkx.api.evolution.EvolvingTest.{Plain, plainCompanionInitialized}
+import org.apache.flinkx.api.evolution.EvolvingTest.{Plain, ThroughClass, ThroughTrait, plainCompanionInitialized}
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -52,6 +52,13 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     Evolutions.get(classOf[Probe], 2)
 
     Evolutions.get[Probe](FormerProbe, 0, getClass.getClassLoader).currentClass shouldBe classOf[Probe]
+  }
+
+  // The macros accept a companion extending Evolving through a type of its own: the scan must find it as well
+  it should "resolve the former names declared by companions extending Evolving indirectly" in {
+    val cl = getClass.getClassLoader
+    Evolutions.get[Any](s"${classOf[ThroughTrait].getName}Former", 0, cl).currentClass shouldBe classOf[ThroughTrait]
+    Evolutions.get[Any](s"${classOf[ThroughClass].getName}Former", 0, cl).currentClass shouldBe classOf[ThroughClass]
   }
 
   // Any companion may declare the former name looked up: all of them are declared on the first lookup
@@ -137,5 +144,18 @@ object EvolvingTest {
   object Plain {
     plainCompanionInitialized = true
   }
+
+  trait EvolvingTrait[T]          extends Evolving[T]
+  abstract class EvolvingClass[T] extends EvolvingTrait[T]
+
+  @version(1)
+  @renamed(since = 1, "ThroughTraitFormer")
+  case class ThroughTrait(a: String)
+  object ThroughTrait extends EvolvingTrait[ThroughTrait] { lazy val evolutions = Evolutions[ThroughTrait] }
+
+  @version(1)
+  @renamed(since = 1, "ThroughClassFormer")
+  case class ThroughClass(a: String)
+  object ThroughClass extends EvolvingClass[ThroughClass] { lazy val evolutions = Evolutions[ThroughClass] }
 
 }

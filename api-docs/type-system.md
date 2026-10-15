@@ -432,6 +432,8 @@ The evolutions are read from the annotations of your source code, at compile tim
 of the ADT, which extends `Evolving`. The annotations, `Evolving` and `Evolutions` all come with a single import:
 
 ```scala
+package org.example
+
 import org.apache.flinkx.api.evolution._
 
 @version(2)
@@ -442,7 +444,7 @@ case class Order(id: String, @added(since = 2) note: String = "none")
 object Order extends Evolving[Order] {
   lazy val evolutions = Evolutions[Order]
 
-  private[this] def fix(version: Int, order: Order): Order = order // Only the annotations need to see the mapper
+  private[example] def fix(version: Int, order: Order): Order = order // Visible where Order is declared
 }
 ```
 

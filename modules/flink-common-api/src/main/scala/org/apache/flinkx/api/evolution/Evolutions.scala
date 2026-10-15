@@ -85,19 +85,10 @@ object Evolutions extends EvolutionsFactory {
   /** The declarations of the companions one class loader loads, registered on first use. */
   private final class Registry(classLoader: ClassLoader) {
 
-    @volatile private var declared: Try[Map[String, Array[Evolution[_]]]] = _
+    // A failure is kept, to be reported again on every lookup
+    private lazy val declared: Try[Map[String, Array[Evolution[_]]]] = Try(declareCompanions(classLoader))
 
-    def evolutions: Map[String, Array[Evolution[_]]] = {
-      if (declared == null) synchronized {
-        if (declared == null) declared = Try(declareCompanions(classLoader))
-      }
-      declared.get
-    }
-
-    @VisibleForTesting
-    private[Evolutions] def replace(byClassName: Map[String, Array[Evolution[_]]]): Unit = synchronized {
-      declared = Try(evolutions ++ byClassName)
-    }
+    def evolutions: Map[String, Array[Evolution[_]]] = declared.get
 
   }
 
@@ -180,15 +171,6 @@ object Evolutions extends EvolutionsFactory {
   @VisibleForTesting
   private[api] def get[T](clazz: Class[T], version: Int): Evolution[T] =
     get[T](clazz.getName, version, clazz.getClassLoader)
-
-  /** Register the given declarations in place of the ones of the same names, for the fixtures not found by the scan. */
-  @VisibleForTesting
-  private[api] def declareInstead(evolutions: Evolutions[_]): Unit =
-    registryOf(evolutions.currentClass.getClassLoader).replace(
-      evolutions.byClassName.groupMapReduce(_._1)(_._2)(_ ++ _).map { case (className, declared) =>
-        className -> sortDeclarations(className, declared)
-      }
-    )
 
   /** Every [[Evolution]] registered by the given class loader, by class name. */
   @VisibleForTesting
