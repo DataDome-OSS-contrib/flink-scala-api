@@ -5,20 +5,16 @@ import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.Unchanged
 import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, FieldIndex}
-import org.apache.flinkx.api.serializer.ConstructorCompat
 
-/** Immutable bundle of evolutions to apply on an ADT during deserialization.
-  *
-  * Produced by [[EvolutionBuilder.build]] and stored in [[Evolutions]] at derivation time. An [[Evolution]] describes
-  * one class name over one version boundary: its `fieldEvolutions` are the ones migrating the data written at
-  * `formerVersion`, so they are applied without further filtering.
+/** Immutable view of evolutions to apply on an ADT during deserialization to migrate its data written at a former
+  * version to its current schema.
   *
   * Thread-safe to read concurrently.
   *
-  * @param className
-  *   Name the evolution is registered under: a former ADT class name, or the current one
+  * @param formerClassName
+  *   Name the data was written under: a former ADT class name, or the current one
   * @param formerVersion
-  *   Former schema version this evolution migrates from, i.e. the version the data was written at
+  *   Schema version the data was written at, which this evolution migrates from
   * @param currentVersion
   *   Current schema version of the ADT, i.e. the data is migrated to this version
   * @param currentClass
@@ -27,48 +23,44 @@ import org.apache.flinkx.api.serializer.ConstructorCompat
   *   Current ADT member names, in declaration order: the field names of a case class, the fully qualified names of the
   *   subtypes of a sealed trait, or the value names of a Scala 3 enum
   * @param fieldEvolutions
-  *   Sorted field-level evolutions to replay during deserialization
-  * @param formerEnumValueToEvolution
-  *   Evolutions of the Scala 3 enum values, by former value name
+  *   Sorted field-level evolutions migrating the former data
+  * @param enumValueEvolutions
+  *   Evolutions of the Scala 3 enum values migrating the former data, by former value name
   * @param postEvolution
-  *   A mapper function taking as parameters the former version and the current ADT instance restored from it
+  *   The mapper applying to the former data, taking as parameters the former version and the current ADT instance
+  *   restored from it
   * @tparam T
   *   the type on which the Evolution applies
   */
 @Internal
 sealed class Evolution[T] private[evolution] (
-    val className: String,
+    val formerClassName: String,
     val formerVersion: Int,
     val currentVersion: Int,
     val currentClass: Class[T],
     private[evolution] val currentMemberNames: Array[String] = Array.empty,
     private val fieldEvolutions: Array[FieldEvolution] = Array.empty,
-    private val formerEnumValueToEvolution: Map[String, EnumValueEvolution] = Map.empty,
+    private val enumValueEvolutions: Map[String, EnumValueEvolution] = Map.empty,
     private val postEvolution: Option[PostEvolutionMapper[T]] = None
 ) extends Serializable {
 
   /** Whether the evolution can be skipped. Returns `true` (fast path) when:
-    *   - no field evolution is declared from the version this evolution migrates from,
-    *   - no `@postEvolution` mapper applies to the former version, and
+    *   - no field evolution migrates the former data,
+    *   - no `@postEvolution` mapper applies to it, and
     *   - the former member names match the current declaration order.
     *
-    * @param writtenVersion
-    *   Former schema version of the ADT, the one the data was written at
     * @param formerMemberNames
     *   Former ADT member names, in declaration order
     */
-  def isAvoidable(writtenVersion: Int, formerMemberNames: Array[String]): Boolean =
-    fieldEvolutions.isEmpty && !isPostEvolved(writtenVersion) && formerMemberNames.sameElements(currentMemberNames)
+  def isAvoidable(formerMemberNames: Array[String]): Boolean =
+    fieldEvolutions.isEmpty && postEvolution.isEmpty && formerMemberNames.sameElements(currentMemberNames)
 
-  /** Apply the `@postEvolution` mapper to an instance read from data at given former written version. */
-  def postEvolve(writtenVersion: Int, instance: T): T =
-    if (isPostEvolved(writtenVersion)) postEvolution.get(writtenVersion, instance) else instance
+  /** Apply the `@postEvolution` mapper to an instance read from the former data. */
+  def postEvolve(instance: T): T = if (postEvolution.isEmpty) instance else postEvolution.get(formerVersion, instance)
 
-  private def isPostEvolved(writtenVersion: Int): Boolean = postEvolution.isDefined && writtenVersion < currentVersion
-
-  /** Return the evolution declared for the Scala 3 enum value named `formerValueName` when the data was serialized. */
+  /** Return the evolution of the Scala 3 enum value named `formerValueName` in the former data. */
   def getEnumValueEvolution(formerValueName: String): EnumValueEvolution =
-    formerEnumValueToEvolution.getOrElse(formerValueName, Unchanged)
+    enumValueEvolutions.getOrElse(formerValueName, Unchanged)
 
   /** Plan how the current fields evolve from the former ones, based on declared field evolutions. Don't read field
     * data.
@@ -124,27 +116,26 @@ object Evolution {
     *   If `true`, encountering an instance of this former class during deserialization throws, otherwise the instance
     *   is deserialized as `null`
     */
-  final class DeletedEvolution[T] private[evolution] (className: String, formerVersion: Int, throwOnInstance: Boolean)
-      extends Evolution[T](className, formerVersion, formerVersion + 1, DeletedClass.asInstanceOf[Class[T]]) {
+  final class DeletedEvolution[T] private[api] (formerClassName: String, formerVersion: Int, throwOnInstance: Boolean)
+      extends Evolution[T](formerClassName, formerVersion, formerVersion + 1, DeletedClass.asInstanceOf[Class[T]]) {
 
     // The former data is read as it was written, only to be dropped
-    override def isAvoidable(writtenVersion: Int, formerMemberNames: Array[String]): Boolean = true
+    override def isAvoidable(formerMemberNames: Array[String]): Boolean = true
 
     /** What an instance of this deleted former class reads as: see [[Evolution.deletedInstance]]. */
-    def deletedInstance: T = Evolution.deletedInstance(className, throwOnInstance)
+    def deletedInstance: T = Evolution.deletedInstance(formerClassName, throwOnInstance)
 
   }
 
-  /** [[Evolution]] returned by [[Evolutions.get]] when the queried class has no registration.
-    *
-    * This evolution is only able to reorder members of its ADT.
-    */
-  final class NoEvolution[T] private[evolution] (clazz: Class[T], version: Int)
-      extends Evolution(clazz.getName, version, version, clazz, ConstructorCompat.lookupFieldNames(clazz)) {
-    override def isAvoidable(writtenVersion: Int, formerMemberNames: Array[String]): Boolean =
+  /** [[Evolution]] of an ADT declaring none. This evolution is only able to reorder its members. */
+  final class NoEvolution[T] private[api] (currentClass: Class[T], currentVersion: Int, memberNames: Array[String])
+      extends Evolution(currentClass.getName, currentVersion, currentVersion, currentClass, memberNames) {
+
+    override def isAvoidable(formerMemberNames: Array[String]): Boolean =
       // Only a reordering is migrated: sealed traits, enums and unreadable names keep the positional resolution
       formerMemberNames.sameElements(currentMemberNames) ||
         !formerMemberNames.sorted.sameElements(currentMemberNames.sorted)
+
   }
 
   /** Evolution of a single Scala 3 enum value between the former and the current source code.

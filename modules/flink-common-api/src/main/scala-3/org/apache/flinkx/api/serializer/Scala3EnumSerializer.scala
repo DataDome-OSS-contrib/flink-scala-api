@@ -81,7 +81,7 @@ class Scala3EnumSerializer[T <: Product](
     } else {
       // A deleted former value throws or reads as null through the evolution of its own serializer
       val instance = enumValueSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.fold(instance)(_.postEvolve(version, instance))
+      evolution.fold(instance)(_.postEvolve(instance))
     }
   }
 
@@ -134,7 +134,7 @@ class Scala3EnumSerializerSnapshot[T <: Product](
 
   override def writeOuterSnapshot(out: DataOutputView): Unit = {
     evolution.foreach { e =>
-      out.writeUTF(e.className)
+      out.writeUTF(e.formerClassName)
       out.writeInt(adtVersion)
     }
     StringArraySerializer.INSTANCE.serialize(enumValueNames, out)
@@ -157,7 +157,7 @@ class Scala3EnumSerializerSnapshot[T <: Product](
 
   /** `old.evolution` holds the evolutions migrating the very version the former data was written at. */
   override protected def isEvolutionRequired(old: Scala3EnumSerializerSnapshot[T]): Boolean =
-    evolution.isDefined && old.evolution.exists(!_.isAvoidable(old.adtVersion, old.enumValueNames))
+    evolution.isDefined && old.evolution.exists(!_.isAvoidable(old.enumValueNames))
 
   /** Check every former enum value is either declared deleted, or still a value of the current enum, possibly under
     * another name, and that the schema of these surviving values can itself be migrated.

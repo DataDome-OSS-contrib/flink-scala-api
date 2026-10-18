@@ -86,6 +86,45 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
+  // The data a class wrote under the former name of another one is told apart by its version only
+  it should "fail every lookup when a class bears a former name without being versioned above it" in {
+    ConflictingScan.bearing = Some("declared")
+    try {
+      val failure = intercept[FormerClassConflictException](Evolutions.get(classOf[Probe], 2))
+      failure.declared shouldBe s"renamed to ${classOf[EvolutionTest.GivingFormerName].getName} up to version 2"
+      failure.conflicting shouldBe s"used by ${classOf[EvolutionTest.TakenFormerName].getName} at version 2"
+    } finally {
+      ConflictingScan.bearing = None
+      Evolutions.reset()
+    }
+  }
+
+  // Its data is written at version 0, which the window of the former name always holds
+  it should "count a class bearing a former name without declaring its evolutions as unversioned" in {
+    ConflictingScan.bearing = Some("undeclared")
+    try {
+      val failure = intercept[FormerClassConflictException](Evolutions.get(classOf[Probe], 2))
+      failure.declared shouldBe s"renamed to ${classOf[EvolutionTest.GivingUndeclaredName].getName} up to version 0"
+      failure.conflicting shouldBe s"used by ${classOf[EvolutionTest.UndeclaredBearer].getName} at version 0"
+    } finally {
+      ConflictingScan.bearing = None
+      Evolutions.reset()
+    }
+  }
+
+  // A deleted name omitting the $ ending the class name of an object stands for an object of that name as well
+  it should "find a case object bearing a name deleted without the $ ending its class name" in {
+    ConflictingScan.bearing = Some("caseObject")
+    try {
+      val failure = intercept[FormerClassConflictException](Evolutions.get(classOf[Probe], 2))
+      failure.declared shouldBe s"deleted by ${classOf[EvolutionTest.DeletingCaseObjectName].getName} up to version 0"
+      failure.conflicting shouldBe s"used by ${EvolutionTest.TakenCaseObject.getClass.getName} at version 0"
+    } finally {
+      ConflictingScan.bearing = None
+      Evolutions.reset()
+    }
+  }
+
   // The tasks of a TaskManager restore their state in parallel: a lookup landing while the declarations are applied
   // must wait for them, rather than take the declaration for one that never reached this JVM
   it should "make concurrent lookups wait for the declarations" in {
@@ -151,11 +190,11 @@ object EvolvingTest {
   @version(1)
   @renamed(since = 1, "ThroughTraitFormer")
   case class ThroughTrait(a: String)
-  object ThroughTrait extends EvolvingTrait[ThroughTrait] { lazy val evolutions = Evolutions[ThroughTrait] }
+  object ThroughTrait extends EvolvingTrait[ThroughTrait] { val evolutions = Evolutions[ThroughTrait] }
 
   @version(1)
   @renamed(since = 1, "ThroughClassFormer")
   case class ThroughClass(a: String)
-  object ThroughClass extends EvolvingClass[ThroughClass] { lazy val evolutions = Evolutions[ThroughClass] }
+  object ThroughClass extends EvolvingClass[ThroughClass] { val evolutions = Evolutions[ThroughClass] }
 
 }

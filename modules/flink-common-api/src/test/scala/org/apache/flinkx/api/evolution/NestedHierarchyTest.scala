@@ -22,7 +22,7 @@ class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils with 
     val subtypes   = serializer.asInstanceOf[org.apache.flinkx.api.serializer.CoproductSerializer[Top]].subtypeFqns
 
     withClue(s"the declared members must match the derived subtypes ${subtypes.mkString(", ")}:")(
-      Evolutions.get(classOf[Top], 1).isAvoidable(1, subtypes) shouldBe true
+      Evolutions.get(classOf[Top], 1).isAvoidable(subtypes) shouldBe true
     )
   }
 
@@ -34,7 +34,7 @@ class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils with 
 
   // The derivation flattens the intermediate sealed traits: a case object below one is declared by the trait above it
   it should "resolve the former name of a case object below an intermediate sealed trait" in {
-    val formerName = ClassUtil.resolveFormerClassName("FormerNested", Nested.getClass)
+    val formerName = ClassUtil.resolveFormerClassName("FormerNested$", Nested.getClass) // As its snapshot records it
 
     Evolutions.get[Top](formerName, 0, getClass.getClassLoader).currentClass shouldBe Nested.getClass
   }
@@ -45,7 +45,7 @@ object NestedHierarchyTest {
 
   @version(1)
   sealed trait Top
-  object Top                 extends Evolving[Top] { lazy val evolutions = Evolutions[Top] }
+  object Top                 extends Evolving[Top] { val evolutions = Evolutions[Top] }
   sealed trait Middle        extends Top
   case class Leaf(a: String) extends Middle
   @version(1)

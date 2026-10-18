@@ -5,6 +5,7 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
+import org.apache.flinkx.api.evolution.Evolution.NoEvolution
 import org.apache.flinkx.api.evolution.{Evolution, Evolvable}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
@@ -38,7 +39,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val version    = evolvable.version
         val fieldNames = ctx.parameters.map(_.label).toArray
 
-        val evolution = evolvable.evolution(clazz)
+        val evolution = new NoEvolution(clazz, version, fieldNames)
 
         val serializer =
           if typeTag.isEnum then new Scala3EnumValueSerializer[T & Product](evolution, version, ctx.typeInfo.short)
@@ -84,7 +85,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val memberNames: Array[String] =
           if typeTag.isEnum then ctx.subtypes.map(_.typeInfo.short).toArray else subtypeClasses.map(_.getName)
 
-        val evolution = evolvable.evolution(clazz)
+        val evolution = new NoEvolution(clazz, version, memberNames)
 
         val serializer =
           if typeTag.isEnum then

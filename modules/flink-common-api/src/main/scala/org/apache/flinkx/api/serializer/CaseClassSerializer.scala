@@ -77,7 +77,7 @@ class CaseClassSerializer[T <: Product](
 
   // Cache to check for fast path on first record only
   @transient private lazy val isEvolutionAvoidable = fieldNames.isEmpty || // Keep compatibility with versions < 2.4.0
-    evolution.isAvoidable(version, fieldNames)
+    evolution.isAvoidable(fieldNames)
 
   // Cache how to evolve from former to current fields
   @transient private lazy val evolutionPlan: Array[EvolvedField] =
@@ -172,10 +172,10 @@ class CaseClassSerializer[T <: Product](
         formerValues(i) = fieldSerializers(i).deserialize(source)
         i += 1
       }
-      val currentValues = if (isEvolutionAvoidable) formerValues else evolve(formerValues)
       evolution match {
         case deleted: DeletedEvolution[T] => deleted.deletedInstance
-        case _                            => evolution.postEvolve(version, createInstance(currentValues))
+        case _ if isEvolutionAvoidable    => createInstance(formerValues)
+        case _                            => evolution.postEvolve(createInstance(evolve(formerValues)))
       }
     }
   }
@@ -248,7 +248,7 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     new CaseClassSerializer[T](evolution, adtVersion, isCaseClassImmutable, fieldNames, nestedSerializers)
 
   override protected def writeOuterSnapshot(out: DataOutputView): Unit = {
-    out.writeUTF(evolution.className)
+    out.writeUTF(evolution.formerClassName)
     out.writeBoolean(isCaseClassImmutable)
     out.writeInt(adtVersion)
     StringArraySerializer.INSTANCE.serialize(fieldNames, out)
@@ -274,7 +274,7 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
   /** `old.evolution` holds the evolutions migrating the very version the former data was written at. */
   override protected def isEvolutionRequired(old: ScalaCaseClassSerializerSnapshot[T]): Boolean =
     old.fieldNames.nonEmpty && // Keep compatibility with versions < 2.4.0
-      !old.evolution.isAvoidable(old.adtVersion, old.fieldNames)
+      !old.evolution.isAvoidable(old.fieldNames)
 
   /** Check the declared evolutions entirely describe the migration from the former schema:
     *   - replays evolutions on the former field names to check for exact match with current field names

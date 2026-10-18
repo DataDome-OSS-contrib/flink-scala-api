@@ -25,9 +25,9 @@ object EvolutionErrorFixtures {
   case class WrongRenamedOnCaseClassWithoutVersion()
 
   @version(1)
-  sealed trait CorrectRenamedOnSealedTraitSubtypeWithoutVersion
+  sealed trait RenamingUnversionedSubtype
   @renamed(since = 1, "A")
-  case class CorrectRenamedOnCaseClassWithoutVersion() extends CorrectRenamedOnSealedTraitSubtypeWithoutVersion
+  case class WrongRenamedOnUnversionedSubtype() extends RenamingUnversionedSubtype
 
   @version(1)
   @transformed(since = 1, identity[Int])
@@ -48,23 +48,31 @@ object EvolutionErrorFixtures {
   @version(1)
   case class NeverDeclared(a: String)
 
-  /** Derives its type information while initializing, before declaring the evolutions the derivation reads. */
+  /** Derives its type information while initializing, before the strict val declaring its evolutions. */
   @version(1)
+  @renamed(since = 1, "FormerDerivedBeforeDeclared")
   case class DerivedBeforeDeclared(a: String)
   object DerivedBeforeDeclared extends Evolving[DerivedBeforeDeclared] {
     import org.apache.flink.api.common.typeinfo.TypeInformation
     import org.apache.flinkx.api.auto._
 
     val typeInfo: TypeInformation[DerivedBeforeDeclared] = implicitly[TypeInformation[DerivedBeforeDeclared]]
-    lazy val evolutions                                  = Evolutions[DerivedBeforeDeclared]
+    val evolutions                                       = Evolutions[DerivedBeforeDeclared]
   }
 
-  /** Declares its evolutions in a strict val, which a derivation running while it initializes would read as null. */
   @version(1)
-  case class EagerlyDeclared(a: String)
-  object EagerlyDeclared extends Evolving[EagerlyDeclared] {
-    val evolutions = Evolutions[EagerlyDeclared]
-  }
+  @renamed(since = 2, "A")
+  case class WrongRenamedSinceAboveVersion(a: String)
+
+  @version(1)
+  @deletedClasses(since = 0, "A")
+  case class WrongDeletedClassesSinceBelowOne(a: String)
+
+  @version(1)
+  sealed trait RenamingSubtypeAboveVersion
+  @version(1)
+  @renamed(since = 2, "A")
+  case class WrongRenamedSubtypeSinceAboveVersion(a: String) extends RenamingSubtypeAboveVersion
 
   @version(1)
   case class WrongVersionOnField(@version(1) a: String)
@@ -152,13 +160,13 @@ object EvolutionErrorFixtures {
   @version(1)
   sealed trait CorrectDeletedClassesOnSealedTraitSubtype
   object CorrectDeletedClassesOnSealedTraitSubtype extends Evolving[CorrectDeletedClassesOnSealedTraitSubtype] {
-    lazy val evolutions = Evolutions[CorrectDeletedClassesOnSealedTraitSubtype]
+    val evolutions = Evolutions[CorrectDeletedClassesOnSealedTraitSubtype]
   }
   @version(1)
   @deletedClasses(since = 1, "A")
   sealed trait CorrectDeletedClassesOnSubtype extends CorrectDeletedClassesOnSealedTraitSubtype
   object CorrectDeletedClassesOnSubtype       extends Evolving[CorrectDeletedClassesOnSubtype] {
-    lazy val evolutions = Evolutions[CorrectDeletedClassesOnSubtype]
+    val evolutions = Evolutions[CorrectDeletedClassesOnSubtype]
   }
   case object CorrectDeletedClassesCaseObject extends CorrectDeletedClassesOnSubtype
 
@@ -170,32 +178,32 @@ object EvolutionErrorFixtures {
   @version(1)
   sealed trait CorrectPostEvolutionOnSealedTraitSubtype
   object CorrectPostEvolutionOnSealedTraitSubtype extends Evolving[CorrectPostEvolutionOnSealedTraitSubtype] {
-    lazy val evolutions = Evolutions[CorrectPostEvolutionOnSealedTraitSubtype]
+    val evolutions = Evolutions[CorrectPostEvolutionOnSealedTraitSubtype]
   }
   @version(1)
   @postEvolution(updateAction)
   case class CorrectPostEvolutionOnSubtype() extends CorrectPostEvolutionOnSealedTraitSubtype
   object CorrectPostEvolutionOnSubtype       extends Evolving[CorrectPostEvolutionOnSubtype] {
-    lazy val evolutions = Evolutions[CorrectPostEvolutionOnSubtype]
+    val evolutions = Evolutions[CorrectPostEvolutionOnSubtype]
   }
 
   @version(2)
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongAddedField(@added(since = 2) a: String = "")
-  object WrongAddedField extends Evolving[WrongAddedField] { lazy val evolutions = Evolutions[WrongAddedField] }
+  object WrongAddedField extends Evolving[WrongAddedField] { val evolutions = Evolutions[WrongAddedField] }
 
   @version(2)
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongRenamedField(@renamed(since = 2, "wrongFieldName") a: String)
   object WrongRenamedField extends Evolving[WrongRenamedField] {
-    lazy val evolutions = Evolutions[WrongRenamedField]
+    val evolutions = Evolutions[WrongRenamedField]
   }
 
   @version(2)
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongTransformedField(@transformed(since = 2, identity[String]) wrongFieldName: String)
   object WrongTransformedField extends Evolving[WrongTransformedField] {
-    lazy val evolutions = Evolutions[WrongTransformedField]
+    val evolutions = Evolutions[WrongTransformedField]
   }
 
   @version(2)
@@ -203,27 +211,27 @@ object EvolutionErrorFixtures {
   @deletedFields(since = 2, "wrongFieldName")
   case class WrongDeletedField(a: String)
   object WrongDeletedField extends Evolving[WrongDeletedField] {
-    lazy val evolutions = Evolutions[WrongDeletedField]
+    val evolutions = Evolutions[WrongDeletedField]
   }
 
   @version(1)
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile")
   case class WrongSeveralFields(a: String, missing: String)
   object WrongSeveralFields extends Evolving[WrongSeveralFields] {
-    lazy val evolutions = Evolutions[WrongSeveralFields]
+    val evolutions = Evolutions[WrongSeveralFields]
   }
 
   @version(1)
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier")
   case class WrongFieldNotUsed(a: String)
   object WrongFieldNotUsed extends Evolving[WrongFieldNotUsed] {
-    lazy val evolutions = Evolutions[WrongFieldNotUsed]
+    val evolutions = Evolutions[WrongFieldNotUsed]
   }
 
   @version(1)
   @deletedFields(since = 1, "inFileClicks", "fieldNotInFile", "identifier", "b")
   case class WrongMissingField(a: String, missingField: String)
   object WrongMissingField extends Evolving[WrongMissingField] {
-    lazy val evolutions = Evolutions[WrongMissingField]
+    val evolutions = Evolutions[WrongMissingField]
   }
 }

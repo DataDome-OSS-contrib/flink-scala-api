@@ -10,7 +10,7 @@ package object evolution {
     * allowing to restore former data read from a savepoint to the current source code.
     *
     * This feature commonly employs the following vocabulary to qualify version, class, field, etc.:
-    *   - `Former` describes the serialization time when the checkpoint was done.
+    *   - `Former` describes the serialization time when the savepoint was done.
     *   - `Current` describes the deserialization time with the current source code.
     *
     * Add `@version(1)` on an ADT afterward is valid: it will be restored from a savepoint as if it was from version 0.
@@ -105,13 +105,23 @@ package object evolution {
     * @renamed(since = 1, "Brood")
     * sealed trait Animal
     *
-    * object Animal {
+    * object Animal extends Evolving[Animal] {
+    *   val evolutions = Evolutions[Animal]
+    *
+    *   @version(1)
     *   @renamed(since = 1, "Cat$Kitten")
     *   case object Cat extends Animal
+    *   @version(1)
     *   @renamed(since = 1, "org.example.Puppy")
     *   case object Dog extends Animal
     * }
     * }}}
+    *
+    * A renamed subtype declares its own `@version`, and its `since` counts in the versions of its sealed trait as well.
+    *
+    * A class bearing the former name of another one later tells the data it writes apart by its version only: it must
+    * declare `@version(since)` at least, from the version it takes that name, which the registry checks when the job
+    * starts.
     *
     * Annotation of case class parameter, ADT or sealed trait subtype.
     * @param since
@@ -194,16 +204,25 @@ package object evolution {
     * @deletedClasses(since = 1, "Fish", "org.example.Ant", "Animal$Bird")
     * sealed trait Animal
     *
-    * object Animal {
+    * object Animal extends Evolving[Animal] {
+    *   val evolutions = Evolutions[Animal]
+    *
     *   case object Cat extends Animal
     *   case object Dog extends Animal
     * }
     * }}}
     *
+    * A name without the `$` ending the class name of a case object stands for both a class and a case object of that
+    * name, the deleted class no longer telling which it was; with it, for the case object only. A class bearing the
+    * name of a deleted class later must declare `@version(since)` at least, as for a renamed class.
+    *
+    * To avoid declaring a deleted case object with a trailing `$` (can't determine if a deleted class is an object), a
+    * deleted name is registered under both names. Declare a deleted object with a trailing `$` to avoid ambiguity.
+    *
     * Annotation of ADT (case class, sealed trait or Scala 3 enum).
     *
     * @param since
-    *   Version in which the listed classes were deleted (informative only).
+    *   Version in which the listed classes were deleted
     * @param throwOnInstance
     *   When `true` (default), encountering an instance of a deleted subtype during deserialization throws a
     *   [[org.apache.flinkx.api.evolution.DeletedInstanceException]]. `false` to deserialize as `null`
@@ -262,15 +281,7 @@ package object evolution {
   private[api] def companionNotEvolving(adt: String): String = {
     val name = adt.split("[.$]").last
     s"$adt declares @version, so its companion must declare its evolutions:" +
-      s" object $name extends Evolving[$name] { lazy val evolutions = Evolutions[$name] }"
-  }
-
-  /** Message of a companion declaring its evolutions in a strict `val`, reported where the type information is derived.
-    */
-  private[api] def evolutionsNotLazy(adt: String): String = {
-    val name = adt.split("[.$]").last
-    s"The companion of $adt must declare its evolutions lazily, since the derivation of a type information may read" +
-      s" them while the companion initializes: lazy val evolutions = Evolutions[$name]"
+      s" object $name extends Evolving[$name] { val evolutions = Evolutions[$name] }"
   }
 
   /** Message of a negative `@version`, reported by the macros declaring the evolutions. */
@@ -281,7 +292,7 @@ package object evolution {
   private[api] def notLiteral(annotation: String, parameter: String, target: String): String =
     s"The $parameter of @$annotation on $target must be an integer literal"
 
-  /** Message of a field evolution declared outside the version range of its ADT. */
+  /** Message of an evolution declared outside the version range of its ADT. */
   private[api] def sinceNotAllowed(adt: String, since: Int, version: Int): String =
     s"An evolution of $adt is declared since=$since: it must be between 1 and the current @version($version)." +
       " Raise @version or fix the since of the annotation"
@@ -301,8 +312,9 @@ package object evolution {
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */
   final case class FormerClassConflictException(formerFqn: String, declared: String, conflicting: String)
       extends FlinkRuntimeException(
-        s"Former class '$formerFqn' is already declared as $declared, it can't also be declared as $conflicting." +
-          s" Two ADTs can't share the same former class name: fix their @renamed or @deletedClasses annotations"
+        s"Former class '$formerFqn' is $declared, it can't also be $conflicting: a class name can't stand for two" +
+          " classes in the data of the same version. Fix their @renamed or @deletedClasses annotations, or raise the" +
+          " @version of the class carrying that name above the versions it formerly stood for another class"
       )
 
   /** Exception indicating an instance of deleted `formerFqn` class has been encountered during deserialization. */

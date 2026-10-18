@@ -164,14 +164,14 @@ object Scala3EnumTest {
     @renamed(since = 1, "PARSING_TYPE")
     case PARSING extends FailureCategory(2)
   }
-  object FailureCategory extends Evolving[FailureCategory] { lazy val evolutions = Evolutions[FailureCategory] }
+  object FailureCategory extends Evolving[FailureCategory] { val evolutions = Evolutions[FailureCategory] }
 
   @version(1)
   enum FirstUnrelatedEnum {
     case X, Y
   }
   object FirstUnrelatedEnum extends Evolving[FirstUnrelatedEnum] {
-    lazy val evolutions = Evolutions[FirstUnrelatedEnum]
+    val evolutions = Evolutions[FirstUnrelatedEnum]
   }
 
   @version(1)
@@ -179,21 +179,21 @@ object Scala3EnumTest {
     case X, Y
   }
   object SecondUnrelatedEnum extends Evolving[SecondUnrelatedEnum] {
-    lazy val evolutions = Evolutions[SecondUnrelatedEnum]
+    val evolutions = Evolutions[SecondUnrelatedEnum]
   }
 
   @version(2)
   enum RolledBackEnum {
     case First, Second
   }
-  object RolledBackEnum extends Evolving[RolledBackEnum] { lazy val evolutions = Evolutions[RolledBackEnum] }
+  object RolledBackEnum extends Evolving[RolledBackEnum] { val evolutions = Evolutions[RolledBackEnum] }
 
   @version(1)
   enum ValueRemovedWithoutAnnotation {
     case Remaining, Removed
   }
   object ValueRemovedWithoutAnnotation extends Evolving[ValueRemovedWithoutAnnotation] {
-    lazy val evolutions = Evolutions[ValueRemovedWithoutAnnotation]
+    val evolutions = Evolutions[ValueRemovedWithoutAnnotation]
   }
 
   enum Example {

@@ -127,6 +127,20 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
     deserializeFormerForm(formerSerializer, Ticket("t")) shouldBe Ticket("t@0")
   }
 
+  // Whichever serializer Flink reads with, the restored or the current one, an evolution never applies to such snapshot
+  it should "not apply @postEvolution to a pre-2.4.0 snapshot of a case class" in {
+    val formerSerializer = new CaseClassSerializer[Ticket](
+      evolution = Evolutions.get(classOf[Ticket], 0),
+      version = 0,
+      isCaseClassImmutable = true,
+      fieldNames = Array.empty,
+      paramSerializers = Array(createSerializer[String])
+    )
+
+    resolveSchemaCompatibilityAfterRestore[Ticket](formerSerializer) shouldBe Symbol("compatibleAsIs")
+    deserializeFormerForm(formerSerializer, Ticket("t")) shouldBe Ticket("t")
+  }
+
   // A default value is evaluated for each restored instance, as the constructor does, not once for all of them
   it should "evaluate the default value of an added field for each restored instance" in {
     val formerSerializer = new CaseClassSerializer[Stamped](
@@ -222,7 +236,7 @@ object EvolutionTest {
       @added(since = 3) fieldInFile: Int = 1,
       @transformed(since = 1, mapIntToString) fieldNotInFile: String
   )
-  object Click extends Evolving[Click] { lazy val evolutions = Evolutions[Click] }
+  object Click extends Evolving[Click] { val evolutions = Evolutions[Click] }
 
   @version(1)
   @renamed(since = 1, "ClickEvent")
@@ -230,7 +244,7 @@ object EvolutionTest {
       @renamed(since = 1, "sessionId") @transformed(since = 1, mapIntToString) id: String,
       date: String
   )
-  object ClickAction extends Evolving[ClickAction] { lazy val evolutions = Evolutions[ClickAction] }
+  object ClickAction extends Evolving[ClickAction] { val evolutions = Evolutions[ClickAction] }
 
   def mapIntToString(a: Int): String                 = a.toString
   def updateClick(version: Int, click: Click): Click =
@@ -247,7 +261,7 @@ object EvolutionTest {
   @deletedClasses(since = 1, "Purchase")
   @postEvolution(updateAction)
   sealed trait Action
-  object Action extends Evolving[Action] { lazy val evolutions = Evolutions[Action] }
+  object Action extends Evolving[Action] { val evolutions = Evolutions[Action] }
 
   @version(0)
   case object Login extends Action
@@ -255,7 +269,7 @@ object EvolutionTest {
   @version(1)
   @renamed(since = 1, "View")
   case class Web(ts: Long) extends Action
-  object Web               extends Evolving[Web] { lazy val evolutions = Evolutions[Web] }
+  object Web               extends Evolving[Web] { val evolutions = Evolutions[Web] }
 
   case class Cart(items: Int) extends Action
 
@@ -268,16 +282,16 @@ object EvolutionTest {
   @version(1)
   @postEvolution(markTicket)
   case class Ticket(id: String)
-  object Ticket extends Evolving[Ticket] { lazy val evolutions = Evolutions[Ticket] }
+  object Ticket extends Evolving[Ticket] { val evolutions = Evolutions[Ticket] }
 
   def markTicket(version: Int, ticket: Ticket): Ticket = ticket.copy(id = s"${ticket.id}@$version")
 
   @version(1)
   case class Stamped(id: String, @added(since = 1) stamp: Int = Stamped.next())
   object Stamped extends Evolving[Stamped] {
-    lazy val evolutions = Evolutions[Stamped]
-    private val stamps  = new java.util.concurrent.atomic.AtomicInteger()
-    def next(): Int     = stamps.incrementAndGet()
+    val evolutions     = Evolutions[Stamped]
+    private val stamps = new java.util.concurrent.atomic.AtomicInteger()
+    def next(): Int    = stamps.incrementAndGet()
   }
 
   case class AddedFieldWithoutAnnotation(a: String, b: Int = 42)
@@ -286,13 +300,13 @@ object EvolutionTest {
   @deletedFields(since = 1, "inFileClicks", "identifier", "b")
   case class WrongUntransformedField(@renamed(since = 1, "a") renamedA: String, fieldNotInFile: String)
   object WrongUntransformedField extends Evolving[WrongUntransformedField] {
-    lazy val evolutions = Evolutions[WrongUntransformedField]
+    val evolutions = Evolutions[WrongUntransformedField]
   }
 
   @version(1)
   case class OuterEvolvedWithNested(@renamed(since = 1, "formerNested") nested: AddedFieldWithoutAnnotation)
   object OuterEvolvedWithNested extends Evolving[OuterEvolvedWithNested] {
-    lazy val evolutions = Evolutions[OuterEvolvedWithNested]
+    val evolutions = Evolutions[OuterEvolvedWithNested]
   }
 
   case class UnrelatedFormerCaseClass(a: String, removed: String)
@@ -301,19 +315,19 @@ object EvolutionTest {
   @deletedFields(since = 1, "removed")
   case class UnrelatedCurrentCaseClass(a: String)
   object UnrelatedCurrentCaseClass extends Evolving[UnrelatedCurrentCaseClass] {
-    lazy val evolutions = Evolutions[UnrelatedCurrentCaseClass]
+    val evolutions = Evolutions[UnrelatedCurrentCaseClass]
   }
 
   // Both traits are sealed in this file, so a single case class can be a member of each of them
   @version(1)
   sealed trait SharedSubtypeTrait
   object SharedSubtypeTrait extends Evolving[SharedSubtypeTrait] {
-    lazy val evolutions = Evolutions[SharedSubtypeTrait]
+    val evolutions = Evolutions[SharedSubtypeTrait]
   }
   @version(1)
   sealed trait OtherSharedSubtypeTrait
   object OtherSharedSubtypeTrait extends Evolving[OtherSharedSubtypeTrait] {
-    lazy val evolutions = Evolutions[OtherSharedSubtypeTrait]
+    val evolutions = Evolutions[OtherSharedSubtypeTrait]
   }
   case class SharedSubtype(a: String) extends SharedSubtypeTrait with OtherSharedSubtypeTrait
 
@@ -321,14 +335,15 @@ object EvolutionTest {
   @renamed(since = 1, "FormerRenamedCaseClass")
   @deletedFields(since = 1, "removed")
   case class RenamedCaseClass(a: String)
-  object RenamedCaseClass extends Evolving[RenamedCaseClass] { lazy val evolutions = Evolutions[RenamedCaseClass] }
+  object RenamedCaseClass extends Evolving[RenamedCaseClass] { val evolutions = Evolutions[RenamedCaseClass] }
 
-  // Still declared to play the former class: the snapshot records its name, which the rename resolves
+  /* RenamedCaseClass v0
   case class FormerRenamedCaseClass(a: String, removed: String)
+   */
 
   @version(2)
   sealed trait RolledBackTrait
-  object RolledBackTrait extends Evolving[RolledBackTrait] { lazy val evolutions = Evolutions[RolledBackTrait] }
+  object RolledBackTrait            extends Evolving[RolledBackTrait] { val evolutions = Evolutions[RolledBackTrait] }
   case class RolledBackA(a: String) extends RolledBackTrait
   case class RolledBackB(b: Int)    extends RolledBackTrait
 
@@ -348,10 +363,52 @@ object EvolutionTest {
       ConflictingScan.evolutionsOf(classOf[SecondClaimingFormerName], Evolutions[SecondClaimingFormerName])
   }
 
+  // Bears the former name of GivingFormerName, versioned at 2 while that name stands for it up to version 2
+  @version(2)
+  case class TakenFormerName(a: String)
+  object TakenFormerName extends Evolving[TakenFormerName] {
+    def evolutions: Evolutions[TakenFormerName] =
+      ConflictingScan.bearingEvolutionsOf(classOf[TakenFormerName], "declared", Evolutions[TakenFormerName])
+  }
+
+  @version(3)
+  @renamed(since = 3, "TakenFormerName")
+  case class GivingFormerName(a: String)
+  object GivingFormerName extends Evolving[GivingFormerName] {
+    def evolutions: Evolutions[GivingFormerName] =
+      ConflictingScan.bearingEvolutionsOf(classOf[GivingFormerName], "declared", Evolutions[GivingFormerName])
+  }
+
+  // Bears the former name of GivingUndeclaredName, with no companion declaring its version
+  case class UndeclaredBearer(a: String)
+
+  @version(1)
+  @renamed(since = 1, "UndeclaredBearer")
+  case class GivingUndeclaredName(a: String)
+  object GivingUndeclaredName extends Evolving[GivingUndeclaredName] {
+    def evolutions: Evolutions[GivingUndeclaredName] =
+      ConflictingScan.bearingEvolutionsOf(classOf[GivingUndeclaredName], "undeclared", Evolutions[GivingUndeclaredName])
+  }
+
+  // Bears a name DeletingCaseObjectName declares deleted without the $ ending the class name of an object
+  case object TakenCaseObject
+
+  @version(1)
+  @deletedClasses(since = 1, "TakenCaseObject")
+  case class DeletingCaseObjectName(a: String)
+  object DeletingCaseObjectName extends Evolving[DeletingCaseObjectName] {
+    def evolutions: Evolutions[DeletingCaseObjectName] =
+      ConflictingScan.bearingEvolutionsOf(
+        classOf[DeletingCaseObjectName],
+        "caseObject",
+        Evolutions[DeletingCaseObjectName]
+      )
+  }
+
   @version(1)
   sealed trait SubtypeRemovedWithoutAnnotation
   object SubtypeRemovedWithoutAnnotation extends Evolving[SubtypeRemovedWithoutAnnotation] {
-    lazy val evolutions = Evolutions[SubtypeRemovedWithoutAnnotation]
+    val evolutions = Evolutions[SubtypeRemovedWithoutAnnotation]
   }
   case class RemainingSubtype(a: String) extends SubtypeRemovedWithoutAnnotation
   case class RemovedSubtype(b: Int)      extends SubtypeRemovedWithoutAnnotation
@@ -371,7 +428,7 @@ object EvolutionTest {
   @deletedFields(since = 1, "kind")
   @deletedFields(since = 2, "breed")
   case class Dog(name: String)
-  object Dog extends Evolving[Dog] { lazy val evolutions = Evolutions[Dog] }
+  object Dog extends Evolving[Dog] { val evolutions = Evolutions[Dog] }
 
   /* Animal-v0
   sealed trait Animal
@@ -389,10 +446,10 @@ object EvolutionTest {
   @version(2)
   @deletedClasses(since = 1, throwOnInstance = false, "Horse")
   sealed trait Animal
-  object Animal extends Evolving[Animal] { lazy val evolutions = Evolutions[Animal] }
+  object Animal extends Evolving[Animal] { val evolutions = Evolutions[Animal] }
   @version(2)
   case class Horse(legs: Int)   extends Animal
-  object Horse                  extends Evolving[Horse] { lazy val evolutions = Evolutions[Horse] }
+  object Horse                  extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
   case class Lion(name: String) extends Animal
 
 }

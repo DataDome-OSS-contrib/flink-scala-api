@@ -58,7 +58,7 @@ class Scala3EnumValueSerializerSnapshot[T](
   }
 
   override def writeSnapshot(out: DataOutputView): Unit = {
-    out.writeUTF(evolution.className)
+    out.writeUTF(evolution.formerClassName)
     out.writeInt(enumVersion)
     out.writeUTF(enumValueName)
   }

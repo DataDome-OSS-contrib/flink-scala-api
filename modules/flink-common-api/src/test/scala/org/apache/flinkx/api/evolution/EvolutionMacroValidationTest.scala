@@ -84,13 +84,7 @@ class EvolutionMacroValidationTest extends AnyFlatSpec with Matchers {
   it should "build the message of a companion declaring nothing" in {
     companionNotEvolving("com.example.Outer$Order") shouldBe
       "com.example.Outer$Order declares @version, so its companion must declare its evolutions:" +
-      " object Order extends Evolving[Order] { lazy val evolutions = Evolutions[Order] }"
-  }
-
-  it should "build the message of a companion declaring its evolutions in a strict val" in {
-    evolutionsNotLazy("com.example.Outer$Order") shouldBe
-      "The companion of com.example.Outer$Order must declare its evolutions lazily, since the derivation of a type" +
-      " information may read them while the companion initializes: lazy val evolutions = Evolutions[Order]"
+      " object Order extends Evolving[Order] { val evolutions = Evolutions[Order] }"
   }
 
 }

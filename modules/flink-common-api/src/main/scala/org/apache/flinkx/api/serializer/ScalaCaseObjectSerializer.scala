@@ -44,7 +44,7 @@ object ScalaCaseObjectSerializer {
     }
 
     override def writeSnapshot(out: DataOutputView): Unit = {
-      out.writeUTF(evolution.className)
+      out.writeUTF(evolution.formerClassName)
       out.writeInt(caseObjectVersion)
     }
 

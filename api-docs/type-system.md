@@ -268,7 +268,7 @@ savepoints: built-in compatibility rules that come "for free", and an opt-in ann
 
 ### Built-in compatibility
 
-Without any annotation, the following changes are safe between checkpoint write and restore (starting from version 2.4.0):
+Without any annotation, the following changes are safe between savepoint write and restore (starting from version 2.4.0):
 * Case classes: you can reorder fields.
 * Sealed traits: you can reorder subtypes and add new subtypes.
 * For everything else (additions, renames, deletions, type changes, cross-field migrations), use the annotation-based schema evolution below.
@@ -277,16 +277,20 @@ Without any annotation, the following changes are safe between checkpoint write 
 
 Annotate an ADT (case class, sealed trait or Scala 3 enum) with `@version(n)` to opt in it, then describe each
 change with one of the evolution annotations on the ADT or on its fields/subtypes. On restore, the library
-applies these operations against the former data read from the checkpoint so it matches the current source code.
+applies these operations against the former data read from the savepoint so it matches the current source code.
 
 This schema evolution feature commonly employs the following vocabulary to qualify version, class, field, etc.:
-* `Former` describes the serialization time when the checkpoint was done.
+* `Former` describes the serialization time when the savepoint was done.
 * `Current` describes the deserialization time with the current source code.
 
 An ADT without `@version` annotation is considered to have version 0 which makes it safe to add `@version(1)` to an
-existing ADT and restore it from a checkpoint produced by the unversioned code.
+existing ADT and restore it from a savepoint produced by the unversioned code.
 
-For example, given this former schema serialized to the checkpoint (no annotations, version 0 is implicit):
+A savepoint written before 2.4.0 records no field names though: the fields of its case classes are read by position,
+so their field evolutions and `@postEvolution` mappers don't apply. Restore such a savepoint with 2.4.0 without
+changing the schema and take a savepoint, before evolving it.
+
+For example, given this former schema serialized to the savepoint (no annotations, version 0 is implicit):
 ```scala
 import org.apache.flinkx.api._
 
@@ -308,6 +312,7 @@ import org.apache.flinkx.api.evolution._
 @postEvolution(updateAction)
 sealed trait Action
 
+@version(1)
 @renamed(since = 1, "View")
 case class Web(ts: Long) extends Action
 
@@ -338,7 +343,7 @@ def updateAction(formerVersion: Int, action: Action): Action = action match {
 |----------------------------------------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `@version(n)`                                                        | ADT                            | Declares the current schema version (`n >= 0`); opt in the ADT to evolution                                                                                                                                                                              |
 | `@added(since = n)`                                                  | case class field               | Field was added in version `n`; requires a default value                                                                                                                                                                                                 |
-| `@renamed(since = n, "oldName")`                                     | case class field, ADT, subtype | Field or class was formerly known under `"oldName"` before version `n`, or lived at another location (see [former class name resolution](#former-class-name-resolution))                                                                                 |
+| `@renamed(since = n, "oldName")`                                     | case class field, ADT, subtype | Field or class was formerly known under `"oldName"` before version `n`, or lived at another location (see [former class name resolution](#former-class-name-resolution)). A renamed subtype declares its own `@version`                                  |
 | `@transformed(since = n, mapper)`                                    | case class field               | Field's type changed in version `n`; `mapper` converts the formerly serialized value to the current type                                                                                                                                                 |
 | `@deletedFields(since = n, "a", "b")`                                | case class                     | Fields `"a"` and `"b"` were deleted in version `n`; their serialized state is dropped on restore                                                                                                                                                         |
 | `@deletedClasses(since = n, throwOnInstance = true, "OldClass1", …)` | ADT                            | Subtypes that have been removed, or field types that were referenced by a now-deleted field (see [former class name resolution](#former-class-name-resolution)). Throws by default when encountering an instance of deleted class during deserialization |
@@ -350,9 +355,9 @@ Delete → Rename → Transform → Add. This ordering enables annotation combin
 * Delete a field (its serialized state is dropped) and re-add a field with the same name from a default value.
 
 > [!NOTE]
-> You can clean up old evolution annotations as long as you don't restore a checkpoint of an older version. For example with `Click`:
-> * if you didn't keep any v0 checkpoint, you can retain only `@version(2)` and `@added(since = 2)` annotations.
-> * if you only have v2 checkpoints, you can remove all annotations, even `@version(2)`. Current `Click` will then be treated as a version 0.
+> You can clean up old evolution annotations as long as you don't restore a savepoint of an older version. For example with `Click`:
+> * if you didn't keep any v0 savepoint, you can retain only `@version(2)` and `@added(since = 2)` annotations.
+> * if you only have v2 savepoints, you can remove all annotations, even `@version(2)`. Current `Click` will then be treated as a version 0.
 
 #### Former class name resolution
 
@@ -366,6 +371,14 @@ Start with a `/` to force absolute path (should be useful to reference unnamed p
 
 Other paths are resolved relatively to the parent of the annotated class (i.e. next to the annotated class).
 They can contain `$` to reference nested classes.
+
+The class of a case object is named after it with a trailing `$`, which the former name of a renamed case object gets
+when it omits it. A deleted class no longer tells whether it was a case object: its name stands for both a class and a
+case object when written without `$`, for the case object only when written with it.
+
+A renamed subtype declares its own `@version`: its own snapshot records the version it was written at, which tells its
+former name apart. The `since` of its rename counts in the versions of its sealed trait as well, which records the
+names of its subtypes.
 
 For example, given this version 0:
 ```scala
@@ -388,7 +401,10 @@ package org.example
 @deletedClasses(since = 1, "Brood$Puppy")
 sealed trait Animal
 
-object Animal {
+object Animal extends Evolving[Animal] {
+  val evolutions = Evolutions[Animal]
+
+  @version(1)
   @renamed(since = 1, "org.example.Brood$Kitten")
   case object Cat extends Animal
 }
@@ -396,7 +412,7 @@ object Animal {
 
 #### Outdated former evolution
 
-It may arrive former evolutions get overwritten by newer evolutions. The rule of thumb is to describe how to restore a current state from these former checkpoints versions.
+It may arrive former evolutions get overwritten by newer evolutions. The rule of thumb is to describe how to restore a current state from these former savepoints versions.
 
 **Rename then delete a field:**
 
@@ -414,7 +430,7 @@ case class Dog(
   @renamed(since = 1, "kind") breed: String
 )
 ```
-If you want to delete `breed` field but still be able to restore from v0 and v1 checkpoints:
+If you want to delete `breed` field but still be able to restore from v0 and v1 savepoints:
 ```scala mdoc:reset-object
 import org.apache.flinkx.api.evolution._
 
@@ -424,7 +440,36 @@ import org.apache.flinkx.api.evolution._
 case class Dog(name: String)
 ```
 
-**Delete then recreate a class:**
+**Rename or delete a class, then reuse its name:**
+
+A snapshot records a class by its name and the version it was written at. Once a class is renamed or deleted, its
+former name stands for it in the data written before the `since` of that annotation, so a class taking that name later
+tells its own data apart by its version only: it must declare `@version` at least equal to that `since`, from the version
+it takes that name.
+
+Given this version 0:
+```scala
+sealed trait Pet
+case class Horse(name: String) extends Pet
+```
+Version 1 renames `Horse` to `Pony`, and a new `Horse` takes its name:
+```scala
+@version(1)
+sealed trait Pet
+object Pet extends Evolving[Pet] { val evolutions = Evolutions[Pet] }
+
+@version(1)
+@renamed(since = 1, "Horse")
+case class Pony(name: String) extends Pet
+object Pony extends Evolving[Pony] { val evolutions = Evolutions[Pony] }
+
+@version(1) // Written at version 1 at least, so never mistaken for the former Horse, now Pony
+case class Horse(name: String) extends Pet
+object Horse extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
+```
+
+Without that `@version`, the job fails to start with a `FormerClassConflictException`, as does its first restore: a class
+bearing such a name without a companion declaring its version counts as version 0.
 
 #### Declaring the evolutions
 
@@ -442,7 +487,7 @@ import org.apache.flinkx.api.evolution._
 case class Order(id: String, @added(since = 2) note: String = "none")
 
 object Order extends Evolving[Order] {
-  lazy val evolutions = Evolutions[Order]
+  val evolutions = Evolutions[Order]
 
   private[example] def fix(version: Int, order: Order): Order = order // Visible where Order is declared
 }
@@ -453,18 +498,16 @@ object has no companion of its own: the sealed trait it belongs to declares it. 
 versioned ADT whose companion doesn't extend `Evolving` fails at compile time, wherever the derivation is written: in a
 `StateDescriptor` built in `open()`, in a `lazy val`, in a companion `object` or with the rest of the job graph.
 
-A TaskManager never derives anything, so it asks the companions itself: while reading a checkpoint, before any state is
-restored, the snapshot of a former ADT initializes the companion of the class it names, which hands its evolutions
-over. The rules therefore travel in the jar rather than in the job graph, and nothing constrains where you build your
-`StateDescriptor`s.
-
-A former class name that no class bears anymore, an ADT renamed or moved since the checkpoint, is declared by the
-companion of the class now bearing it, which the former name doesn't tell. The jars of the job are then scanned once
-for the companions extending `Evolving`, and all of them are initialized. The scan reads the class files of the jars
-listed by the class loader of the job, or the class path of the JVM when there are none, as in a MiniCluster.
+The derivation of the type information only reads the version of the ADT: a derived serializer writes the current
+schema, which nothing evolves. The evolutions are read when a savepoint is restored, before any state is: a former
+class name, of an ADT renamed or moved since the savepoint, is declared by the companion of the class now bearing it,
+which the former name doesn't tell, so the jars of the job are scanned once for the companions extending `Evolving`,
+and all of them are initialized. The scan reads the class files of the jars listed by the class loader of the job, or
+the class path of the JVM when there are none, as in a MiniCluster. The rules therefore travel in the jar rather than
+in the job graph, and nothing constrains where you build your `StateDescriptor`s.
 
 A former name that no class bears and no companion declares fails the restore with a `MissingEvolutionException`,
-rather than reading the former form as if it had never evolved. A checkpoint written by a more recent source code is
+rather than reading the former form as if it had never evolved. A savepoint written by a more recent source code is
 not that case: the class is there, its declaration just doesn't reach that far, and the schema compatibility
 resolution reports it.
 

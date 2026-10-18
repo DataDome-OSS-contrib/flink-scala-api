@@ -69,19 +69,21 @@ object ClassUtil {
     if (formerBinaryName == null || formerBinaryName.isEmpty) {
       throw new FlinkRuntimeException("Former binary name is mandatory")
     }
-    val parentClass            = currentClass.getDeclaringClass
-    val isCurrentClassTopLevel = parentClass == null
-    val forceAbsolutePath      = formerBinaryName.head == '/'
-    val absolutePath           = forceAbsolutePath || formerBinaryName.contains('.')
-    if (absolutePath) {
-      if (forceAbsolutePath) formerBinaryName.substring(1) else formerBinaryName
-    } else if (isCurrentClassTopLevel) {
-      s"${currentClass.getPackageName}.$formerBinaryName"
+    val parentClass = currentClass.getDeclaringClass
+    val packageName = currentClass.getPackageName
+    if (formerBinaryName.head == '/') formerBinaryName.substring(1)
+    else if (formerBinaryName.contains('.')) formerBinaryName
+    else if (parentClass == null) { // The unnamed package qualifies no name
+      if (packageName.isEmpty) formerBinaryName else s"$packageName.$formerBinaryName"
     } else {
       val parentClassName = parentClass.getName
       if (parentClassName.last == '$') s"$parentClassName$formerBinaryName" else s"$parentClassName$$$formerBinaryName"
     }
   }
+
+  /** Whether the given class is the class of a Scala object, which holds its instance in a static `MODULE$` field. */
+  def isObjectClass(clazz: Class[_]): Boolean =
+    clazz.getDeclaredFields.exists(field => field.getName == "MODULE$" && Modifier.isStatic(field.getModifiers))
 
   /** Default value of the `index`-th field of the given case class, evaluated anew at each call.
     *

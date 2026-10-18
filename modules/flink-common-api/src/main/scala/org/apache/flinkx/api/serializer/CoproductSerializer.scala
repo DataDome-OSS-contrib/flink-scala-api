@@ -83,7 +83,7 @@ class CoproductSerializer[T](
     } else {
       // A deleted former subtype throws or reads as null through the evolution of its own serializer
       val instance = subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.fold(instance)(_.postEvolve(version, instance))
+      evolution.fold(instance)(_.postEvolve(instance))
     }
   }
 
@@ -147,7 +147,7 @@ object CoproductSerializer {
 
         override def writeOuterSnapshot(out: DataOutputView): Unit = {
           evolution.foreach { e =>
-            out.writeUTF(e.className)
+            out.writeUTF(e.formerClassName)
             out.writeInt(adtVersion)
           }
           StringArraySerializer.INSTANCE.serialize(subtypeFqns, out)
@@ -194,7 +194,7 @@ object CoproductSerializer {
 
     /** `old.evolution` holds the evolutions migrating the very version the former data was written at. */
     override protected def isEvolutionRequired(old: CoproductSerializerSnapshot[T]): Boolean =
-      evolution.isDefined && old.evolution.exists(!_.isAvoidable(old.adtVersion, old.subtypeFqns))
+      evolution.isDefined && old.evolution.exists(!_.isAvoidable(old.subtypeFqns))
 
     /** Check every former subtype is either declared deleted, or still a member of the current sealed trait, possibly
       * under another name, and that the schema of these surviving subtypes can itself be migrated.

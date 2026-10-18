@@ -35,51 +35,25 @@ private[api] object EvolutionMacro {
   }
 
   /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived,
-    * and hand the evolutions it declares over to the derivation.
+    * and hand its version over to the derivation.
     */
   def evolvableImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Evolvable[T]] = {
     import c.universe._
 
-    val tpe    = weakTypeOf[T]
-    val symbol = tpe.typeSymbol
+    val tpe     = weakTypeOf[T]
+    val symbol  = tpe.typeSymbol
+    val version = versionOf(c)(symbol)
 
     rejectVersionedParameter(c)(symbol, primaryParameters(c)(tpe))
     // A version 0 declares nothing to evolve from, and a case object is declared by the sealed trait it belongs to
-    if (versionOf(c)(symbol) > 0 && !symbol.isModuleClass) {
+    if (version > 0 && !symbol.isModuleClass) {
       val companion = symbol.companion
       val evolving  = appliedType(typeOf[Evolving[_]].typeConstructor, tpe)
       if (companion == NoSymbol || !(companion.typeSignature <:< evolving)) {
         c.abort(c.enclosingPosition, companionNotEvolving(symbol.fullName))
       }
     }
-    val companion = declaringCompanion(c)(tpe)
-    // The derivation may run while the companion initializes, when a strict val is still null
-    companion.foreach { companion =>
-      val evolutions = companion.typeSignature.member(TermName("evolutions"))
-      if (evolutions.isTerm && evolutions.asTerm.isStable && !evolutions.asTerm.isLazy) {
-        c.abort(c.enclosingPosition, evolutionsNotLazy(companion.fullName))
-      }
-    }
-    val declaring = companion.fold[Tree](q"_root_.org.apache.flinkx.api.evolution.Evolutions.none") { companion =>
-      q"${internal.gen.mkAttributedRef(companion)}.evolutions"
-    }
-    c.Expr[Evolvable[T]](
-      q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe](${versionOf(c)(symbol)}, () => $declaring)"
-    )
-  }
-
-  /** The companion declaring the evolutions of the given type, if it extends [[Evolving]]: its own, or the one of the
-    * nearest sealed trait it belongs to for a case object, which has no companion of its own.
-    */
-  private def declaringCompanion(c: blackbox.Context)(tpe: c.Type): Option[c.Symbol] = {
-    import c.universe._
-    def evolving(companion: Symbol) = companion != NoSymbol && companion.typeSignature <:< typeOf[Evolving[_]]
-    val symbol                      = tpe.typeSymbol
-    if (!symbol.isModuleClass) Some(symbol.companion).filter(evolving)
-    else
-      tpe.baseClasses.drop(1).collectFirst {
-        case base if base.asClass.isSealed && evolving(base.companion) => base.companion
-      }
+    c.Expr[Evolvable[T]](q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe]($version)")
   }
 
   /** The subtypes the derivation serializes, with the intermediate sealed traits it flattens on the way.
@@ -188,34 +162,40 @@ private[api] object EvolutionMacro {
 
     def nameOf(annotation: Annotation): String = annotation.tree.tpe.typeSymbol.name.decodedName.toString
 
-    /** The literal `since` of a field evolution, rejected outside the version range of the ADT. */
-    def sinceOf(annotation: Annotation, target: String): Int = {
-      val since = intArgument(c)(annotation, "since")
-        .getOrElse(c.abort(c.enclosingPosition, notLiteral(nameOf(annotation), "since", target)))
-      // An evolution outside the version range is never applied when it should
-      if (since < 1 || since > version) c.abort(c.enclosingPosition, sinceNotAllowed(symbol.fullName, since, version))
-      since
-    }
-
     def is(annotation: Annotation, annotationType: Symbol): Boolean =
       annotation.tree.tpe.typeSymbol == annotationType
 
     def isVersioned(owner: Symbol): Boolean = EvolutionMacro.isVersioned(c)(owner)
+
+    // A subtype is also renamed or deleted in the versions of the sealed traits above it, which resolve its former name
+    val classVersion = (version :: tpe.baseClasses.filter(isVersioned).map(ancestor => versionOf(c)(ancestor))).max
+
+    /** The literal `since` of an evolution, rejected outside the version range it is declared in. */
+    def sinceOf(annotation: Annotation, target: String, lastVersion: Int = version): Int = {
+      val since = intArgument(c)(annotation, "since")
+        .getOrElse(c.abort(c.enclosingPosition, notLiteral(nameOf(annotation), "since", target)))
+      // An evolution outside the version range is never applied when it should
+      if (since < 1 || since > lastVersion) {
+        c.abort(c.enclosingPosition, sinceNotAllowed(symbol.fullName, since, lastVersion))
+      }
+      since
+    }
 
     /** The annotation as an expression to splice, detyped: it was typed in the context of the class declaring it. */
     def instanceOf(annotation: Annotation): Tree = c.untypecheck(annotation.tree)
 
     def classAnnotations(builder: TermName, clazz: TermName): List[Tree] = symbol.annotations.collect {
       case a if is(a, Renamed) =>
-        q"""val r = ${instanceOf(a)}; $builder.renameClass(r.formerName, r.since)"""
+        q"""$builder.renameClass(${instanceOf(a)}.formerName, ${sinceOf(a, symbol.fullName, classVersion)})"""
       case a if is(a, DeletedFields) =>
         val since = sinceOf(a, symbol.fullName)
         q"""${instanceOf(a)}.formerNames.foreach(name =>
               $builder.addFieldEvolution($evolution.FieldEvolution.Delete($since, $clazz, name))
             )"""
       case a if is(a, DeletedClasses) =>
+        val since = sinceOf(a, symbol.fullName, classVersion)
         q"""val d = ${instanceOf(a)}
-            d.formerClassNames.foreach(name => $builder.deleteClass(name, d.since, d.throwOnInstance))"""
+            d.formerClassNames.foreach(name => $builder.deleteClass(name, $since, d.throwOnInstance))"""
       case a if is(a, PostEvolution) =>
         // The mapper is read on first use: the companion holding it may still be initializing
         val post = TermName(c.freshName("post$"))

@@ -38,12 +38,13 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     resolveSchemaCompatibility(formerSerializer) shouldBe Symbol("incompatible")
   }
 
-  // The former and the current classes are compared after resolveFormerClass mapped the former name to the current
-  // class, so a renamed case class must compare equal to itself.
+  // The former and the current classes are compared once the former name resolves to the current class, so a renamed
+  // case class must compare equal to itself.
   it should "resolve the schema compatibility of a renamed case class as compatible after migration" in {
-    // The former class is still declared to play its part in the snapshot, but its name belongs to the renamed one
-    val formerSerializer = new CaseClassSerializer[FormerRenamedCaseClass](
-      evolution = Evolutions.get(classOf[FormerRenamedCaseClass], 0),
+    // No class bears the former name anymore: the snapshot records it, as the former code wrote it
+    val formerName       = classOf[RenamedCaseClass].getName.replace("RenamedCaseClass", "FormerRenamedCaseClass")
+    val formerSerializer = new CaseClassSerializer[RenamedCaseClass](
+      evolution = new Evolution(formerName, 0, 0, classOf[RenamedCaseClass]),
       version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("a", "removed"),
@@ -93,14 +94,30 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     assertDoesNotCompile("implicitly[TypeInformation[NeverDeclared]]")
   }
 
-  // The derivation reads the evolutions from the companion, possibly while it initializes: they are built on demand
-  it should "derive the type information in the companion before the line declaring its evolutions" in {
+  // The derivation doesn't read the evolutions, which the restore reads once the companion is initialized
+  it should "derive the type information in the companion before the strict val declaring its evolutions" in {
     DerivedBeforeDeclared.typeInfo.getTypeClass shouldBe classOf[DerivedBeforeDeclared]
+    val formerName =
+      classOf[DerivedBeforeDeclared].getName.replace("DerivedBeforeDeclared", "FormerDerivedBeforeDeclared")
+    Evolutions.get(formerName, 0, getClass.getClassLoader).currentClass shouldBe classOf[DerivedBeforeDeclared]
   }
 
-  // A strict val would still be null when the derivation runs in the companion before it: the derivation rejects it
-  it should "not compile the derivation of an ADT whose companion declares its evolutions in a strict val" in {
-    assertDoesNotCompile("implicitly[TypeInformation[EagerlyDeclared]]")
+  it should "not compile a declaration renaming an ADT since a version above its current one" in {
+    assertDoesNotCompile("Evolutions[WrongRenamedSinceAboveVersion]")
+  }
+
+  it should "not compile a declaration deleting classes since a version below 1" in {
+    assertDoesNotCompile("Evolutions[WrongDeletedClassesSinceBelowOne]")
+  }
+
+  // Its own snapshot always records version 0, so its former name could never be told apart by the version
+  it should "not compile a declaration renaming an unversioned subtype" in {
+    assertDoesNotCompile("Evolutions[RenamingUnversionedSubtype]")
+  }
+
+  // A subtype may be renamed in the versions of its sealed trait, as Horse is, but not above them
+  it should "not compile a declaration renaming a subtype since a version above the ones of its sealed traits" in {
+    assertDoesNotCompile("Evolutions[WrongRenamedSubtypeSinceAboveVersion]")
   }
 
 }

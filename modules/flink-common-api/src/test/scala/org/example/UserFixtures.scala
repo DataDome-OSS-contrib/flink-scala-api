@@ -15,7 +15,7 @@ object UserFixtures {
       @transformed(since = 1, intToLabel) label: String,
       @added(since = 2) note: String = "none"
   )
-  object Order extends Evolving[Order] { lazy val evolutions = Evolutions[Order] }
+  object Order extends Evolving[Order] { val evolutions = Evolutions[Order] }
 
   def intToLabel(i: Int): String              = i.toString
   def bump(version: Int, order: Order): Order = order.copy(note = order.note + version)
@@ -25,7 +25,7 @@ object UserFixtures {
   @postEvolution(Invoice.stamp)
   case class Invoice(@transformed(since = 1, Invoice.toAmount) amount: String)
   object Invoice extends Evolving[Invoice] {
-    lazy val evolutions = Evolutions[Invoice]
+    val evolutions = Evolutions[Invoice]
 
     private[example] def toAmount(cents: Int): String                   = s"$cents cents"
     private[example] def stamp(version: Int, invoice: Invoice): Invoice = Invoice(s"${invoice.amount} since v$version")
