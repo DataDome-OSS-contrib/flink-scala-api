@@ -1,6 +1,7 @@
 package org.apache.flinkx.api
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.auto.*
 import org.apache.flinkx.api.evolution.{Evolutions, Evolving, deletedClasses, renamed, version}
@@ -123,6 +124,23 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "resolve the schema compatibility of an unevolved enum as compatible as is" in {
     resolveSchemaCompatibility[Failure](createSerializer[Failure]) shouldBe Symbol("compatibleAsIs")
+  }
+
+  // The former values are matched to the current ones by name, whatever their order
+  it should "restore the reordered values of an unversioned enum, a value being added" in {
+    given TypeSerializer[Failure]     = createSerializer[Failure]
+    val derived                       = summon[TypeSerializer[Failure]].asInstanceOf[Scala3EnumSerializer[Failure]]
+    def valueSerializer(name: String) = derived.enumValueSerializers(derived.enumValueNames.indexOf(name))
+    // Failure v0 only had UNKNOWN and MISSING_KEY, in this order
+    val formerSerializer = new Scala3EnumSerializer[Failure](
+      evolution = derived.evolution,
+      version = 0,
+      enumValueNames = Array("UNKNOWN", "MISSING_KEY"),
+      enumValueSerializers = Array(valueSerializer("UNKNOWN"), valueSerializer("MISSING_KEY"))
+    )
+
+    deserializeFormerForm[Failure](formerSerializer, Failure.MISSING_KEY) shouldBe Failure.MISSING_KEY
+    resolveSchemaCompatibilityAfterRestore[Failure](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
   /* Test to serialize FailureType.OTHER_TYPE v0 code into Failure-Type-OTHER_TYPE-v0.snapshot file, uncomment both test and code to regenerate

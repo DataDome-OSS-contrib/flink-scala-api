@@ -155,9 +155,11 @@ class Scala3EnumSerializerSnapshot[T <: Product](
     // No evolution: delegates schema compatibility to parent standard resolution
     super[CompositeTypeSerializerSnapshot].resolveSchemaCompatibility(old)
 
-  /** `old.evolution` holds the evolutions migrating the very version the former data was written at. */
+  /** `old.evolution` holds the evolutions migrating the very version the former data was written at. The values are
+    * compared by name: a reordered, added, renamed or deleted one requires the migration as well.
+    */
   override protected def isEvolutionRequired(old: Scala3EnumSerializerSnapshot[T]): Boolean =
-    evolution.isDefined && old.evolution.exists(!_.isAvoidable(old.enumValueNames))
+    evolution.isDefined && old.evolution.exists(!_.isEmpty || !old.enumValueNames.sameElements(enumValueNames))
 
   /** Check every former enum value is either declared deleted, or still a value of the current enum, possibly under
     * another name, and that the schema of these surviving values can itself be migrated.

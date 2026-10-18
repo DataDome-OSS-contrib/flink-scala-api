@@ -85,7 +85,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val memberNames: Array[String] =
           if typeTag.isEnum then ctx.subtypes.map(_.typeInfo.short).toArray else subtypeClasses.map(_.getName)
 
-        val evolution = new NoEvolution(clazz, version, memberNames)
+        val evolution = new NoEvolution(clazz, version)
 
         val serializer =
           if typeTag.isEnum then

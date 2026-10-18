@@ -20,9 +20,8 @@ import scala.collection.mutable
   *   Current ADT class, against which the former class names are resolved
   * @param currentVersion
   *   Current schema version of the ADT
-  * @param currentMemberNames
-  *   Current ADT member names, in declaration order: the field names of a case class, the fully qualified names of the
-  *   subtypes of a sealed trait, or the value names of a Scala 3 enum
+  * @param currentFieldNames
+  *   Current field names of a case class, in declaration order, none for a sealed trait or an enum
   * @tparam T
   *   The type on which the [[Evolution]] applies
   */
@@ -30,7 +29,7 @@ import scala.collection.mutable
 final class EvolutionBuilder[T](
     val currentClass: Class[T],
     val currentVersion: Int,
-    currentMemberNames: Array[String] = Array.empty
+    currentFieldNames: Array[String] = Array.empty
 ) {
 
   // Former class names, with the version in which they were renamed to the current class
@@ -115,7 +114,7 @@ final class EvolutionBuilder[T](
       formerVersion = formerVersion,
       currentVersion = currentVersion,
       currentClass = currentClass,
-      currentMemberNames = currentMemberNames,
+      currentFieldNames = currentFieldNames,
       // An evolution introduced in version N migrates the data written before it
       fieldEvolutions = fieldEvolutions.filter(_.since > formerVersion).sorted.toArray,
       enumValueEvolutions = enumValueChanges

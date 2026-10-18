@@ -1,9 +1,11 @@
 package org.apache.flinkx.api.evolution
 
+import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto.*
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Renamed, Unchanged}
+import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -46,6 +48,22 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils wi
     roundtrip(serializer, Letter.A) // Read by the serializer restored from its snapshot
   }
 
+  // The value names are the same as before, but they swapped: the evolution of the values is still required
+  it should "migrate the values of an enum swapping their names" in {
+    given TypeSerializer[Swapped] = createSerializer[Swapped]
+    val v0                        = Evolutions.get(classOf[Swapped], 0)
+    val formerSerializer          = new Scala3EnumSerializer[Swapped](
+      evolution = Some(v0),
+      version = 0,
+      enumValueNames = Array("A", "B"),
+      enumValueSerializers =
+        Array[TypeSerializer[?]](new Scala3EnumValueSerializer(v0, 0, "A"), new Scala3EnumValueSerializer(v0, 0, "B"))
+    )
+
+    deserializeFormerForm[Swapped](formerSerializer, Swapped.A) shouldBe Swapped.B
+    resolveSchemaCompatibilityAfterRestore[Swapped](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
+  }
+
   it should "not compile a declaration renaming an enum value since a version above the one of its enum" in {
     assertDoesNotCompile("Evolutions[WrongEnumValueRenamedSinceAboveVersion]")
   }
@@ -64,6 +82,17 @@ object EvolutionMacroEnumTest {
     case A
   }
   object Letter extends Evolving[Letter] { val evolutions = Evolutions[Letter] }
+
+  /* Swapped v0
+  enum Swapped { case A, B }
+   */
+
+  @version(1)
+  enum Swapped {
+    @renamed(since = 1, "B") case A
+    @renamed(since = 1, "A") case B
+  }
+  object Swapped extends Evolving[Swapped] { val evolutions = Evolutions[Swapped] }
 
   @version(1)
   enum WrongEnumValueRenamedSinceAboveVersion {

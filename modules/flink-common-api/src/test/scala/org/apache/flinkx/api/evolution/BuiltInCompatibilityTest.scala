@@ -6,7 +6,7 @@ import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.BuiltInCompatibilityTest._
-import org.apache.flinkx.api.serializer.CaseClassSerializer
+import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -55,6 +55,22 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
     )
   }
 
+  // The former subtypes are matched to the current ones by name, whatever their order
+  it should "restore the reordered subtypes of an unversioned sealed trait, a subtype being added" in {
+    implicit val current: TypeSerializer[Shape] = createSerializer[Shape]
+    // Shape v0 only had Square and Circle, in this order
+    val formerSerializer = new CoproductSerializer[Shape](
+      evolution = Some(Evolutions.get(classOf[Shape], 0)),
+      version = 0,
+      subtypeClasses = Array(classOf[Square], classOf[Circle]),
+      subtypeFqns = Array(classOf[Square].getName, classOf[Circle].getName),
+      subtypeSerializers = Array(createSerializer[Square], createSerializer[Circle])
+    )
+
+    deserializeFormerForm[Shape](formerSerializer, Circle(1)) shouldBe Circle(1)
+    resolveSchemaCompatibilityAfterRestore[Shape](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
+  }
+
   /** Restores the snapshot of `clazz` written when its fields were declared in the given former order, as Flink
     * restores a savepoint, and reads back the given former field values with the restored serializer.
     */
@@ -89,5 +105,10 @@ object BuiltInCompatibilityTest {
   case class Pair(first: String, last: String)
 
   case class Counter(id: String, count: Int)
+
+  sealed trait Shape
+  case class Circle(radius: Int) extends Shape
+  case class Square(side: Int)   extends Shape
+  case object Dot                extends Shape
 
 }

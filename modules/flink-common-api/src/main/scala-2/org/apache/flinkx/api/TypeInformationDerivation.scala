@@ -72,7 +72,7 @@ private[api] trait TypeInformationDerivation {
         val subtypeFqns    = subtypeClasses.map(_.getName)
 
         val serializer = new CoproductSerializer[T](
-          evolution = Some(new NoEvolution(clazz, version, subtypeFqns)),
+          evolution = Some(new NoEvolution(clazz, version)),
           version = version,
           subtypeClasses = subtypeClasses,
           subtypeFqns = subtypeFqns,

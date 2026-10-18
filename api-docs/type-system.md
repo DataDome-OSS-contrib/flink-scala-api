@@ -271,6 +271,7 @@ savepoints: built-in compatibility rules that come "for free", and an opt-in ann
 Without any annotation, the following changes are safe between savepoint write and restore (starting from version 2.4.0):
 * Case classes: you can reorder fields.
 * Sealed traits: you can reorder subtypes and add new subtypes.
+* Scala 3 enums: you can reorder values and add new values.
 * For everything else (additions, renames, deletions, type changes, cross-field migrations), use the annotation-based schema evolution below.
 
 ### Annotation-based schema evolution

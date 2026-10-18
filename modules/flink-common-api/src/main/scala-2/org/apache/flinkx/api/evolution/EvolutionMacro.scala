@@ -12,18 +12,14 @@ import scala.util.control.NonFatal
   */
 private[api] object EvolutionMacro {
 
-  /** The subtypes the derivation serializes, and the intermediate sealed traits it flattened on the way. */
-  final case class Subtypes[S](serialized: List[S], intermediates: List[S])
-
   def evolutionsImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Evolutions[T]] = {
     import c.universe._
 
     val tpe    = weakTypeOf[T]
     val symbol = tpe.typeSymbol
     // A case object has no companion of its own to declare it: the sealed trait it belongs to declares it
-    val moduleChildren =
-      if (symbol.isClass) subtypesOf(c)(symbol.asClass).serialized.filter(_.isModuleClass) else Nil
-    val builders = tpe :: moduleChildren.map(_.asType.toType)
+    val moduleChildren = descendantsOf(c)(symbol).filter(_.isModuleClass).distinct
+    val builders       = tpe :: moduleChildren.map(_.asType.toType)
     c.Expr[Evolutions[T]](q"""
       new _root_.org.apache.flinkx.api.evolution.Evolutions[$tpe](
         _root_.scala.reflect.classTag[$tpe].runtimeClass.asInstanceOf[_root_.java.lang.Class[$tpe]],
@@ -56,24 +52,17 @@ private[api] object EvolutionMacro {
     c.Expr[Evolvable[T]](q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe]($version)")
   }
 
-  /** The subtypes the derivation serializes, with the intermediate sealed traits it flattens on the way.
-    *
-    * Magnolia replaces a sealed subtype by its own subtypes and sorts them by name, so a declaration describing the
-    * direct children instead would not match the serialized members, and an unchanged schema would be reported as
-    * needing a migration.
+  /** The subtypes of the given sealed type, and the ones of the intermediate sealed traits among them, none for a class
+    * that is not sealed.
     */
-  private def subtypesOf(c: blackbox.Context)(parent: c.universe.ClassSymbol): Subtypes[c.Symbol] = {
-    val (abstractChildren, concreteChildren) = parent.knownDirectSubclasses.toList.partition(_.isAbstract)
-    // Forces the signature, without which a child of the same compilation unit may not be known yet
-    (concreteChildren ++ abstractChildren).foreach(_.typeSignature)
-    val flattened = abstractChildren.collect {
-      case child if child.asClass.isSealed => subtypesOf(c)(child.asClass)
+  private def descendantsOf(c: blackbox.Context)(parent: c.Symbol): List[c.Symbol] =
+    if (!parent.isClass) Nil
+    else {
+      val children = parent.asClass.knownDirectSubclasses.toList
+      // Forces the signature, without which a child of the same compilation unit may not be known yet
+      children.foreach(_.typeSignature)
+      children ++ children.filter(child => child.isAbstract && child.asClass.isSealed).flatMap(descendantsOf(c))
     }
-    Subtypes(
-      (concreteChildren ++ flattened.flatMap(_.serialized)).sortBy(_.fullName),
-      abstractChildren ++ flattened.flatMap(_.intermediates)
-    )
-  }
 
   /** The parameters of the primary constructor of the given type, none for a trait. */
   private def primaryParameters(c: blackbox.Context)(tpe: c.Type): List[c.Symbol] = {
@@ -134,20 +123,13 @@ private[api] object EvolutionMacro {
 
     val evolution = q"_root_.org.apache.flinkx.api.evolution"
     val symbol    = tpe.typeSymbol
-    // The subtypes the derivation serializes, and every sealed trait it flattened on the way, which declares nothing
-    val Subtypes(children, intermediates) =
-      if (symbol.isClass) subtypesOf(c)(symbol.asClass) else Subtypes[Symbol](Nil, Nil)
+    // The subtypes of a sealed trait, and the ones of the intermediate sealed traits among them
+    val descendants = descendantsOf(c)(symbol)
 
     val parameters = primaryParameters(c)(tpe)
 
-    /** Members of the ADT, in declaration order: field names or subtype class names. */
-    val memberNames: Tree =
-      if (children.isEmpty) q"_root_.scala.Array(..${parameters.map(p => q"${p.name.decodedName.toString}")})"
-      else {
-        val subtypeClasses =
-          children.map(child => q"_root_.scala.reflect.classTag[${child.asType.toType}].runtimeClass")
-        q"_root_.scala.Array[_root_.java.lang.Class[_]](..$subtypeClasses).map(_.getName)"
-      }
+    // The fields of a case class, in declaration order: a sealed trait compares its subtypes in its snapshots
+    val fieldNames = if (descendants.isEmpty) parameters.map(_.name.decodedName.toString) else Nil
 
     // Compared by symbol rather than by type: the generic annotations have no type tag to compare against
     def annotationSymbol(name: String): Symbol = c.mirror.staticClass(s"org.apache.flinkx.api.evolution.$name")
@@ -238,7 +220,7 @@ private[api] object EvolutionMacro {
       val hasVersionedAncestor = tpe.baseClasses.filterNot(_ == symbol).exists(ancestor => isVersioned(ancestor))
 
       rejectVersionedParameter(c)(symbol, parameters)
-      val isCoproduct = children.nonEmpty
+      val isCoproduct = descendants.nonEmpty
 
       def reject(annotation: Annotation, target: String): Nothing =
         c.abort(c.enclosingPosition, notAllowed(nameOf(annotation), target))
@@ -266,7 +248,7 @@ private[api] object EvolutionMacro {
       }
 
       // A subtype declares its own evolutions, which its own declaration registers
-      (children ++ intermediates).filterNot(isVersioned).foreach { child =>
+      descendants.filterNot(isVersioned).foreach { child =>
         child.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
           if (!AnnotationRules.allowedOnUnversionedSubtype(nameOf(annotation), version, isEnum = false)) {
             reject(annotation, child.fullName)
@@ -283,7 +265,7 @@ private[api] object EvolutionMacro {
     val fieldDeclarations = fieldAnnotations(builder, clazz)
     q"""{
       val $clazz = $classOfTree
-      val $builder = new $evolution.EvolutionBuilder[$tpe]($clazz, $version, $memberNames)
+      val $builder = new $evolution.EvolutionBuilder[$tpe]($clazz, $version, _root_.scala.Array(..$fieldNames))
       ..$classDeclarations
       ..$fieldDeclarations
       $builder

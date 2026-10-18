@@ -19,9 +19,9 @@ import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, FieldIndex}
   *   Current schema version of the ADT, i.e. the data is migrated to this version
   * @param currentClass
   *   Current ADT class this evolution applies to
-  * @param currentMemberNames
-  *   Current ADT member names, in declaration order: the field names of a case class, the fully qualified names of the
-  *   subtypes of a sealed trait, or the value names of a Scala 3 enum
+  * @param currentFieldNames
+  *   Current field names of a case class, in declaration order, none for a sealed trait or an enum whose snapshots
+  *   compare their members themselves
   * @param fieldEvolutions
   *   Sorted field-level evolutions migrating the former data
   * @param enumValueEvolutions
@@ -38,22 +38,23 @@ sealed class Evolution[T] private[evolution] (
     val formerVersion: Int,
     val currentVersion: Int,
     val currentClass: Class[T],
-    private[evolution] val currentMemberNames: Array[String] = Array.empty,
+    private[evolution] val currentFieldNames: Array[String] = Array.empty,
     private val fieldEvolutions: Array[FieldEvolution] = Array.empty,
     private val enumValueEvolutions: Map[String, EnumValueEvolution] = Map.empty,
     private val postEvolution: Option[PostEvolutionMapper[T]] = None
 ) extends Serializable {
 
-  /** Whether the evolution can be skipped. Returns `true` (fast path) when:
-    *   - no field evolution migrates the former data,
-    *   - no `@postEvolution` mapper applies to it, and
-    *   - the former member names match the current declaration order.
+  /** Whether nothing is declared to migrate the former data: no field, enum value, and no `@postEvolution` mapper. */
+  def isEmpty: Boolean = fieldEvolutions.isEmpty && enumValueEvolutions.isEmpty && postEvolution.isEmpty
+
+  /** Whether the former data of a case class reads as is (fast path): nothing migrates it, and the former field names
+    * match the current declaration order.
     *
-    * @param formerMemberNames
-    *   Former ADT member names, in declaration order
+    * @param formerFieldNames
+    *   Former case class field names, in declaration order
     */
-  def isAvoidable(formerMemberNames: Array[String]): Boolean =
-    fieldEvolutions.isEmpty && postEvolution.isEmpty && formerMemberNames.sameElements(currentMemberNames)
+  def isAvoidable(formerFieldNames: Array[String]): Boolean =
+    isEmpty && formerFieldNames.sameElements(currentFieldNames)
 
   /** Apply the `@postEvolution` mapper to an instance read from the former data. */
   def postEvolve(instance: T): T = if (postEvolution.isEmpty) instance else postEvolution.get(formerVersion, instance)
@@ -75,7 +76,7 @@ sealed class Evolution[T] private[evolution] (
       case Left(failure) => Left(Seq(failure))
       case Right(fields) =>
         val failures = checkInstantiation(fields.keySet)
-        if (failures.nonEmpty) Left(failures) else Right(currentMemberNames.map(fields))
+        if (failures.nonEmpty) Left(failures) else Right(currentFieldNames.map(fields))
     }
 
   /** Check if the former schema can be migrated to the current one with the declared evolutions. Don't read field data.
@@ -89,8 +90,8 @@ sealed class Evolution[T] private[evolution] (
     plan(formerFieldNames).map(_.map(_.formerIndex))
 
   private def checkInstantiation(fieldNames: collection.Set[String]): Seq[FlinkRuntimeException] =
-    (currentMemberNames.collect { case n if !fieldNames.contains(n) => MissingFieldException(currentClass, n) } ++
-      fieldNames.collect { case n if !currentMemberNames.contains(n) => FieldNotUsedException(currentClass, n) }).toSeq
+    (currentFieldNames.collect { case n if !fieldNames.contains(n) => MissingFieldException(currentClass, n) } ++
+      fieldNames.collect { case n if !currentFieldNames.contains(n) => FieldNotUsedException(currentClass, n) }).toSeq
 
 }
 
@@ -120,21 +121,24 @@ object Evolution {
       extends Evolution[T](formerClassName, formerVersion, formerVersion + 1, DeletedClass.asInstanceOf[Class[T]]) {
 
     // The former data is read as it was written, only to be dropped
-    override def isAvoidable(formerMemberNames: Array[String]): Boolean = true
+    override def isAvoidable(formerFieldNames: Array[String]): Boolean = true
 
     /** What an instance of this deleted former class reads as: see [[Evolution.deletedInstance]]. */
     def deletedInstance: T = Evolution.deletedInstance(formerClassName, throwOnInstance)
 
   }
 
-  /** [[Evolution]] of an ADT declaring none. This evolution is only able to reorder its members. */
-  final class NoEvolution[T] private[api] (currentClass: Class[T], currentVersion: Int, memberNames: Array[String])
-      extends Evolution(currentClass.getName, currentVersion, currentVersion, currentClass, memberNames) {
+  /** [[Evolution]] of an ADT declaring none. This evolution is only able to reorder the fields of a case class. */
+  final class NoEvolution[T] private[api] (
+      currentClass: Class[T],
+      currentVersion: Int,
+      fieldNames: Array[String] = Array.empty
+  ) extends Evolution(currentClass.getName, currentVersion, currentVersion, currentClass, fieldNames) {
 
-    override def isAvoidable(formerMemberNames: Array[String]): Boolean =
-      // Only a reordering is migrated: sealed traits, enums and unreadable names keep the positional resolution
-      formerMemberNames.sameElements(currentMemberNames) ||
-        !formerMemberNames.sorted.sameElements(currentMemberNames.sorted)
+    override def isAvoidable(formerFieldNames: Array[String]): Boolean =
+      // Only a reordering is migrated: unreadable names, an added or a removed field keep the positional resolution
+      formerFieldNames.sameElements(currentFieldNames) ||
+        !formerFieldNames.sorted.sameElements(currentFieldNames.sorted)
 
   }
 

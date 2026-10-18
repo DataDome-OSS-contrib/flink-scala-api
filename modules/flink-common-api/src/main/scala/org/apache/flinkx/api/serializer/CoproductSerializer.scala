@@ -192,9 +192,11 @@ object CoproductSerializer {
         old: CoproductSerializerSnapshot[T]
     ): TypeSerializerSchemaCompatibility[T] = adapter.resolveSchemaCompatibility(old.adapter)
 
-    /** `old.evolution` holds the evolutions migrating the very version the former data was written at. */
+    /** `old.evolution` holds the evolutions migrating the very version the former data was written at. The subtypes are
+      * compared by name: a reordered, added, renamed or deleted one requires the migration as well.
+      */
     override protected def isEvolutionRequired(old: CoproductSerializerSnapshot[T]): Boolean =
-      evolution.isDefined && old.evolution.exists(!_.isAvoidable(old.subtypeFqns))
+      evolution.isDefined && old.evolution.exists(!_.isEmpty || !old.subtypeFqns.sameElements(subtypeFqns))
 
     /** Check every former subtype is either declared deleted, or still a member of the current sealed trait, possibly
       * under another name, and that the schema of these surviving subtypes can itself be migrated.

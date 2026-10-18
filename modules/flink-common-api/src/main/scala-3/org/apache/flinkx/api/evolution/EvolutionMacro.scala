@@ -118,16 +118,8 @@ private[evolution] object EvolutionMacro:
     val children = symbol.children
     val version  = versionOf(symbol)
 
-    /** The subtypes of a sealed trait, a case object child being a term whose singleton type names its class. */
-    val subtypeClasses: List[Expr[Class[?]]] =
-      if isEnum then Nil
-      else children.map(child => classOfExpr(if child.isTerm then child.termRef else child.typeRef))
-
-    /** Members of the ADT, in declaration order: field names, enum value names or subtype class names. */
-    val memberNames: Expr[Array[String]] =
-      if children.isEmpty then Expr(parametersOf(symbol).map(_.name).toArray)
-      else if isEnum then Expr(children.map(_.name).toArray)
-      else '{ Array(${ Varargs(subtypeClasses) }*).map(_.getName) }
+    // The fields of a case class, in declaration order: a sealed trait or an enum compares its members in its snapshots
+    val fieldNames = Expr(if children.isEmpty then parametersOf(symbol).map(_.name).toArray else Array.empty[String])
 
     def is[A: Type](term: Term): Boolean = term.tpe <:< TypeRepr.of[A]
 
@@ -267,7 +259,7 @@ private[evolution] object EvolutionMacro:
     val clazz = classOfExpr(TypeRepr.of[T])
     '{
       val declaredClass = $clazz.asInstanceOf[Class[T]]
-      val builder       = new EvolutionBuilder[T](declaredClass, ${ Expr(version) }, $memberNames)
+      val builder       = new EvolutionBuilder[T](declaredClass, ${ Expr(version) }, $fieldNames)
       ${ Expr.block(classAnnotations('builder, 'declaredClass), '{ () }) }
       ${ Expr.block(fieldAnnotations('builder, 'declaredClass), '{ () }) }
       ${ Expr.block(enumValueAnnotations('builder), '{ () }) }
