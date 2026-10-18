@@ -33,14 +33,9 @@ private[serializer] trait ConstructorCompat:
   // Say you have a class `final case class Foo(a: String, b: Int)`.
   // The first parameter is an alias for `java.lang.String`, which the constructor uses.
   // The second parameter is an alias for `java.lang.Integer`, but the constructor actually takes an unboxed `int`.
+  // The longest constructor stands for the primary one, whatever the order the JVM lists them in.
   private def constructorOf(cls: Class[?]): Constructor[?] =
-    try
-      cls.getConstructors
-        .foldLeft[Option[Constructor[?]]](None) {
-          case (Some(longest), c) if longest.getParameterCount < c.getParameterCount => Some(c)
-          case (_, c)                                                                => Some(c)
-        }
-        .get
+    try cls.getConstructors.maxBy(_.getParameterCount)
     catch
       case NonFatal(e) =>
         throw new IllegalArgumentException(

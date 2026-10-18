@@ -46,15 +46,13 @@ class ConstructorCompatTest extends AnyFlatSpec with Matchers {
     constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[SecondaryConstructor]
   }
 
-  /* Commented out failing test in CI: not throwing as expected with JDK 17
   it should "throw when the longest constructor is a secondary constructor" in {
     val constructor = ConstructorCompatImpl.lookupConstructor(classOf[LongestSecondaryConstructor])
-    val exception = intercept[IllegalArgumentException] {
-      constructor.apply(Array.empty)
+    val exception   = intercept[IllegalArgumentException] {
+      constructor.apply(Array(1.asInstanceOf[AnyRef], "b"))
     }
     exception.getMessage should startWith("wrong number of arguments")
   }
-   */
 
   // The constructor lookup no longer fills the missing arguments with the case class default values: a field added to
   // a case class has to be declared with the @added annotation, which is what supplies its default value.
