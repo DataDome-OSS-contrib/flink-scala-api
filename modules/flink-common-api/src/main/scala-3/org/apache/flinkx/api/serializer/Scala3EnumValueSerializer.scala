@@ -2,7 +2,6 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Renamed, Unchanged}
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.util.ClassUtil
 
@@ -21,12 +20,7 @@ class Scala3EnumValueSerializer[T](
   private def valueOf(valueName: String): T =
     companionClass.getFields.find(_.getName == valueName).map(_.get(null)).orNull.asInstanceOf[T]
 
-  @transient private lazy val enumValue: T = evolution.getEnumValueEvolution(enumValueName) match {
-    case Unchanged                => valueOf(enumValueName)
-    case Renamed(currentName)     => valueOf(currentName)
-    case Deleted(throwOnInstance) =>
-      Evolution.deletedInstance(s"${evolution.currentClass.getName}#$enumValueName", throwOnInstance)
-  }
+  @transient private lazy val enumValue: T = evolution.restoreEnumValue(enumValueName)(valueOf)
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {}
   override def createInstance(): T                                       = enumValue
@@ -78,17 +72,10 @@ class Scala3EnumValueSerializerSnapshot[T](
   ): TypeSerializerSchemaCompatibility[T] = restoredSnapshot match {
     case restored: Scala3EnumValueSerializerSnapshot[?]
         if restored.evolution.currentClass.getName == evolution.currentClass.getName &&
-          restored.currentValueName.contains(enumValueName) =>
+          restored.evolution.currentEnumValueName(restored.enumValueName).contains(enumValueName) =>
       TypeSerializerSchemaCompatibility.compatibleAsIs()
     case _ =>
       TypeSerializerSchemaCompatibility.incompatible()
-  }
-
-  /** The current name of the enum value this snapshot records, none if it is deleted. */
-  private def currentValueName: Option[String] = evolution.getEnumValueEvolution(enumValueName) match {
-    case Unchanged            => Some(enumValueName)
-    case Renamed(currentName) => Some(currentName)
-    case Deleted(_)           => None
   }
 
   override def restoreSerializer(): TypeSerializer[T] =

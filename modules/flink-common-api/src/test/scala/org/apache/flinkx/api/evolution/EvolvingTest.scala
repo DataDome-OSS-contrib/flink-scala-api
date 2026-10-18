@@ -151,7 +151,7 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   it should "fail to restore a former name no class bears and no companion declares" in {
     val goneName   = "org.example.Gone"
     val serializer = new CaseClassSerializer[Probe](
-      evolution = new Evolution[Probe](goneName, 2, 2, classOf[Probe]),
+      evolution = new Evolution[Probe](goneName, 2, classOf[Probe]),
       version = 2,
       isCaseClassImmutable = true,
       fieldNames = Array("id"),

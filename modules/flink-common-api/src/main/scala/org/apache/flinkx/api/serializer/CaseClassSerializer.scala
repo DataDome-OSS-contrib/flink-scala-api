@@ -30,7 +30,6 @@ import org.apache.flink.api.common.typeutils.{
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
-import org.apache.flinkx.api.evolution.Evolution.DeletedEvolution
 import org.apache.flinkx.api.evolution.FieldEvolution.EvolvedField
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
@@ -75,9 +74,10 @@ class CaseClassSerializer[T <: Product](
   // The underlying implementation is major version-specific (Scala 2 vs. Scala 3).
   @transient private lazy val constructor = lookupConstructor(tupleClass)
 
-  // Cache to check for fast path on first record only
-  @transient private lazy val isEvolutionAvoidable = fieldNames.isEmpty || // Keep compatibility with versions < 2.4.0
-    evolution.isAvoidable(fieldNames)
+  // Cache to check for fast path on first record only, a deleted class building nothing
+  @transient private lazy val isEvolutionAvoidable =
+    !evolution.isDeleted && (fieldNames.isEmpty // No field names before 2.4.0: read by position
+      || evolution.isAvoidable(fieldNames))
 
   // Cache how to evolve from former to current fields
   @transient private lazy val evolutionPlan: Array[EvolvedField] =
@@ -172,11 +172,8 @@ class CaseClassSerializer[T <: Product](
         formerValues(i) = fieldSerializers(i).deserialize(source)
         i += 1
       }
-      evolution match {
-        case deleted: DeletedEvolution[T] => deleted.deletedInstance
-        case _ if isEvolutionAvoidable    => createInstance(formerValues)
-        case _                            => evolution.postEvolve(createInstance(evolve(formerValues)))
-      }
+      if (isEvolutionAvoidable) createInstance(formerValues)
+      else evolution.restore(createInstance(evolve(formerValues)))
     }
   }
 

@@ -48,7 +48,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     declaration.versions.map(_.formerVersion) shouldBe Seq(0, 1, 2)
     declaration.versions(1).dryRun(Array("id", "count")).map(_.toSeq) shouldBe Right(Seq(Some(0), Some(1), None))
     val version1 = declaration.versions(1).asInstanceOf[Evolution[Probe]]
-    version1.postEvolve(Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
+    version1.restore(Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
     declaration.versions(2).isAvoidable(Array("id", "count", "label")) shouldBe true
   }
 
@@ -69,7 +69,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   it should "apply the mappers of the companion" in {
     val evolution = Evolutions.get(classOf[Probe], 1)
 
-    evolution.postEvolve(Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
+    evolution.restore(Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
   }
 
 }

@@ -83,7 +83,7 @@ class CoproductSerializer[T](
     } else {
       // A deleted former subtype throws or reads as null through the evolution of its own serializer
       val instance = subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.fold(instance)(_.postEvolve(instance))
+      evolution.fold(instance)(_.restore(instance))
     }
   }
 

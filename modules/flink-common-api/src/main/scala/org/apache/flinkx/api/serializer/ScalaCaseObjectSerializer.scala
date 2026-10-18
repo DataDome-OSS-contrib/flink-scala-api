@@ -2,16 +2,13 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.Evolution.DeletedEvolution
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
 
 class ScalaCaseObjectSerializer[T](val evolution: Evolution[T], val version: Int) extends ImmutableSerializer[T] {
 
-  @transient private lazy val caseObject: T = evolution match {
-    case deleted: DeletedEvolution[T] => deleted.deletedInstance
-    case _                            => evolution.currentClass.getField("MODULE$").get(null).asInstanceOf[T]
-  }
+  @transient private lazy val caseObject: T =
+    evolution.restore(evolution.currentClass.getField("MODULE$").get(null).asInstanceOf[T])
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {}
   override def createInstance(): T                                       = caseObject

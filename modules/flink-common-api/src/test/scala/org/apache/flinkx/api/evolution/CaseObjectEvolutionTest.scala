@@ -2,7 +2,6 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flinkx.api.TestUtils
-import org.apache.flinkx.api.evolution.Evolution.DeletedEvolution
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.serializer.{CoproductSerializer, ScalaCaseObjectSerializer}
 import org.scalatest.BeforeAndAfterEach
@@ -28,10 +27,10 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils w
   private def formerSerializer: CoproductSerializer[Litter] = {
     def formerCaseObject(name: String, caseObject: Litter): TypeSerializer[_] = {
       val clazz = caseObject.getClass.asInstanceOf[Class[Litter]]
-      new ScalaCaseObjectSerializer[Litter](new Evolution(recorded(name), 0, 0, clazz), 0)
+      new ScalaCaseObjectSerializer[Litter](new Evolution(recorded(name), 0, clazz), 0)
     }
     new CoproductSerializer[Litter](
-      evolution = Some(new Evolution(classOf[Litter].getName, 0, 0, classOf[Litter])),
+      evolution = Some(new Evolution(classOf[Litter].getName, 0, classOf[Litter])),
       version = 0,
       subtypeClasses = Array[Class[_]](Cat.getClass, Dog.getClass),
       subtypeFqns = Array(recorded("Kitten"), recorded("Puppy")),
@@ -55,17 +54,19 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils w
   it should "resolve a class deleted under a name without the $ ending the class name of a case object" in {
     val cl = getClass.getClassLoader
 
-    Evolution.isDeletedClass(Evolutions.get[Litter](recorded("Bird"), 0, cl).currentClass) shouldBe true
-    Evolution.isDeletedClass(Evolutions.get[Litter](named("Bird"), 0, cl).currentClass) shouldBe true
+    Evolutions.get[Litter](recorded("Bird"), 0, cl).isDeleted shouldBe true
+    Evolutions.get[Litter](named("Bird"), 0, cl).isDeleted shouldBe true
   }
 
   // Each deletion keeps its own window and behavior, the case class deleted in version 1 reading as null
   it should "keep each deletion of a name taken again in between" in {
-    def deleted(name: String, version: Int) =
-      Evolutions.get[Nest](named(name), version, getClass.getClassLoader).asInstanceOf[DeletedEvolution[Nest]]
+    def restored(name: String, version: Int): Nest =
+      Evolutions
+        .get[Nest](named(name), version, getClass.getClassLoader)
+        .restore(fail("A deleted class builds nothing"))
 
-    deleted("Egg", 0).deletedInstance shouldBe null
-    intercept[DeletedInstanceException](deleted("Egg$", 2).deletedInstance)
+    restored("Egg", 0) shouldBe null
+    intercept[DeletedInstanceException](restored("Egg$", 2))
   }
 
   it should "not mistake a case class bearing the former name of a renamed case object for it" in {

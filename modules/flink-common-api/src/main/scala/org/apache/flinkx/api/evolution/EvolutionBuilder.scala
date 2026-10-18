@@ -112,7 +112,6 @@ final class EvolutionBuilder[T](
     new Evolution[T](
       formerClassName = formerClassName,
       formerVersion = formerVersion,
-      currentVersion = currentVersion,
       currentClass = currentClass,
       currentFieldNames = currentFieldNames,
       // An evolution introduced in version N migrates the data written before it

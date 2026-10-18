@@ -4,7 +4,6 @@ import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Renamed, Unchanged}
 import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -29,14 +28,15 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils wi
   it should "declare the evolutions of the enum values" in {
     val evolution = Evolutions.get(classOf[FailureCategory], 0)
 
-    evolution.getEnumValueEvolution("MISSING_TYPE") shouldBe Renamed("MISSING")
-    evolution.getEnumValueEvolution("OTHER_TYPE") shouldBe Deleted(throwOnInstance = true)
+    evolution.currentEnumValueName("MISSING_TYPE") shouldBe Some("MISSING")
+    evolution.currentEnumValueName("OTHER_TYPE") shouldBe None
+    intercept[DeletedInstanceException](evolution.restoreEnumValue("OTHER_TYPE")(_ => fail("A deleted value is read")))
   }
 
   // The former name of a renamed value is borne again by a value added since
   it should "apply the evolution of an enum value only to the data written before it" in {
-    Evolutions.get(classOf[Letter], 0).getEnumValueEvolution("A") shouldBe Renamed("B")
-    Evolutions.get(classOf[Letter], 1).getEnumValueEvolution("A") shouldBe Unchanged
+    Evolutions.get(classOf[Letter], 0).currentEnumValueName("A") shouldBe Some("B")
+    Evolutions.get(classOf[Letter], 1).currentEnumValueName("A") shouldBe Some("A")
   }
 
   it should "serialize an enum value bearing the former name of a renamed value as itself" in {

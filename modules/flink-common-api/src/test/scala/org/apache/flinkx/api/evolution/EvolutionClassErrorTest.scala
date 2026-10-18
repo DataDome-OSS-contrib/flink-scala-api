@@ -44,7 +44,7 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     // No class bears the former name anymore: the snapshot records it, as the former code wrote it
     val formerName       = classOf[RenamedCaseClass].getName.replace("RenamedCaseClass", "FormerRenamedCaseClass")
     val formerSerializer = new CaseClassSerializer[RenamedCaseClass](
-      evolution = new Evolution(formerName, 0, 0, classOf[RenamedCaseClass]),
+      evolution = new Evolution(formerName, 0, classOf[RenamedCaseClass]),
       version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("a", "removed"),

@@ -9,8 +9,6 @@ import org.apache.flink.api.common.typeutils.{
   TypeSerializerSnapshot
 }
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Renamed, Unchanged}
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions, renamedOrDeletedHint}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 
@@ -81,7 +79,7 @@ class Scala3EnumSerializer[T <: Product](
     } else {
       // A deleted former value throws or reads as null through the evolution of its own serializer
       val instance = enumValueSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.fold(instance)(_.postEvolve(instance))
+      evolution.fold(instance)(_.restore(instance))
     }
   }
 
@@ -184,12 +182,8 @@ class Scala3EnumSerializerSnapshot[T <: Product](
     old.enumValueNames.indices.iterator
       .flatMap { i =>
         val formerName = old.enumValueNames(i)
-        old.evolution.fold[EnumValueEvolution](Unchanged)(_.getEnumValueEvolution(formerName)) match {
-          // A deleted former value throws or reads as null through the evolution of its own serializer
-          case Deleted(_)           => None
-          case Renamed(currentName) => checkValue(i, formerName, currentName)
-          case Unchanged            => checkValue(i, formerName, formerName)
-        }
+        // A deleted former value throws or reads as null through the evolution of its own serializer
+        old.evolution.fold(Option(formerName))(_.currentEnumValueName(formerName)).flatMap(checkValue(i, formerName, _))
       }
       .nextOption()
   }

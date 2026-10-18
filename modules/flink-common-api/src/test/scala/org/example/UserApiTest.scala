@@ -23,7 +23,7 @@ class UserApiTest extends AnyFlatSpec with Matchers {
 
     evolution.plan(Array("amount")).map(_.map(_.evolve(Array[AnyRef](Int.box(42)))).toSeq) shouldBe
       Right(Seq("42 cents"))
-    evolution.postEvolve(Invoice("42 cents")) shouldBe Invoice("42 cents since v0")
+    evolution.restore(Invoice("42 cents")) shouldBe Invoice("42 cents since v0")
   }
 
 }

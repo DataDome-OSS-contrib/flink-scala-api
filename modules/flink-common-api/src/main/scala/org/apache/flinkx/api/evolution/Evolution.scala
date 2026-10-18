@@ -3,7 +3,7 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.annotation.Internal
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution
-import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.Unchanged
+import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Renamed}
 import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, FieldIndex}
 
 /** Immutable view of evolutions to apply on an ADT during deserialization to migrate its data written at a former
@@ -15,8 +15,6 @@ import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, FieldIndex}
   *   Name the data was written under: a former ADT class name, or the current one
   * @param formerVersion
   *   Schema version the data was written at, which this evolution migrates from
-  * @param currentVersion
-  *   Current schema version of the ADT, i.e. the data is migrated to this version
   * @param currentClass
   *   Current ADT class this evolution applies to
   * @param currentFieldNames
@@ -36,7 +34,6 @@ import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, FieldIndex}
 sealed class Evolution[T] private[evolution] (
     val formerClassName: String,
     val formerVersion: Int,
-    val currentVersion: Int,
     val currentClass: Class[T],
     private[evolution] val currentFieldNames: Array[String] = Array.empty,
     private val fieldEvolutions: Array[FieldEvolution] = Array.empty,
@@ -56,12 +53,29 @@ sealed class Evolution[T] private[evolution] (
   def isAvoidable(formerFieldNames: Array[String]): Boolean =
     isEmpty && formerFieldNames.sameElements(currentFieldNames)
 
-  /** Apply the `@postEvolution` mapper to an instance read from the former data. */
-  def postEvolve(instance: T): T = if (postEvolution.isEmpty) instance else postEvolution.get(formerVersion, instance)
+  /** Whether the former class is deleted: its data is read as it was written, only to be dropped by [[restore]]. */
+  def isDeleted: Boolean = Evolution.isDeletedClass(currentClass)
 
-  /** Return the evolution of the Scala 3 enum value named `formerValueName` in the former data. */
-  def getEnumValueEvolution(formerValueName: String): EnumValueEvolution =
-    enumValueEvolutions.getOrElse(formerValueName, Unchanged)
+  /** Restore the current `instance` builds from the former data, mapped by the `@postEvolution` mapper */
+  def restore(instance: => T): T = if (postEvolution.isEmpty) instance else postEvolution.get(formerVersion, instance)
+
+  /** The current name of the Scala 3 enum value named `formerValueName` in the former data, none if it is deleted. */
+  def currentEnumValueName(formerValueName: String): Option[String] = enumValueEvolutions.get(formerValueName) match {
+    case Some(Renamed(currentName)) => Some(currentName)
+    case Some(Deleted(_))           => None
+    case None                       => Some(formerValueName)
+  }
+
+  /** Restore the current Scala 3 enum value of the one named `formerValueName` in the former data, which `valueOf`
+    * reads by its current name. A deleted value reads as `null`, or throws a [[DeletedInstanceException]].
+    */
+  def restoreEnumValue(formerValueName: String)(valueOf: String => T): T =
+    enumValueEvolutions.get(formerValueName) match {
+      case Some(Renamed(currentName))     => valueOf(currentName)
+      case Some(Deleted(throwOnInstance)) =>
+        Evolution.deletedInstance(s"${currentClass.getName}#$formerValueName", throwOnInstance)
+      case None => valueOf(formerValueName)
+    }
 
   /** Plan how the current fields evolve from the former ones, based on declared field evolutions. Don't read field
     * data.
@@ -108,7 +122,7 @@ object Evolution {
   /** Throw a [[DeletedInstanceException]] if requesting an instance of this deleted former class registered with
     * `throwOnInstance = true`; return `null` otherwise.
     */
-  private[api] def deletedInstance[T](formerName: String, throwOnInstance: Boolean): T =
+  private def deletedInstance[T](formerName: String, throwOnInstance: Boolean): T =
     if (throwOnInstance) throw DeletedInstanceException(formerName) else null.asInstanceOf[T]
 
   /** [[Evolution]] of a former class registered as deleted with `@deletedClasses`.
@@ -117,23 +131,17 @@ object Evolution {
     *   If `true`, encountering an instance of this former class during deserialization throws, otherwise the instance
     *   is deserialized as `null`
     */
-  final class DeletedEvolution[T] private[api] (formerClassName: String, formerVersion: Int, throwOnInstance: Boolean)
-      extends Evolution[T](formerClassName, formerVersion, formerVersion + 1, DeletedClass.asInstanceOf[Class[T]]) {
+  private[api] final class DeletedEvolution[T](formerClassName: String, formerVersion: Int, throwOnInstance: Boolean)
+      extends Evolution[T](formerClassName, formerVersion, DeletedClass.asInstanceOf[Class[T]]) {
 
-    // The former data is read as it was written, only to be dropped
-    override def isAvoidable(formerFieldNames: Array[String]): Boolean = true
-
-    /** What an instance of this deleted former class reads as: see [[Evolution.deletedInstance]]. */
-    def deletedInstance: T = Evolution.deletedInstance(formerClassName, throwOnInstance)
+    /** A deleted class restore nothing: it reads as `null`, or throws a [[DeletedInstanceException]]. */
+    override def restore(instance: => T): T = Evolution.deletedInstance(formerClassName, throwOnInstance)
 
   }
 
   /** [[Evolution]] of an ADT declaring none. This evolution is only able to reorder the fields of a case class. */
-  final class NoEvolution[T] private[api] (
-      currentClass: Class[T],
-      currentVersion: Int,
-      fieldNames: Array[String] = Array.empty
-  ) extends Evolution(currentClass.getName, currentVersion, currentVersion, currentClass, fieldNames) {
+  private[api] final class NoEvolution[T](currentClass: Class[T], version: Int, fieldNames: Array[String] = Array.empty)
+      extends Evolution(currentClass.getName, version, currentClass, fieldNames) {
 
     override def isAvoidable(formerFieldNames: Array[String]): Boolean =
       // Only a reordering is migrated: unreadable names, an added or a removed field keep the positional resolution
@@ -147,14 +155,9 @@ object Evolution {
     * As an enum value is not a class, it can't hold an [[Evolution]] of its own: these evolutions are held by the
     * [[Evolution]] of the enum declaring the value.
     */
-  @Internal
-  sealed trait EnumValueEvolution
+  private[evolution] sealed trait EnumValueEvolution
 
-  @Internal
-  object EnumValueEvolution {
-
-    /** The former enum value is still declared under the same name. */
-    case object Unchanged extends EnumValueEvolution
+  private[evolution] object EnumValueEvolution {
 
     /** The former enum value is now declared under `currentName`. Backs the `@renamed` annotation on an enum value. */
     final case class Renamed(currentName: String) extends EnumValueEvolution
