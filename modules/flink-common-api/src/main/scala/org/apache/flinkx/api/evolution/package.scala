@@ -249,30 +249,14 @@ package object evolution {
   private[api] def evolutionNotAllowed(annotation: String, target: String): String =
     s"@$annotation annotation is not allowed on $target"
 
-  /** Exception indicating `formerField` is not used to instantiate `currentClass`. */
-  final case class FieldNotUsedException(currentClass: Class[_], formerField: String)
+  /** Exception indicating the declared evolutions can't migrate the data of `currentClass` written at `formerVersion`.
+    *
+    * @param failures
+    *   Why, each one telling which annotation is missing or wrong
+    */
+  final case class MigrationException(currentClass: Class[_], formerVersion: Int, failures: Seq[String])
       extends FlinkRuntimeException(
-        s"'$formerField' field not used to instantiate $currentClass. " +
-          s"Use @deletedFields(since=<version>,\"$formerField\") annotation to indicate it has been deleted"
-      )
-
-  /** Exception indicating `currentField` is missing to instantiate `currentClass`. */
-  final case class MissingFieldException(currentClass: Class[_], currentField: String)
-      extends FlinkRuntimeException(
-        s"'$currentField' field missing to instantiate $currentClass. " +
-          s"Use @added(since=<version>) annotation to indicate it has been added"
-      )
-
-  /** Exception indicating `field` is not found in `clazz`. */
-  final case class FieldNotFoundException(clazz: Class[_], field: String, operation: String, fields: Iterable[String])
-      extends FlinkRuntimeException(
-        s"Cannot $operation '$field'. Field not found in $clazz. Available fields: ${fields.mkString("[\"", "\",\"", "\"]")}"
-      )
-
-  /** Exception indicating `field` already exists in `clazz`. */
-  final case class FieldAlreadyExistException(clazz: Class[_], field: String, fields: Iterable[String])
-      extends FlinkRuntimeException(
-        s"Cannot add '$field'. Field already exists in $clazz. Existing fields: ${fields.mkString("[\"", "\",\"", "\"]")}"
+        s"Cannot migrate $currentClass from version $formerVersion: ${failures.mkString("\n")}"
       )
 
   /** Message of a versioned ADT whose companion doesn't extend `Evolving`, reported where its type information is

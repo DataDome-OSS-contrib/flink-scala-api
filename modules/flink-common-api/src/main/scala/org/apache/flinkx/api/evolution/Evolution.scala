@@ -1,10 +1,9 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
-import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution
 import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Renamed}
-import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, FieldIndex}
+import org.apache.flinkx.api.evolution.FieldEvolution.EvolvedField
 
 /** Immutable view of evolutions to apply on an ADT during deserialization to migrate its data written at a former
   * version to its current schema.
@@ -83,9 +82,9 @@ sealed class Evolution[T] private[evolution] (
     * @param formerFieldNames
     *   Former case class field names, in declaration order
     * @return
-    *   Failures the deserialization would hit, or how current fields evolve, in declaration order
+    *   How current fields evolve (in declaration order), or why the declared evolutions can't migrate the former fields
     */
-  def plan(formerFieldNames: Array[String]): Either[Seq[FlinkRuntimeException], Array[EvolvedField]] =
+  def plan(formerFieldNames: Array[String]): Either[Seq[String], Array[EvolvedField]] =
     FieldEvolution.replay(fieldEvolutions, formerFieldNames) match {
       case Left(failure) => Left(Seq(failure))
       case Right(fields) =>
@@ -93,19 +92,14 @@ sealed class Evolution[T] private[evolution] (
         if (failures.nonEmpty) Left(failures) else Right(currentFieldNames.map(fields))
     }
 
-  /** Check if the former schema can be migrated to the current one with the declared evolutions. Don't read field data.
-    *
-    * @param formerFieldNames
-    *   Former case class field names, in declaration order
-    * @return
-    *   Failures the deserialization would hit, or the index of current fields, in declaration order
-    */
-  def dryRun(formerFieldNames: Array[String]): Either[Seq[FlinkRuntimeException], Array[FieldIndex]] =
-    plan(formerFieldNames).map(_.map(_.formerIndex))
-
-  private def checkInstantiation(fieldNames: collection.Set[String]): Seq[FlinkRuntimeException] =
-    (currentFieldNames.collect { case n if !fieldNames.contains(n) => MissingFieldException(currentClass, n) } ++
-      fieldNames.collect { case n if !currentFieldNames.contains(n) => FieldNotUsedException(currentClass, n) }).toSeq
+  private def checkInstantiation(fieldNames: collection.Set[String]): Seq[String] =
+    currentFieldNames.toSeq.collect {
+      case n if !fieldNames.contains(n) =>
+        s"'$n' field missing. Use @added(since=<version>) annotation to indicate it has been added"
+    } ++ fieldNames.toSeq.collect {
+      case n if !currentFieldNames.contains(n) =>
+        s"'$n' former field not used. Use @deletedFields(since=<version>,\"$n\") annotation to indicate its deletion"
+    }
 
 }
 

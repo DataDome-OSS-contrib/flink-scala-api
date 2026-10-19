@@ -117,12 +117,11 @@ private[api] object EvolutionMacro {
   private def versionSymbol(c: blackbox.Context): c.Symbol =
     c.mirror.staticClass("org.apache.flinkx.api.evolution.version")
 
-  /** The code building the [[EvolutionBuilder]] of the given ADT type from its annotations. */
+  /** The code building the [[EvolutionBuilder]] of the given ADT type from its annotations, once they are validated. */
   private def builderOf(c: blackbox.Context)(tpe: c.Type): c.Tree = {
     import c.universe._
 
-    val evolution = q"_root_.org.apache.flinkx.api.evolution"
-    val symbol    = tpe.typeSymbol
+    val symbol = tpe.typeSymbol
     // The subtypes of a sealed trait, and the ones of the intermediate sealed traits among them
     val descendants = descendantsOf(c)(symbol)
 
@@ -134,11 +133,9 @@ private[api] object EvolutionMacro {
     // Compared by symbol rather than by type: the generic annotations have no type tag to compare against
     def annotationSymbol(name: String): Symbol = c.mirror.staticClass(s"org.apache.flinkx.api.evolution.$name")
     val Renamed                                = annotationSymbol("renamed")
-    val DeletedFields                          = annotationSymbol("deletedFields")
     val DeletedClasses                         = annotationSymbol("deletedClasses")
     val PostEvolution                          = annotationSymbol("postEvolution")
     val Added                                  = annotationSymbol("added")
-    val Transformed                            = annotationSymbol("transformed")
 
     val version = EvolutionMacro.versionOf(c)(symbol)
 
@@ -149,71 +146,22 @@ private[api] object EvolutionMacro {
 
     def isVersioned(owner: Symbol): Boolean = EvolutionMacro.isVersioned(c)(owner)
 
+    // Compared by base class: the erroneous type of an annotation that doesn't compile conforms to any type
+    def evolutionAnnotationsOf(owner: Symbol): List[Annotation] =
+      owner.annotations.filter(_.tree.tpe.baseClasses.contains(typeOf[EvolutionAnnotation].typeSymbol))
+
     // A subtype is also renamed or deleted in the versions of the sealed traits above it, which resolve its former name
     val classVersion = (version :: tpe.baseClasses.filter(isVersioned).map(ancestor => versionOf(c)(ancestor))).max
 
-    /** The literal `since` of an evolution, rejected outside the version range it is declared in. */
-    def sinceOf(annotation: Annotation, target: String, lastVersion: Int = version): Int = {
+    /** Reject a `since` that is not a literal, or outside the version range the annotation is declared in. */
+    def checkSince(annotation: Annotation, target: String, lastVersion: Int = version): Unit = {
       val since = intArgument(c)(annotation, "since")
         .getOrElse(c.abort(c.enclosingPosition, notLiteral(nameOf(annotation), "since", target)))
       // An evolution outside the version range is never applied when it should
       if (since < 1 || since > lastVersion) {
         c.abort(c.enclosingPosition, sinceNotAllowed(symbol.fullName, since, lastVersion))
       }
-      since
     }
-
-    /** The annotation as an expression to splice, detyped: it was typed in the context of the class declaring it. */
-    def instanceOf(annotation: Annotation): Tree = c.untypecheck(annotation.tree)
-
-    def classAnnotations(builder: TermName, clazz: TermName): List[Tree] = symbol.annotations.collect {
-      case a if is(a, Renamed) =>
-        q"""$builder.renameClass(${instanceOf(a)}.formerName, ${sinceOf(a, symbol.fullName, classVersion)})"""
-      case a if is(a, DeletedFields) =>
-        val since = sinceOf(a, symbol.fullName)
-        q"""${instanceOf(a)}.formerNames.foreach(name =>
-              $builder.addFieldEvolution($evolution.FieldEvolution.Delete($since, $clazz, name))
-            )"""
-      case a if is(a, DeletedClasses) =>
-        val since = sinceOf(a, symbol.fullName, classVersion)
-        q"""val d = ${instanceOf(a)}
-            d.formerClassNames.foreach(name => $builder.deleteClass(name, $since, d.throwOnInstance))"""
-      case a if is(a, PostEvolution) =>
-        // The mapper is read on first use: the companion holding it may still be initializing
-        val post = TermName(c.freshName("post$"))
-        q"""lazy val $post = ${instanceOf(a)}.asInstanceOf[_root_.org.apache.flinkx.api.evolution.postEvolution[$tpe]]
-            $builder.addPostEvolution(
-              new _root_.org.apache.flinkx.api.evolution.postEvolution[$tpe]((v: _root_.scala.Int, i: $tpe) => $post.mapper(v, i))
-            )"""
-    }
-
-    def fieldAnnotations(builder: TermName, clazz: TermName): List[Tree] =
-      parameters.zipWithIndex.flatMap { case (parameter, index) =>
-        val label  = parameter.name.decodedName.toString
-        val target = s"${symbol.fullName}.$label"
-        parameter.annotations.collect {
-          case a if is(a, Added) =>
-            if (!parameter.asTerm.isParamWithDefault) {
-              c.abort(c.enclosingPosition, addedFieldWithoutDefault(symbol.fullName, label))
-            }
-            q"""$builder.addFieldEvolution($evolution.FieldEvolution.Add(${sinceOf(
-                a,
-                target
-              )}, $clazz, $label, $index))"""
-          case a if is(a, Renamed) =>
-            q"""$builder.addFieldEvolution(
-                  $evolution.FieldEvolution.Rename(${sinceOf(a, target)}, $clazz, ${instanceOf(a)}.formerName, $label)
-                )"""
-          case a if is(a, Transformed) =>
-            // The mapper is read on first use: the companion holding it may still be initializing
-            val List(from, to) = a.tree.tpe.typeArgs.map(TypeTree(_))
-            val mapper         = TermName(c.freshName("transform$"))
-            q"""lazy val $mapper = ${instanceOf(a)}
-                $builder.addFieldEvolution($evolution.FieldEvolution.Transform[$from, $to](
-                  ${sinceOf(a, target)}, $clazz, $label, (a: $from) => $mapper.mapper(a)
-                ))"""
-        }
-      }
 
     /** Reject the evolution annotations that declare nothing where they are, before anything is generated. */
     def validate(): Unit = {
@@ -225,13 +173,13 @@ private[api] object EvolutionMacro {
       def reject(annotation: Annotation, target: String): Nothing =
         c.abort(c.enclosingPosition, notAllowed(nameOf(annotation), target))
 
-      def isEvolutionAnnotation(annotation: Annotation): Boolean =
-        annotation.tree.tpe.baseClasses.contains(typeOf[EvolutionAnnotation].typeSymbol)
-
-      symbol.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
+      evolutionAnnotationsOf(symbol).foreach { annotation =>
         if (!AnnotationRules.allowedOnAdt(nameOf(annotation), version, isCoproduct, hasVersionedAncestor)) {
           reject(annotation, AnnotationRules.target(symbol.fullName, None, version))
         }
+        if (is(annotation, Renamed) || is(annotation, DeletedClasses)) {
+          checkSince(annotation, symbol.fullName, classVersion)
+        } else if (!is(annotation, PostEvolution)) checkSince(annotation, symbol.fullName)
       }
 
       if (symbol.annotations.count(annotation => is(annotation, PostEvolution)) > 1) {
@@ -239,17 +187,21 @@ private[api] object EvolutionMacro {
       }
 
       parameters.foreach { parameter =>
-        parameter.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
+        val field = parameter.name.decodedName.toString
+        evolutionAnnotationsOf(parameter).foreach { annotation =>
           if (!AnnotationRules.allowedOnField(nameOf(annotation), version)) {
-            val field = parameter.name.decodedName.toString
             reject(annotation, AnnotationRules.target(symbol.fullName, Some(field), version))
           }
+          if (is(annotation, Added) && !parameter.asTerm.isParamWithDefault) {
+            c.abort(c.enclosingPosition, addedFieldWithoutDefault(symbol.fullName, field))
+          }
+          checkSince(annotation, s"${symbol.fullName}.$field")
         }
       }
 
       // A subtype declares its own evolutions, which its own declaration registers
       descendants.filterNot(isVersioned).foreach { child =>
-        child.annotations.filter(isEvolutionAnnotation).foreach { annotation =>
+        evolutionAnnotationsOf(child).foreach { annotation =>
           if (!AnnotationRules.allowedOnUnversionedSubtype(nameOf(annotation), version, isEnum = false)) {
             reject(annotation, child.fullName)
           }
@@ -257,15 +209,22 @@ private[api] object EvolutionMacro {
       }
     }
 
+    // The annotation as an expression to splice, untyped: it was typed in the context of the class declaring it
+    def instanceOf(annotation: Annotation): Tree = c.untypecheck(annotation.tree)
+
     validate()
-    val builder     = TermName("builder")
-    val clazz       = TermName("declaredClass")
-    val classOfTree = q"_root_.scala.reflect.classTag[$tpe].runtimeClass.asInstanceOf[_root_.java.lang.Class[$tpe]]"
-    val classDeclarations = classAnnotations(builder, clazz)
-    val fieldDeclarations = fieldAnnotations(builder, clazz)
+    val builder           = TermName("builder")
+    val classDeclarations = evolutionAnnotationsOf(symbol).map(a => q"$builder.declare(${instanceOf(a)})")
+    val fieldDeclarations = parameters.zipWithIndex.flatMap { case (parameter, index) =>
+      val name = parameter.name.decodedName.toString
+      evolutionAnnotationsOf(parameter).map(a => q"$builder.declareField($name, $index, ${instanceOf(a)})")
+    }
     q"""{
-      val $clazz = $classOfTree
-      val $builder = new $evolution.EvolutionBuilder[$tpe]($clazz, $version, _root_.scala.Array(..$fieldNames))
+      val $builder = new _root_.org.apache.flinkx.api.evolution.EvolutionBuilder[$tpe](
+        _root_.scala.reflect.classTag[$tpe].runtimeClass.asInstanceOf[_root_.java.lang.Class[$tpe]],
+        $version,
+        _root_.scala.Array(..$fieldNames)
+      )
       ..$classDeclarations
       ..$fieldDeclarations
       $builder

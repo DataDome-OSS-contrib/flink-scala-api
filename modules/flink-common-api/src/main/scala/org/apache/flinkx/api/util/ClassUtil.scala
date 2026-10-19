@@ -88,7 +88,7 @@ object ClassUtil {
     catch {
       case error @ (_: ExceptionInInitializerError | _: LinkageError) =>
         Failure(new FlinkRuntimeException(s"Cannot load $className", error))
-      case exception => Failure(exception)
+      case exception: Exception => Failure(exception)
     }
 
   /** Default value of the `index`-th field of the given case class, evaluated anew at each call.

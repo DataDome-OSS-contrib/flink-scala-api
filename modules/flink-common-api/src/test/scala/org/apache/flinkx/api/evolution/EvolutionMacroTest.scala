@@ -1,5 +1,6 @@
 package org.apache.flinkx.api.evolution
 
+import org.apache.flinkx.api.evolution.FieldEvolution.Former
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -15,14 +16,16 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   /** The class names an ADT declares. */
   private def namesOf(evolutions: Evolutions[_]): Set[String] = evolutions.declarations.map(_.formerClassName).toSet
 
-  /** What the evolutions do to a former schema, which compares the rules themselves and the order they run in. */
-  private def dryRunOf[T](
-      formerName: String,
-      formerVersion: Int,
-      formerFields: Array[String]
-  ): Option[Either[Seq[String], Seq[Option[Int]]]] =
-    Option(Evolutions.get[T](formerName, formerVersion, getClass.getClassLoader))
-      .map(_.dryRun(formerFields).left.map(_.map(_.getMessage).toSeq).map(_.toSeq))
+  /** The former field each current field reads, none when its lineage is broken: what the evolutions do to a former
+    * schema, which compares the rules themselves and the order they run in.
+    */
+  private def lineageOf(evolution: Evolution[_], formerFields: Array[String]): Either[Seq[String], Seq[Option[Int]]] =
+    evolution
+      .plan(formerFields)
+      .map(_.toSeq.map {
+        case Former(index) => Some(index)
+        case _             => None
+      })
 
   it should "declare the former and the current name of a case class" in {
     namesOf(Probe.evolutions) shouldBe Set(
@@ -46,7 +49,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     val declaration = Probe.evolutions.declarations.find(_.formerClassName == classOf[Probe].getName).get
 
     declaration.versions.map(_.formerVersion) shouldBe Seq(0, 1, 2)
-    declaration.versions(1).dryRun(Array("id", "count")).map(_.toSeq) shouldBe Right(Seq(Some(0), Some(1), None))
+    lineageOf(declaration.versions(1), Array("id", "count")) shouldBe Right(Seq(Some(0), Some(1), None))
     val version1 = declaration.versions(1).asInstanceOf[Evolution[Probe]]
     version1.restore(Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
     declaration.versions(2).isAvoidable(Array("id", "count", "label")) shouldBe true
@@ -57,12 +60,10 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     val formerName   = classOf[Probe].getName.replace("Probe", "FormerProbe")
     val formerFields = Array("formerId", "count", "gone")
 
-    val failures = dryRunOf[Probe](formerName, 0, formerFields)
-    withClue("the former name must resolve:")(failures shouldBe defined)
+    val evolution = Evolutions.get[Probe](formerName, 0, getClass.getClassLoader)
+
     // The transformed field loses its lineage by design, as does the added one
-    withClue("every field of the current schema must be filled:")(
-      failures shouldBe Some(Right(Seq(Some(0), None, None)))
-    )
+    lineageOf(evolution, formerFields) shouldBe Right(Seq(Some(0), None, None))
   }
 
   // The mappers live in the companion, hidden from the outside: the declaration is read from the companion itself

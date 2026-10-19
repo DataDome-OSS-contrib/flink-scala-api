@@ -35,9 +35,9 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils {
     clickV0As(clazz).deserialize(input)
   }
 
-  /** Messages of every failure the dry run of the evolutions `clazz` declares from version 0 reports on Click v0. */
-  private def dryRunFailures(clazz: Class[_]): Seq[String] =
-    Evolutions.get(clazz, 0).dryRun(ClickV0FieldNames).swap.map(_.map(_.getMessage).toSeq).getOrElse(Seq.empty)
+  /** Every failure the plan of the evolutions `clazz` declares from version 0 reports on Click v0. */
+  private def planFailures(clazz: Class[_]): Seq[String] =
+    Evolutions.get(clazz, 0).plan(ClickV0FieldNames).swap.getOrElse(Seq.empty)
 
   // Rejected where the declaration is read, at compile time
   it should "not compile a declaration with @added on a case class field without default value" in {
@@ -46,44 +46,44 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils {
     )
   }
 
-  it should "throw field not found when deserializing Click v0 with wrong added field" in {
-    val exception = intercept[FieldAlreadyExistException](readClickV0As(classOf[WrongAddedField]))
-    exception.getMessage shouldBe "Cannot add 'a'. Field already exists in class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongAddedField. Existing fields: [\"a\"]"
+  it should "throw field already exists when deserializing Click v0 with wrong added field" in {
+    val exception = intercept[MigrationException](readClickV0As(classOf[WrongAddedField]))
+    exception.getMessage shouldBe "Cannot migrate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongAddedField from version 0: Cannot add 'a': field already exists. Existing fields: [\"a\"]"
   }
 
   it should "throw field not found when deserializing Click v0 with wrong renamed field" in {
-    val exception = intercept[FieldNotFoundException](readClickV0As(classOf[WrongRenamedField]))
-    exception.getMessage shouldBe "Cannot rename 'wrongFieldName'. Field not found in class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongRenamedField. Available fields: [\"a\"]"
+    val exception = intercept[MigrationException](readClickV0As(classOf[WrongRenamedField]))
+    exception.getMessage shouldBe "Cannot migrate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongRenamedField from version 0: Cannot rename 'wrongFieldName': field not found. Available fields: [\"a\"]"
   }
 
   it should "throw field not found when deserializing Click v0 with wrong transformed field" in {
-    val exception = intercept[FieldNotFoundException](readClickV0As(classOf[WrongTransformedField]))
-    exception.getMessage shouldBe "Cannot transform 'wrongFieldName'. Field not found in class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongTransformedField. Available fields: [\"a\"]"
+    val exception = intercept[MigrationException](readClickV0As(classOf[WrongTransformedField]))
+    exception.getMessage shouldBe "Cannot migrate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongTransformedField from version 0: Cannot transform 'wrongFieldName': field not found. Available fields: [\"a\"]"
   }
 
   it should "ignore field not found when deserializing Click v0 with wrong deleted field" in {
     readClickV0As(classOf[WrongDeletedField]) shouldBe WrongDeletedField("a")
   }
 
-  // The field names are checked by the dry run, when the schema compatibility is resolved, and no longer on every
+  // The field names are checked by the plan, when the schema compatibility is resolved, and no longer on every
   // record: these assert the guidance the user gets, which resolveSchemaCompatibility only logs.
-  it should "report an unused former field when dry running Click v0 evolutions" in {
-    dryRunFailures(classOf[WrongFieldNotUsed]) shouldBe Seq(
-      "'b' field not used to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongFieldNotUsed. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
+  it should "report an unused former field when planning Click v0 evolutions" in {
+    planFailures(classOf[WrongFieldNotUsed]) shouldBe Seq(
+      "'b' former field not used. Use @deletedFields(since=<version>,\"b\") annotation to indicate its deletion"
     )
   }
 
-  it should "report every offending field when dry running Click v0 evolutions" in {
-    dryRunFailures(classOf[WrongSeveralFields]) shouldBe Seq(
-      "'missing' field missing to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSeveralFields. Use @added(since=<version>) annotation to indicate it has been added",
-      "'identifier' field not used to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSeveralFields. Use @deletedFields(since=<version>,\"identifier\") annotation to indicate it has been deleted",
-      "'b' field not used to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongSeveralFields. Use @deletedFields(since=<version>,\"b\") annotation to indicate it has been deleted"
+  it should "report every offending field when planning Click v0 evolutions" in {
+    planFailures(classOf[WrongSeveralFields]) shouldBe Seq(
+      "'missing' field missing. Use @added(since=<version>) annotation to indicate it has been added",
+      "'identifier' former field not used. Use @deletedFields(since=<version>,\"identifier\") annotation to indicate its deletion",
+      "'b' former field not used. Use @deletedFields(since=<version>,\"b\") annotation to indicate its deletion"
     )
   }
 
-  it should "report a missing current field when dry running Click v0 evolutions" in {
-    dryRunFailures(classOf[WrongMissingField]) shouldBe Seq(
-      "'missingField' field missing to instantiate class org.apache.flinkx.api.evolution.EvolutionErrorFixtures$WrongMissingField. Use @added(since=<version>) annotation to indicate it has been added"
+  it should "report a missing current field when planning Click v0 evolutions" in {
+    planFailures(classOf[WrongMissingField]) shouldBe Seq(
+      "'missingField' field missing. Use @added(since=<version>) annotation to indicate it has been added"
     )
   }
 
@@ -145,13 +145,10 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils {
     resolveSchemaCompatibilityAfterRestore[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol(
       "incompatible"
     )
-    // An unversioned ADT declares nothing: its no-op evolution still reports what its dry run would hit
-    Evolutions.get(classOf[AddedFieldWithoutAnnotation], 0).dryRun(Array("a")).swap.map(_.map(_.getMessage)) shouldBe
-      Right(
-        Seq(
-          "'b' field missing to instantiate class org.apache.flinkx.api.evolution.EvolutionTest$AddedFieldWithoutAnnotation. Use @added(since=<version>) annotation to indicate it has been added"
-        )
-      )
+    // An unversioned ADT declares nothing: its no-op evolution still reports what its plan would hit
+    Evolutions.get(classOf[AddedFieldWithoutAnnotation], 0).plan(Array("a")).swap shouldBe Right(
+      Seq("'b' field missing. Use @added(since=<version>) annotation to indicate it has been added")
+    )
   }
 
 }

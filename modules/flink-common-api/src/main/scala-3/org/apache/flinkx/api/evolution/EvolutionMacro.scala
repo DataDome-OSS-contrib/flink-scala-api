@@ -1,6 +1,5 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
 import org.apache.flinkx.api.AnnotationTrees
 
 import scala.quoted.*
@@ -109,7 +108,7 @@ private[evolution] object EvolutionMacro:
     val clazz = classOfExpr(TypeRepr.of[T])
     '{ new Evolutions[T]($clazz.asInstanceOf[Class[T]], () => Seq(${ Varargs(builders) }*)) }
 
-  /** The code building the [[EvolutionBuilder]] of `T` from its annotations. */
+  /** The code building the [[EvolutionBuilder]] of `T` from its annotations, once they are validated. */
   private def builderImpl[T: Type](using Quotes): Expr[EvolutionBuilder[T]] =
     import quotes.reflect.*
 
@@ -117,6 +116,8 @@ private[evolution] object EvolutionMacro:
     val isEnum   = symbol.flags.is(Flags.Enum)
     val children = symbol.children
     val version  = versionOf(symbol)
+    // An enum declares the evolutions of its values, while a subtype of a sealed trait declares its own
+    val enumValues = if isEnum then children else Nil
 
     // The fields of a case class, in declaration order: a sealed trait or an enum compares its members in its snapshots
     val fieldNames = Expr(if children.isEmpty then parametersOf(symbol).map(_.name).toArray else Array.empty[String])
@@ -125,100 +126,21 @@ private[evolution] object EvolutionMacro:
 
     def nameOf(term: Term): String = term.tpe.typeSymbol.name
 
+    /** The evolution annotations of a symbol, read whole so that splicing them is safe. */
+    def evolutionAnnotationsOf(owner: Symbol): List[Term] = {
+      AnnotationTrees.readWhole(List(owner))
+      owner.annotations.filter(is[EvolutionAnnotation])
+    }
+
     // A subtype is also renamed or deleted in the versions of the sealed traits above it, which resolve its former name
     val classVersion = (version :: TypeRepr.of[T].baseClasses.filter(isVersioned).map(versionOf)).max
 
-    /** The literal `since` of an evolution, rejected outside the version range it is declared in. */
-    def sinceOf(term: Term, target: String, lastVersion: Int = version): Expr[Int] =
+    /** Reject a `since` that is not a literal, or outside the version range the annotation is declared in. */
+    def checkSince(term: Term, target: String, lastVersion: Int = version): Unit =
       val since = intArgument(term, "since").getOrElse(report.errorAndAbort(notLiteral(nameOf(term), "since", target)))
       // An evolution outside the version range is never applied when it should
       if since < 1 || since > lastVersion then
         report.errorAndAbort(sinceNotAllowed(symbol.fullName, since, lastVersion))
-      Expr(since)
-
-    /** The annotations of a symbol, read whole so that splicing them is safe. */
-    def annotationsOf(owner: Symbol): List[Term] = {
-      AnnotationTrees.readWhole(List(owner))
-      owner.annotations
-    }
-
-    def classAnnotations(builder: Expr[EvolutionBuilder[T]], clazz: Expr[Class[T]]): List[Expr[Unit]] =
-      annotationsOf(symbol).collect {
-        case term if is[renamed](term) =>
-          val a     = term.asExprOf[renamed]
-          val since = sinceOf(term, symbol.fullName, classVersion)
-          '{ $builder.renameClass($a.formerName, $since) }
-        case term if is[deletedFields](term) =>
-          val a     = term.asExprOf[deletedFields]
-          val since = sinceOf(term, symbol.fullName)
-          '{ $a.formerNames.foreach(name => $builder.addFieldEvolution(Delete($since, $clazz, name))) }
-        case term if is[deletedClasses](term) && isEnum =>
-          val a     = term.asExprOf[deletedClasses]
-          val since = sinceOf(term, symbol.fullName)
-          '{
-            val d = $a
-            d.formerClassNames.foreach(name => $builder.deleteEnumValue(name, $since, d.throwOnInstance))
-          }
-        case term if is[deletedClasses](term) =>
-          val a     = term.asExprOf[deletedClasses]
-          val since = sinceOf(term, symbol.fullName, classVersion)
-          '{
-            val d = $a
-            d.formerClassNames.foreach(name => $builder.deleteClass(name, $since, d.throwOnInstance))
-          }
-        case term if is[postEvolution[?]](term) =>
-          term.tpe.typeArgs.head.asType match
-            case '[a] =>
-              val p = term.asExprOf[postEvolution[a]]
-              // The mapper is read on first use: the companion holding it may still be initializing
-              '{
-                lazy val post = $p
-                $builder.addPostEvolution(
-                  new postEvolution[T]((v: Int, i: T) => post.mapper(v, i.asInstanceOf[a]).asInstanceOf[T])
-                )
-              }
-      }
-
-    def fieldAnnotations(builder: Expr[EvolutionBuilder[T]], clazz: Expr[Class[T]]): List[Expr[Unit]] =
-      parametersOf(symbol).zipWithIndex.flatMap { case (parameter, index) =>
-        val label  = Expr(parameter.name)
-        val target = s"${symbol.fullName}.${parameter.name}"
-        annotationsOf(parameter).collect {
-          case term if is[added](term) =>
-            if !parameter.flags.is(Flags.HasDefault) then
-              report.errorAndAbort(addedFieldWithoutDefault(symbol.fullName, parameter.name))
-            val since = sinceOf(term, target)
-            '{ $builder.addFieldEvolution(Add($since, $clazz, $label, ${ Expr(index) })) }
-          case term if is[renamed](term) =>
-            val a     = term.asExprOf[renamed]
-            val since = sinceOf(term, target)
-            '{ $builder.addFieldEvolution(Rename($since, $clazz, $a.formerName, $label)) }
-          case term if is[transformed[?, ?]](term) =>
-            (term.tpe.typeArgs.head.asType, term.tpe.typeArgs.last.asType) match
-              case ('[from], '[to]) =>
-                val t     = term.asExprOf[transformed[from, to]]
-                val since = sinceOf(term, target)
-                // The mapper is read on first use: the companion holding it may still be initializing
-                '{
-                  lazy val tr = $t
-                  $builder.addFieldEvolution(Transform[from, to]($since, $clazz, $label, (a: from) => tr.mapper(a)))
-                }
-        }
-      }
-
-    /** Value renames of a Scala 3 enum, declared on its values rather than on the enum itself. */
-    def enumValueAnnotations(builder: Expr[EvolutionBuilder[T]]): List[Expr[Unit]] =
-      if !isEnum then Nil
-      else
-        children.flatMap { child =>
-          val valueName = Expr(child.name)
-          annotationsOf(child).collect {
-            case term if is[renamed](term) =>
-              val a     = term.asExprOf[renamed]
-              val since = sinceOf(term, s"${symbol.fullName}.${child.name}")
-              '{ $builder.renameEnumValue($a.formerName, $valueName, $since) }
-          }
-        }
 
     /** Reject the evolution annotations that declare nothing where they are, before anything is generated. */
     def validate(): Unit = {
@@ -229,39 +151,58 @@ private[evolution] object EvolutionMacro:
 
       rejectVersionedParameter(symbol)
 
-      def isEvolutionAnnotation(term: Term): Boolean = term.tpe <:< TypeRepr.of[EvolutionAnnotation]
-
-      symbol.annotations.filter(isEvolutionAnnotation).foreach { term =>
+      evolutionAnnotationsOf(symbol).foreach { term =>
         if !AnnotationRules.allowedOnAdt(nameOf(term), version, isCoproduct, hasVersionedAncestor) then
           reject(term, AnnotationRules.target(symbol.fullName, None, version))
+        if is[renamed](term) || is[deletedClasses](term) && !isEnum then checkSince(term, symbol.fullName, classVersion)
+        else if !is[postEvolution[?]](term) then checkSince(term, symbol.fullName)
       }
 
       if symbol.annotations.count(is[postEvolution[?]]) > 1 then
         report.errorAndAbort(evolutionNotAllowed("postEvolution", s"${symbol.fullName} twice"))
 
-      parametersOf(symbol).filter(_.annotations.exists(isEvolutionAnnotation)).foreach { parameter =>
-        parameter.annotations.filter(isEvolutionAnnotation).foreach { term =>
+      parametersOf(symbol).foreach { parameter =>
+        evolutionAnnotationsOf(parameter).foreach { term =>
           if !AnnotationRules.allowedOnField(nameOf(term), version) then
             reject(term, AnnotationRules.target(symbol.fullName, Some(parameter.name), version))
+          if is[added](term) && !parameter.flags.is(Flags.HasDefault) then
+            report.errorAndAbort(addedFieldWithoutDefault(symbol.fullName, parameter.name))
+          checkSince(term, s"${symbol.fullName}.${parameter.name}")
         }
       }
 
-      // A subtype declares its own evolutions, which its own declaration registers
-      children.filterNot(isVersioned).foreach { child =>
-        child.annotations.filter(isEvolutionAnnotation).foreach { term =>
+      // A subtype of a sealed trait declares its own evolutions, which its own declaration registers
+      children.filter(child => isEnum || !isVersioned(child)).foreach { child =>
+        evolutionAnnotationsOf(child).foreach { term =>
           if !AnnotationRules.allowedOnUnversionedSubtype(nameOf(term), version, isEnum) then
             reject(term, child.fullName)
+          checkSince(term, s"${symbol.fullName}.${child.name}")
         }
       }
     }
 
+    /** Hands the annotations over to the builder, which reads them at runtime. */
+    def declarations(builder: Expr[EvolutionBuilder[T]]): List[Expr[Unit]] =
+      def annotation(term: Term) = term.asExprOf[EvolutionAnnotation]
+      val ofClass  = evolutionAnnotationsOf(symbol).map(term => '{ $builder.declare(${ annotation(term) }) })
+      val ofFields = parametersOf(symbol).zipWithIndex.flatMap { case (parameter, index) =>
+        val (name, position) = (Expr(parameter.name), Expr(index))
+        evolutionAnnotationsOf(parameter).map(term =>
+          '{ $builder.declareField($name, $position, ${ annotation(term) }) }
+        )
+      }
+      val ofEnumValues = enumValues.flatMap { value =>
+        evolutionAnnotationsOf(value).map(term =>
+          '{ $builder.declareEnumValue(${ Expr(value.name) }, ${ annotation(term) }) }
+        )
+      }
+      ofClass ++ ofFields ++ ofEnumValues
+
     validate()
     val clazz = classOfExpr(TypeRepr.of[T])
     '{
-      val declaredClass = $clazz.asInstanceOf[Class[T]]
-      val builder       = new EvolutionBuilder[T](declaredClass, ${ Expr(version) }, $fieldNames)
-      ${ Expr.block(classAnnotations('builder, 'declaredClass), '{ () }) }
-      ${ Expr.block(fieldAnnotations('builder, 'declaredClass), '{ () }) }
-      ${ Expr.block(enumValueAnnotations('builder), '{ () }) }
+      val builder =
+        new EvolutionBuilder[T]($clazz.asInstanceOf[Class[T]], ${ Expr(version) }, $fieldNames, ${ Expr(isEnum) })
+      ${ Expr.block(declarations('builder), '{ () }) }
       builder
     }

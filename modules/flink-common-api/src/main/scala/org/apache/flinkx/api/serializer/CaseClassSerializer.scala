@@ -30,8 +30,8 @@ import org.apache.flink.api.common.typeutils.{
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
-import org.apache.flinkx.api.evolution.FieldEvolution.EvolvedField
-import org.apache.flinkx.api.evolution.Evolution
+import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, Former}
+import org.apache.flinkx.api.evolution.{Evolution, MigrationException}
 import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.CurrentVersion
@@ -80,7 +80,10 @@ class CaseClassSerializer[T <: Product](
 
   // Cache how to evolve from former to current fields
   @transient private lazy val evolutionPlan: Array[EvolvedField] =
-    evolution.plan(fieldNames).fold(failures => throw failures.head, identity) // or report the failure
+    evolution.plan(fieldNames) match {
+      case Right(plan)    => plan
+      case Left(failures) => throw MigrationException(evolution.currentClass, evolution.formerVersion, failures)
+    }
 
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
@@ -276,18 +279,16 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     *   - doesn't resolve the compatibility of added, transformed or deleted fields as their lineage is broken
     */
   override protected def checkMigration(old: ScalaCaseClassSerializerSnapshot[T]): Option[String] =
-    old.evolution.dryRun(old.fieldNames) match {
-      case Left(failures)      => Some(failures.mkString("\n"))
-      case Right(fieldOrigins) =>
+    old.evolution.plan(old.fieldNames) match {
+      case Left(failures) => Some(failures.mkString("\n"))
+      case Right(plan)    =>
         val formerFieldSnapshots  = old.getNestedSerializerSnapshots
         val currentFieldSnapshots = getNestedSerializerSnapshots
-        fieldOrigins.indices.iterator
-          .flatMap(currentIndex => fieldOrigins(currentIndex).map(currentIndex -> _))
-          .collectFirst {
-            case (currentIndex, formerIndex)
-                if isIncompatible(currentFieldSnapshots(currentIndex), formerFieldSnapshots(formerIndex)) =>
-              s"field '${fieldNames(currentIndex)}' can't be migrated from former field '${old.fieldNames(formerIndex)}'"
-          }
+        plan.iterator.zipWithIndex.collectFirst {
+          case (Former(formerIndex), currentIndex)
+              if isIncompatible(currentFieldSnapshots(currentIndex), formerFieldSnapshots(formerIndex)) =>
+            s"field '${fieldNames(currentIndex)}' can't be migrated from former field '${old.fieldNames(formerIndex)}'"
+        }
     }
 
   override protected def resolveOuterSchemaCompatibility(

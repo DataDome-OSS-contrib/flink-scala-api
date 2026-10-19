@@ -5,6 +5,7 @@ import org.apache.flinkx.api.evolution.Evolution.EnumValueEvolution.{Deleted, Re
 import org.apache.flinkx.api.evolution.Evolution.{DeletedEvolution, EnumValueEvolution}
 import org.apache.flinkx.api.evolution.EvolutionBuilder.{Deletion, EnumValueChange}
 import org.apache.flinkx.api.evolution.Evolutions.Declaration
+import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.collection.mutable
@@ -22,14 +23,17 @@ import scala.collection.mutable
   *   Current schema version of the ADT
   * @param currentFieldNames
   *   Current field names of a case class, in declaration order, none for a sealed trait or an enum
-  * @tparam T
+  * @param isEnum
+  *   Whether the ADT is a Scala 3 enum, whose deleted classes are values
+  * @tparam A
   *   The type on which the [[Evolution]] applies
   */
 @Internal
-final class EvolutionBuilder[T](
-    val currentClass: Class[T],
+final class EvolutionBuilder[A](
+    val currentClass: Class[A],
     val currentVersion: Int,
-    currentFieldNames: Array[String] = Array.empty
+    currentFieldNames: Array[String] = Array.empty,
+    isEnum: Boolean = false
 ) {
 
   // Former class names, with the version in which they were renamed to the current class
@@ -42,48 +46,61 @@ final class EvolutionBuilder[T](
 
   private val enumValueChanges = mutable.ArrayBuffer.empty[EnumValueChange]
 
-  private var postEvolution: Option[PostEvolutionMapper[T]] = None
+  private var postEvolution: Option[PostEvolutionMapper[A]] = None
+
+  /** Declare an evolution annotation of the ADT itself. */
+  def declare(annotation: EvolutionAnnotation): Unit = annotation match {
+    case renamed(since, formerName) => renameClass(formerName, since)
+    case deleted: deletedFields => deleted.formerNames.foreach(name => fieldEvolutions += Delete(deleted.since, name))
+    case deleted: deletedClasses if isEnum => deleted.formerClassNames.foreach(deleteEnumValue(_, deleted))
+    case deleted: deletedClasses           => deleted.formerClassNames.foreach(deleteClass(_, deleted))
+    case post: postEvolution[_]            => postEvolution = Some(post.mapper.asInstanceOf[PostEvolutionMapper[A]])
+    case _                                 => notAllowed(annotation, currentClass.getName)
+  }
+
+  /** Declare an evolution annotation of the field `name`, at `index` in the constructor of the ADT. */
+  def declareField(name: String, index: Int, annotation: EvolutionAnnotation): Unit = annotation match {
+    case added(since)               => fieldEvolutions += Add(since, currentClass, name, index)
+    case renamed(since, formerName) => fieldEvolutions += Rename(since, formerName, name)
+    case transformed(since, mapper) => fieldEvolutions += Transform(since, name, mapper.asInstanceOf[AnyRef => AnyRef])
+    case _                          => notAllowed(annotation, s"${currentClass.getName}.$name")
+  }
+
+  /** Declare an evolution annotation of the Scala 3 enum value `name`. */
+  def declareEnumValue(name: String, annotation: EvolutionAnnotation): Unit = annotation match {
+    case renamed(since, formerName) => enumValueChanges += EnumValueChange(formerName, since, Renamed(name))
+    case _                          => notAllowed(annotation, s"${currentClass.getName}.$name")
+  }
+
+  // The macros reject a misplaced annotation at compile time
+  private def notAllowed(annotation: EvolutionAnnotation, target: String): Nothing =
+    throw new IllegalArgumentException(evolutionNotAllowed(annotation.toString, target))
 
   /** The current class was named `formerClassName` (simple, relative or absolute) before version `since`.
     *
     * The former name of an object is the name of its class, ending with `$`: it is added when omitted.
     */
-  def renameClass(formerClassName: String, since: Int): Unit = {
+  private def renameClass(formerClassName: String, since: Int): Unit = {
     val formerName = ClassUtil.resolveFormerClassName(formerClassName, currentClass)
     renames(if (isObject && !formerName.endsWith("$")) s"$formerName$$" else formerName) = since
   }
 
-  /** The subtype or field type `formerClassName` (simple, relative or absolute) is deleted `since` version.
+  /** The subtype or field type `formerClassName` (simple, relative or absolute) is deleted by `deleted`.
     *
     * As we can't determine if a deleted class was an object, when the name doesn't end with `$`, registers both names.
-    *
-    * @param throwOnInstance
-    *   If `true`, encountering an instance of this former class during deserialization throws, otherwise returns `null`
     */
-  def deleteClass(formerClassName: String, since: Int, throwOnInstance: Boolean): Unit = {
+  private def deleteClass(formerClassName: String, deleted: deletedClasses): Unit = {
     val formerName = ClassUtil.resolveFormerClassName(formerClassName, currentClass)
-    if (!formerName.endsWith("$")) deletions += Deletion(s"$formerName$$", since, throwOnInstance)
-    deletions += Deletion(formerName, since, throwOnInstance)
+    if (!formerName.endsWith("$")) deletions += Deletion(s"$formerName$$", deleted.since, deleted.throwOnInstance)
+    deletions += Deletion(formerName, deleted.since, deleted.throwOnInstance)
   }
 
   // Whether the ADT is a case object, whose former names are names of objects
   private lazy val isObject = ClassUtil.isObjectClass(currentClass)
 
-  def addFieldEvolution(evolution: FieldEvolution): Unit = fieldEvolutions += evolution
-
-  /** The Scala 3 enum value `currentName` was named `formerName` before version `since`. */
-  def renameEnumValue(formerName: String, currentName: String, since: Int): Unit =
-    enumValueChanges += EnumValueChange(formerName, since, Renamed(currentName))
-
-  /** The Scala 3 enum value `formerName` is deleted `since` version.
-    *
-    * @param throwOnInstance
-    *   If `true`, encountering an instance of this former class during deserialization throws, otherwise returns `null`
-    */
-  def deleteEnumValue(formerName: String, since: Int, throwOnInstance: Boolean): Unit =
-    enumValueChanges += EnumValueChange(formerName, since, Deleted(throwOnInstance))
-
-  def addPostEvolution(p: postEvolution[T]): Unit = postEvolution = Some(p.mapper)
+  /** The Scala 3 enum value `formerName` is deleted by `deleted`. */
+  private def deleteEnumValue(formerName: String, deleted: deletedClasses): Unit =
+    enumValueChanges += EnumValueChange(formerName, deleted.since, Deleted(deleted.throwOnInstance))
 
   /** Build the [[Declaration]]s to register, one per class name the data of the ADT was written under, each holding the
     * evolution of the data written at each version it is declared up to.
@@ -99,17 +116,17 @@ final class EvolutionBuilder[T](
     }
     // A class deleted in version N still exists in the data written up to version N - 1
     val deleted = deletions.toSeq.map { case Deletion(className, since, throwOnInstance) =>
-      declaration(className, since - 1)(new DeletedEvolution[T](className, _, throwOnInstance))
+      declaration(className, since - 1)(new DeletedEvolution[A](className, _, throwOnInstance))
     }
     current +: (renamed ++ deleted)
   }
 
-  private def declaration(className: String, lastVersion: Int)(evolutionAt: Int => Evolution[T]): Declaration =
+  private def declaration(className: String, lastVersion: Int)(evolutionAt: Int => Evolution[A]): Declaration =
     Declaration(className, (0 to lastVersion).map(evolutionAt), currentClass)
 
   /** The evolution of the data written under `className` at `formerVersion`, holding the evolutions migrating it. */
-  private def evolution(formerClassName: String, formerVersion: Int): Evolution[T] =
-    new Evolution[T](
+  private def evolution(formerClassName: String, formerVersion: Int): Evolution[A] =
+    new Evolution[A](
       formerClassName = formerClassName,
       formerVersion = formerVersion,
       currentClass = currentClass,
