@@ -5,11 +5,12 @@ import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flinkx.api.evolution.Evolution
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isSameClass, readEvolution, writeEvolution}
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
+import org.apache.flinkx.api.util.ClassUtil
 
 class ScalaCaseObjectSerializer[T](val evolution: Evolution[T]) extends ImmutableSerializer[T] {
 
   @transient private lazy val caseObject: T =
-    evolution.restore(evolution.currentClass.getField("MODULE$").get(null).asInstanceOf[T])
+    evolution.restore(ClassUtil.companionInstance[T](evolution.currentClass))
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {}
   override def createInstance(): T                                       = caseObject

@@ -302,11 +302,12 @@ package object evolution {
     s"'$field' added field in $adt must have a default value"
 
   /** Exception indicating the evolution of `fqn` is not properly declared. */
-  final case class MissingEvolutionException(fqn: String, version: Int)
+  final case class MissingEvolutionException(fqn: String, version: Int, cause: Throwable)
       extends FlinkRuntimeException(
-        s"Cannot restore '$fqn' written at @version($version): no class of that name exists, and no evolution" +
+        s"Cannot restore '$fqn' written at @version($version): no class of that name can be loaded, and no evolution" +
           s" declares it renamed or deleted. If it was renamed, the companion of the class now bearing it must" +
-          s" extend Evolving; if it was deleted, the ADT that held it must declare it with @deletedClasses"
+          s" extend Evolving; if it was deleted, the ADT that held it must declare it with @deletedClasses",
+        cause
       )
 
   /** Exception indicating `formerFqn` is declared by two different ADTs, so it can't be resolved unambiguously. */

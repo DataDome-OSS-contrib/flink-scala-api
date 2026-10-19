@@ -1,14 +1,13 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.{Internal, VisibleForTesting}
-import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.Evolution.{NoEvolution, isDeletedClass}
 import org.apache.flinkx.api.evolution.Evolutions.Declaration
 import org.apache.flinkx.api.serializer.ConstructorCompat
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.collection.concurrent
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /** The evolutions an ADT declares through its annotations, built at compile time by [[Evolutions.apply]] in the
   * companion of the ADT.
@@ -115,19 +114,14 @@ object Evolutions extends EvolutionsFactory {
   private def declareCompanions(cl: ClassLoader): Map[String, Seq[Declaration]] =
     CompanionScan
       .companionsOf(cl)
-      .flatMap(name => evolutionsOf(initialize(name, cl)))
+      .flatMap(name => evolutionsOf(ClassUtil.loadClass(name, initialize = true, cl).get))
       .flatMap(_.declarations)
       .groupBy(_.formerClassName)
       .map { case (className, declarations) => className -> sortDeclarations(className, declarations, cl) }
 
-  private def initialize(companion: String, cl: ClassLoader): Class[_] =
-    try Class.forName(companion, true, cl)
-    // The JVM reports the failure of an initialization once: it is kept to be reported again on every lookup
-    catch { case failure: LinkageError => throw new FlinkRuntimeException(s"Cannot initialize $companion", failure) }
-
-  /** The evolutions the given initialized companion declares, none if it is not a top-level object. */
+  /** The evolutions the given initialized companion declares, none if it is not an object. */
   private def evolutionsOf(companion: Class[_]): Option[Evolutions[_]] =
-    Try(companion.getField("MODULE$").get(null)).toOption.collect { case evolving: Evolving[_] => evolving.evolutions }
+    ClassUtil.moduleOf(companion).collect { case evolving: Evolving[_] => evolving.evolutions }
 
   /** Sort the declarations of a class name, dropping the duplicates, and reject a name standing for two classes.
     * @throws FormerClassConflictException
@@ -169,8 +163,9 @@ object Evolutions extends EvolutionsFactory {
 
   /** The class of the given name whose data may be recorded under it, including case object. */
   private def classNamed(className: String, cl: ClassLoader): Option[Class[_]] =
-    (try Some(Class.forName(className, false, cl))
-    catch { case _: ClassNotFoundException | _: LinkageError => None })
+    ClassUtil
+      .loadClass(className, initialize = false, cl)
+      .toOption
       .filterNot(clazz => ClassUtil.isObjectClass(clazz) && !classOf[Product].isAssignableFrom(clazz))
 
   /** Return the [[Evolution]] of the data written under the given class name at the given version, or
@@ -189,9 +184,10 @@ object Evolutions extends EvolutionsFactory {
       .flatMap(_.find(_.lastVersion >= writtenVersion))
       .map(_.versions(writtenVersion))
       .getOrElse {
-        val currentClass =
-          try Class.forName(className, false, cl)
-          catch { case _: ClassNotFoundException => throw MissingEvolutionException(className, writtenVersion) }
+        val currentClass = ClassUtil.loadClass(className, initialize = false, cl) match {
+          case Success(clazz)   => clazz
+          case Failure(failure) => throw MissingEvolutionException(className, writtenVersion, failure)
+        }
         new NoEvolution(currentClass, writtenVersion, ConstructorCompat.lookupFieldNames(currentClass))
       }
       .asInstanceOf[Evolution[T]]

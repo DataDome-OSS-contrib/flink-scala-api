@@ -167,9 +167,10 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     }
 
     exception.getMessage should startWith(
-      s"Cannot restore '$goneName' written at @version(2): no class of that name exists, and no evolution declares" +
-        s" it renamed or deleted."
+      s"Cannot restore '$goneName' written at @version(2): no class of that name can be loaded, and no evolution" +
+        s" declares it renamed or deleted."
     )
+    exception.getCause shouldBe a[ClassNotFoundException]
   }
 
 }

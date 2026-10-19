@@ -3,6 +3,7 @@ package org.apache.flinkx.api.util
 import org.apache.flink.util.FlinkRuntimeException
 
 import java.lang.reflect.{Field, InvocationTargetException, Modifier}
+import scala.util.{Failure, Success, Try}
 
 object ClassUtil {
 
@@ -81,9 +82,14 @@ object ClassUtil {
     }
   }
 
-  /** Whether the given class is the class of a Scala object, which holds its instance in a static `MODULE$` field. */
-  def isObjectClass(clazz: Class[_]): Boolean =
-    clazz.getDeclaredFields.exists(field => field.getName == "MODULE$" && Modifier.isStatic(field.getModifiers))
+  /** Load the class of the given name, or why it can't be loaded: not found, or found but failing to link or init. */
+  def loadClass(className: String, initialize: Boolean, cl: ClassLoader): Try[Class[_]] =
+    try Success(Class.forName(className, initialize, cl))
+    catch {
+      case error @ (_: ExceptionInInitializerError | _: LinkageError) =>
+        Failure(new FlinkRuntimeException(s"Cannot load $className", error))
+      case exception => Failure(exception)
+    }
 
   /** Default value of the `index`-th field of the given case class, evaluated anew at each call.
     *
@@ -105,11 +111,20 @@ object ClassUtil {
     * @throws java.lang.ClassNotFoundException
     *   if the class has no companion object
     */
-  def companionInstance[A](clazz: Class[_]): A =
-    Class
-      .forName(companionName(clazz.getName), true, clazz.getClassLoader)
-      .getField("MODULE$")
-      .get(null)
+  def companionInstance[A](clazz: Class[_]): A = {
+    val companion = Class.forName(companionName(clazz.getName), true, clazz.getClassLoader)
+    moduleOf(companion)
+      .getOrElse(throw new ClassNotFoundException(s"${companion.getName} is not an object"))
       .asInstanceOf[A]
+  }
+
+  /** Whether the given class is the class of a Scala object, which holds its instance in a static `MODULE$` field. */
+  def isObjectClass(clazz: Class[_]): Boolean = moduleField(clazz).isDefined
+
+  /** The instance of the given Scala object class, initializing it, none for another class. */
+  def moduleOf(clazz: Class[_]): Option[AnyRef] = moduleField(clazz).map(_.get(null))
+
+  private def moduleField(clazz: Class[_]): Option[Field] =
+    clazz.getDeclaredFields.find(field => field.getName == "MODULE$" && Modifier.isStatic(field.getModifiers))
 
 }
