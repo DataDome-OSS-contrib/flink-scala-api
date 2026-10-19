@@ -2,10 +2,11 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
+import org.apache.flinkx.api.evolution.Evolution
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isSameClass, readEvolution, writeEvolution}
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
 
-class ScalaCaseObjectSerializer[T](val evolution: Evolution[T], val version: Int) extends ImmutableSerializer[T] {
+class ScalaCaseObjectSerializer[T](val evolution: Evolution[T]) extends ImmutableSerializer[T] {
 
   @transient private lazy val caseObject: T =
     evolution.restore(evolution.currentClass.getField("MODULE$").get(null).asInstanceOf[T])
@@ -32,24 +33,14 @@ object ScalaCaseObjectSerializer {
     def this() = this(None)
 
     private var evolution: Evolution[T] = _
-    // Schema version of the ADT this snapshot describes, as declared by @version at write time
-    private var caseObjectVersion: Int = 0
 
-    serializer.foreach { s =>
-      evolution = s.evolution
-      caseObjectVersion = s.version
-    }
+    serializer.foreach(s => evolution = s.evolution)
 
-    override def writeSnapshot(out: DataOutputView): Unit = {
-      out.writeUTF(evolution.formerClassName)
-      out.writeInt(caseObjectVersion)
-    }
+    override def writeSnapshot(out: DataOutputView): Unit = writeEvolution(evolution, out)
 
-    override def readSnapshot(readVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-      val caseObjectClassName = in.readUTF()
-      caseObjectVersion = if (readVersion > 1) in.readInt() else 0
-      evolution = Evolutions.get(caseObjectClassName, caseObjectVersion, cl)
-    }
+    // The version 1, before 2.4.0, records no schema version
+    override def readSnapshot(readVersion: Int, in: DataInputView, cl: ClassLoader): Unit =
+      evolution = readEvolution(in, cl, hasVersion = readVersion > 1)
 
     override def getCurrentVersion: Int = CurrentVersion
 
@@ -57,15 +48,14 @@ object ScalaCaseObjectSerializer {
     override def resolveSchemaCompatibility(
         restoredSnapshot: TypeSerializerSnapshot[T]
     ): TypeSerializerSchemaCompatibility[T] = restoredSnapshot match {
-      case restored: ScalaCaseObjectSerializerSnapshot[_]
-          if restored.evolution.currentClass.getName == evolution.currentClass.getName =>
+      case restored: ScalaCaseObjectSerializerSnapshot[_] if isSameClass(evolution, restored.evolution) =>
         TypeSerializerSchemaCompatibility.compatibleAsIs()
       case _ =>
         TypeSerializerSchemaCompatibility.incompatible()
     }
 
     override def restoreSerializer(): TypeSerializer[T] =
-      new ScalaCaseObjectSerializer[T](evolution, caseObjectVersion)
+      new ScalaCaseObjectSerializer[T](evolution)
 
   }
 }

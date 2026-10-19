@@ -143,7 +143,6 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
     // Serializer before schema change: without serializers for the second "new" default fields
     val oldSerializer = new CaseClassSerializer[WithDefault](
       evolution = Evolutions.get(classOf[WithDefault], 0),
-      version = 0,
       isCaseClassImmutable = false,
       fieldNames = Array("sc1"),
       paramSerializers = Array(implicitly[TypeSerializer[SimpleClass1]])

@@ -31,9 +31,9 @@ import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
 import org.apache.flinkx.api.evolution.FieldEvolution.EvolvedField
-import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
+import org.apache.flinkx.api.evolution.Evolution
 import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
-import org.apache.flinkx.api.serializer.EvolvingSnapshot.isIncompatible
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.CurrentVersion
 import org.apache.flinkx.api.{NullMarker, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
@@ -45,7 +45,6 @@ import org.slf4j.{Logger, LoggerFactory}
 @SerialVersionUID(7341356073446263475L)
 class CaseClassSerializer[T <: Product](
     val evolution: Evolution[T],
-    val version: Int,
     val isCaseClassImmutable: Boolean,
     val fieldNames: Array[String],
     paramSerializers: Array[TypeSerializer[_]]
@@ -222,7 +221,6 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
 
   private var evolution: Evolution[T]       = _
   private var isCaseClassImmutable: Boolean = false
-  private[serializer] var adtVersion: Int   = 0
   private var fieldNames: Array[String]     = Array.empty
 
   serializer.foreach { s =>
@@ -230,7 +228,6 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
     evolution = s.evolution
     isCaseClassImmutable = s.isCaseClassImmutable
-    adtVersion = s.version
     fieldNames = s.fieldNames
   }
 
@@ -242,25 +239,25 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
   override protected def createOuterSerializerWithNestedSerializers(
       nestedSerializers: Array[TypeSerializer[_]]
   ): CaseClassSerializer[T] =
-    new CaseClassSerializer[T](evolution, adtVersion, isCaseClassImmutable, fieldNames, nestedSerializers)
+    new CaseClassSerializer[T](evolution, isCaseClassImmutable, fieldNames, nestedSerializers)
 
   override protected def writeOuterSnapshot(out: DataOutputView): Unit = {
-    out.writeUTF(evolution.formerClassName)
+    writeEvolution(evolution, out)
     out.writeBoolean(isCaseClassImmutable)
-    out.writeInt(adtVersion)
     StringArraySerializer.INSTANCE.serialize(fieldNames, out)
   }
 
   override protected def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-    val caseClassName = in.readUTF()
+    // Before 2.4.0, the version 3 records neither the schema version nor the field names
+    evolution = readEvolution(in, cl, hasVersion = readOuterSnapshotVersion > 3)
     // If reading a version of 2 or below, don't read the boolean and set isCaseClassImmutable to false
     isCaseClassImmutable = readOuterSnapshotVersion > 2 && in.readBoolean
-    adtVersion = if (readOuterSnapshotVersion > 3) in.readInt else 0
-    evolution = Evolutions.get(caseClassName, adtVersion, cl)
     fieldNames = if (readOuterSnapshotVersion > 3) StringArraySerializer.INSTANCE.deserialize(in) else Array.empty
   }
 
-  override private[serializer] def adtEvolution: Option[Evolution[T]] = Option(evolution)
+  override private[serializer] def adtEvolution: Option[Evolution[T]] = Some(evolution)
+
+  override private[serializer] def memberNames: Array[String] = fieldNames
 
   override protected def resolveUnevolvedCompatibility(
       old: ScalaCaseClassSerializerSnapshot[T]

@@ -21,7 +21,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils {
     val clickV0 = restoreSerializerFromFile[Click]("Click-v0").asInstanceOf[CaseClassSerializer[Click]]
     new CaseClassSerializer[T](
       evolution = Evolutions.get(clazz, 0),
-      version = clickV0.version,
       isCaseClassImmutable = clickV0.isCaseClassImmutable,
       fieldNames = clickV0.fieldNames,
       paramSerializers = clickV0.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
@@ -119,14 +118,12 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils {
     // The outer case class evolves through a rename, and its nested field type gained a field without @added
     val formerNestedSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
       evolution = Evolutions.get(classOf[AddedFieldWithoutAnnotation], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("a"),
       paramSerializers = Array(createSerializer[String])
     )
     val formerSerializer = new CaseClassSerializer[OuterEvolvedWithNested](
       evolution = Evolutions.get(classOf[OuterEvolvedWithNested], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("formerNested"),
       paramSerializers = Array(formerNestedSerializer)
@@ -140,7 +137,6 @@ class EvolutionFieldErrorTest extends AnyFlatSpec with Matchers with TestUtils {
   it should "resolve the schema compatibility of a case class with a field added without annotation as incompatible" in {
     val formerSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
       evolution = Evolutions.get(classOf[AddedFieldWithoutAnnotation], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("a"),
       paramSerializers = Array(createSerializer[String])

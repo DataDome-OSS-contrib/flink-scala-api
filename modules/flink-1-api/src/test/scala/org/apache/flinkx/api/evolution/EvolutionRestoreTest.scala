@@ -66,7 +66,6 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
     val formerName = classOf[Order].getName.replace("Order", "FormerOrder")
     val former     = new CaseClassSerializer[Order](
       Evolutions.get[Order](formerName, 0, getClass.getClassLoader),
-      0,
       serializer.isCaseClassImmutable,
       serializer.fieldNames,
       serializer.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]

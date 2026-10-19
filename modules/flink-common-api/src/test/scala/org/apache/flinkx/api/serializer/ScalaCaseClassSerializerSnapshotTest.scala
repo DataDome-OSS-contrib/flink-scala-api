@@ -1,5 +1,6 @@
 package org.apache.flinkx.api.serializer
 
+import org.apache.flink.api.common.typeutils.base.array.StringArraySerializer
 import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
@@ -46,7 +47,7 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val registered = serializerOf(stringSer).snapshotConfiguration()
     // A snapshot of a different class is erased to the same raw type at runtime, the way Flink sees it.
     val restored = savepointed[Other](
-      new CaseClassSerializer[Other](Evolutions.get(classOf[Other], 0), 0, false, Array("a"), Array(stringSer))
+      new CaseClassSerializer[Other](Evolutions.get(classOf[Other], 0), false, Array("a"), Array(stringSer))
     )
       .asInstanceOf[TypeSerializerSnapshot[Evolved]]
 
@@ -63,6 +64,9 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     in.readInt() should be(911108)                   // CompositeTypeSerializerSnapshot.MAGIC_NUMBER
     in.readInt() should be(4)                        // outer-snapshot version
     in.readUTF() should be(classOf[Evolved].getName) // outer snapshot: class name
+    in.readInt() should be(0)                        // schema version, since outer-snapshot version 4
+    in.readBoolean() should be(false)                // immutability, since outer-snapshot version 3
+    StringArraySerializer.INSTANCE.deserialize(in) should be(Array("a")) // field names, since version 4
   }
 
   it should "round-trip through writeSnapshot/readSnapshot" in {
@@ -95,7 +99,6 @@ object ScalaCaseClassSerializerSnapshotTest {
   def serializerOf(fieldSerializers: TypeSerializer[_]*): CaseClassSerializer[Evolved] =
     new CaseClassSerializer[Evolved](
       Evolutions.get(classOf[Evolved], 0),
-      0,
       false,
       Array("a", "b").take(fieldSerializers.length),
       fieldSerializers.toArray

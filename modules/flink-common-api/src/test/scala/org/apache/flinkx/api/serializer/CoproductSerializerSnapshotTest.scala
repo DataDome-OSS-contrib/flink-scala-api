@@ -22,7 +22,6 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
         Some(
           new CoproductSerializer[ADT](
             Some(Evolutions.get(classOf[ADT], 0)),
-            0,
             subtypeClasses,
             subtypeClasses.map(_.getName),
             subtypeSerializers
@@ -71,7 +70,6 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
       Some(
         new CoproductSerializer[ADT](
           Some(Evolutions.get(classOf[ADT], 0)),
-          0,
           subtypeClasses,
           subtypeClasses.map(_.getName),
           subtypeSerializers
@@ -111,7 +109,6 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
       Some(
         new CoproductSerializer[ADT](
           Some(Evolutions.get(classOf[ADT], 0)),
-          0,
           subtypeClasses,
           subtypeClasses.map(_.getName),
           subtypeSerializers

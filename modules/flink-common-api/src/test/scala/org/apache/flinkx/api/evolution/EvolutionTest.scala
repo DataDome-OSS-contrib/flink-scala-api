@@ -61,7 +61,6 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
   it should "resolve the schema compatibility of a pre-2.4.0 snapshot of an unchanged case class as compatible as is" in {
     val formerSerializer = new CaseClassSerializer[ClickAction](
       evolution = Evolutions.get(classOf[ClickAction], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array.empty,
       paramSerializers = Array(createSerializer[String], createSerializer[String])
@@ -83,7 +82,6 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
   it should "resolve the schema compatibility of an unrelated case class as incompatible" in {
     val formerSerializer = new CaseClassSerializer[UnrelatedFormerCaseClass](
       evolution = Evolutions.get(classOf[UnrelatedFormerCaseClass], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("a", "removed"),
       paramSerializers = Array(createSerializer[String], createSerializer[String])
@@ -117,7 +115,6 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
   it should "apply @postEvolution to a case class written at a former version with an unchanged schema" in {
     val formerSerializer = new CaseClassSerializer[Ticket](
       evolution = Evolutions.get(classOf[Ticket], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("id"),
       paramSerializers = Array(createSerializer[String])
@@ -131,7 +128,6 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
   it should "not apply @postEvolution to a pre-2.4.0 snapshot of a case class" in {
     val formerSerializer = new CaseClassSerializer[Ticket](
       evolution = Evolutions.get(classOf[Ticket], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array.empty,
       paramSerializers = Array(createSerializer[String])
@@ -145,7 +141,6 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils with Before
   it should "evaluate the default value of an added field for each restored instance" in {
     val formerSerializer = new CaseClassSerializer[Stamped](
       evolution = Evolutions.get(classOf[Stamped], 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("id"),
       paramSerializers = Array(createSerializer[String])

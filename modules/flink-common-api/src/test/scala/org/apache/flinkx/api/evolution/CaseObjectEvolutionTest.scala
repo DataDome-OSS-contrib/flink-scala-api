@@ -27,11 +27,10 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils w
   private def formerSerializer: CoproductSerializer[Litter] = {
     def formerCaseObject(name: String, caseObject: Litter): TypeSerializer[_] = {
       val clazz = caseObject.getClass.asInstanceOf[Class[Litter]]
-      new ScalaCaseObjectSerializer[Litter](new Evolution(recorded(name), 0, clazz), 0)
+      new ScalaCaseObjectSerializer[Litter](new Evolution(recorded(name), 0, clazz))
     }
     new CoproductSerializer[Litter](
       evolution = Some(new Evolution(classOf[Litter].getName, 0, classOf[Litter])),
-      version = 0,
       subtypeClasses = Array[Class[_]](Cat.getClass, Dog.getClass),
       subtypeFqns = Array(recorded("Kitten"), recorded("Puppy")),
       subtypeSerializers = Array(formerCaseObject("Kitten", Cat), formerCaseObject("Puppy", Dog))

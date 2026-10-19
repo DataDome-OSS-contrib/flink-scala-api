@@ -32,7 +32,7 @@ class Scala3EnumValueSerializerSnapshotTest extends AnyFlatSpec with Matchers {
   }
 
   private def enumValueSerializer(enumValueName: String) =
-    new Scala3EnumValueSerializer[Failure](Evolutions.get(classOf[Failure], 0), 0, enumValueName)
+    new Scala3EnumValueSerializer[Failure](Evolutions.get(classOf[Failure], 0), enumValueName)
 
 }
 

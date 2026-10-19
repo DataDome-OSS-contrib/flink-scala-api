@@ -54,10 +54,9 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils wi
     val v0                        = Evolutions.get(classOf[Swapped], 0)
     val formerSerializer          = new Scala3EnumSerializer[Swapped](
       evolution = Some(v0),
-      version = 0,
       enumValueNames = Array("A", "B"),
       enumValueSerializers =
-        Array[TypeSerializer[?]](new Scala3EnumValueSerializer(v0, 0, "A"), new Scala3EnumValueSerializer(v0, 0, "B"))
+        Array[TypeSerializer[?]](new Scala3EnumValueSerializer(v0, "A"), new Scala3EnumValueSerializer(v0, "B"))
     )
 
     deserializeFormerForm[Swapped](formerSerializer, Swapped.A) shouldBe Swapped.B

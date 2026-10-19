@@ -152,7 +152,6 @@ class EvolvingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     val goneName   = "org.example.Gone"
     val serializer = new CaseClassSerializer[Probe](
       evolution = new Evolution[Probe](goneName, 2, classOf[Probe]),
-      version = 2,
       isCaseClassImmutable = true,
       fieldNames = Array("id"),
       paramSerializers = Array(StringSerializer.INSTANCE)

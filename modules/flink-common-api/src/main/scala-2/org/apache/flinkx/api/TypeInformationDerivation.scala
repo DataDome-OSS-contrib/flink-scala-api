@@ -29,17 +29,15 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
-        val version    = implicitly[Evolvable[T]].version
         val fieldNames = ctx.parameters.map(_.label).toArray
 
-        val evolution = new NoEvolution(clazz, version, fieldNames)
+        val evolution = new NoEvolution(clazz, implicitly[Evolvable[T]].version, fieldNames)
 
         val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
-          new ScalaCaseObjectSerializer[T](evolution, version)
+          new ScalaCaseObjectSerializer[T](evolution)
         } else {
           new CaseClassSerializer[T](
             evolution = evolution,
-            version = version,
             isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
             fieldNames = fieldNames,
             paramSerializers = ctx.parameters.map { p =>
@@ -67,13 +65,11 @@ private[api] trait TypeInformationDerivation {
       case Some(cached) => cached.asInstanceOf[TypeInformation[T]]
       case None         =>
         val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val version        = implicitly[Evolvable[T]].version
         val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
         val subtypeFqns    = subtypeClasses.map(_.getName)
 
         val serializer = new CoproductSerializer[T](
-          evolution = Some(new NoEvolution(clazz, version)),
-          version = version,
+          evolution = Some(new NoEvolution(clazz, implicitly[Evolvable[T]].version)),
           subtypeClasses = subtypeClasses,
           subtypeFqns = subtypeFqns,
           subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray

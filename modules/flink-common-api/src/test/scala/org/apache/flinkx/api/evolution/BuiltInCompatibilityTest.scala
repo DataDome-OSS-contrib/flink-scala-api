@@ -61,7 +61,6 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
     // Shape v0 only had Square and Circle, in this order
     val formerSerializer = new CoproductSerializer[Shape](
       evolution = Some(Evolutions.get(classOf[Shape], 0)),
-      version = 0,
       subtypeClasses = Array(classOf[Square], classOf[Circle]),
       subtypeFqns = Array(classOf[Square].getName, classOf[Circle].getName),
       subtypeSerializers = Array(createSerializer[Square], createSerializer[Circle])
@@ -80,7 +79,6 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
   ): (TypeSerializerSnapshot[T], T) = {
     val formerSerializer = new CaseClassSerializer[T](
       evolution = Evolutions.get(clazz, 0),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = formerFields.map(_._1).toArray,
       paramSerializers = formerFields.map(_._2).toArray

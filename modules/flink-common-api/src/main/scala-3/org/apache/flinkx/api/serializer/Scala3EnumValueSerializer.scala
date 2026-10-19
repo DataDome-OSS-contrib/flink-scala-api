@@ -2,13 +2,13 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
+import org.apache.flinkx.api.evolution.Evolution
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isSameClass, readEvolution, writeEvolution}
 import org.apache.flinkx.api.util.ClassUtil
 
 /** Serializer for Scala 3 enum value. */
 class Scala3EnumValueSerializer[T](
     val evolution: Evolution[T],
-    val version: Int,
     val enumValueName: String
 ) extends ImmutableSerializer[T] {
 
@@ -40,27 +40,23 @@ class Scala3EnumValueSerializerSnapshot[T](
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
+  // The evolution of the enum declaring the value
   private var evolution: Evolution[T] = _
-  // Schema version of the enum this snapshot describes, as declared by @version at write time
-  private var enumVersion: Int      = 0
-  private var enumValueName: String = _
+  private var enumValueName: String   = _
 
   serializer.foreach { s =>
     evolution = s.evolution
-    enumVersion = s.version
     enumValueName = s.enumValueName
   }
 
   override def writeSnapshot(out: DataOutputView): Unit = {
-    out.writeUTF(evolution.formerClassName)
-    out.writeInt(enumVersion)
+    writeEvolution(evolution, out)
     out.writeUTF(enumValueName)
   }
 
+  // The version 1, before 2.4.0, records no schema version
   override def readSnapshot(readVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-    val enumClassName = in.readUTF()
-    enumVersion = if (readVersion > 1) in.readInt() else 0
-    evolution = Evolutions.get(enumClassName, enumVersion, cl)
+    evolution = readEvolution(in, cl, hasVersion = readVersion > 1)
     enumValueName = in.readUTF()
   }
 
@@ -71,7 +67,7 @@ class Scala3EnumValueSerializerSnapshot[T](
       restoredSnapshot: TypeSerializerSnapshot[T]
   ): TypeSerializerSchemaCompatibility[T] = restoredSnapshot match {
     case restored: Scala3EnumValueSerializerSnapshot[?]
-        if restored.evolution.currentClass.getName == evolution.currentClass.getName &&
+        if isSameClass(evolution, restored.evolution) &&
           restored.evolution.currentEnumValueName(restored.enumValueName).contains(enumValueName) =>
       TypeSerializerSchemaCompatibility.compatibleAsIs()
     case _ =>
@@ -79,7 +75,7 @@ class Scala3EnumValueSerializerSnapshot[T](
   }
 
   override def restoreSerializer(): TypeSerializer[T] =
-    new Scala3EnumValueSerializer[T](evolution, enumVersion, enumValueName)
+    new Scala3EnumValueSerializer[T](evolution, enumValueName)
 
 }
 

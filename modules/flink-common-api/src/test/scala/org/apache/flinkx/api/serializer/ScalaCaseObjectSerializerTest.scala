@@ -23,7 +23,7 @@ class ScalaCaseObjectSerializerTest extends AnyFlatSpec with Matchers {
   }
 
   private def caseObjectSerializer[T](caseObject: T) =
-    new ScalaCaseObjectSerializer[T](Evolutions.get(caseObject.getClass.asInstanceOf[Class[T]], 0), 0)
+    new ScalaCaseObjectSerializer[T](Evolutions.get(caseObject.getClass.asInstanceOf[Class[T]], 0))
 
 }
 

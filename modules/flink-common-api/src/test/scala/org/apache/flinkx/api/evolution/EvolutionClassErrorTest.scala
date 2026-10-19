@@ -4,6 +4,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import EvolutionTest._
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.evolution.Evolution.NoEvolution
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
 import org.scalatest.BeforeAndAfterEach
@@ -28,8 +29,8 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
   it should "resolve the schema compatibility of a sealed trait restored by an outdated source code as incompatible" in {
     val derived          = createSerializer[RolledBackTrait].asInstanceOf[CoproductSerializer[RolledBackTrait]]
     val formerSerializer = new CoproductSerializer[RolledBackTrait](
-      evolution = derived.evolution,
-      version = derived.version + 1,
+      // Written at the next version, which this source code doesn't know
+      evolution = derived.evolution.map(current => new NoEvolution(current.currentClass, current.formerVersion + 1)),
       subtypeClasses = derived.subtypeClasses.dropRight(1),
       subtypeFqns = derived.subtypeFqns.dropRight(1),
       subtypeSerializers = derived.subtypeSerializers.dropRight(1)
@@ -45,7 +46,6 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     val formerName       = classOf[RenamedCaseClass].getName.replace("RenamedCaseClass", "FormerRenamedCaseClass")
     val formerSerializer = new CaseClassSerializer[RenamedCaseClass](
       evolution = new Evolution(formerName, 0, classOf[RenamedCaseClass]),
-      version = 0,
       isCaseClassImmutable = true,
       fieldNames = Array("a", "removed"),
       paramSerializers = Array(createSerializer[String], createSerializer[String])
@@ -63,14 +63,12 @@ class EvolutionClassErrorTest extends AnyFlatSpec with Matchers with TestUtils w
     ]]
     val formerSerializer = new CoproductSerializer[SubtypeRemovedWithoutAnnotation](
       evolution = derived.evolution,
-      version = 0,
       subtypeClasses = derived.subtypeClasses,
       subtypeFqns = derived.subtypeFqns,
       subtypeSerializers = derived.subtypeSerializers
     )
     val currentSerializer = new CoproductSerializer[SubtypeRemovedWithoutAnnotation](
       evolution = derived.evolution,
-      version = 1,
       subtypeClasses = derived.subtypeClasses.dropRight(1),
       subtypeFqns = derived.subtypeFqns.dropRight(1),
       subtypeSerializers = derived.subtypeSerializers.dropRight(1)

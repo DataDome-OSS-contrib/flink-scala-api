@@ -4,6 +4,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.auto.*
+import org.apache.flinkx.api.evolution.Evolution.NoEvolution
 import org.apache.flinkx.api.evolution.{Evolutions, Evolving, deletedClasses, renamed, version}
 import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
@@ -21,9 +22,9 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
   it should "serialize an enum value with the version of its enum" in {
     val enumSerializer = createSerializer[FailureCategory].asInstanceOf[Scala3EnumSerializer[FailureCategory & Product]]
 
-    enumSerializer.version shouldBe 1
+    enumSerializer.evolution.map(_.formerVersion) shouldBe Some(1)
     forAll(enumSerializer.enumValueSerializers.toSeq) {
-      _.asInstanceOf[Scala3EnumValueSerializer[?]].version shouldBe enumSerializer.version
+      _.asInstanceOf[Scala3EnumValueSerializer[?]].evolution.formerVersion shouldBe 1
     }
   }
 
@@ -85,13 +86,11 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
       .asInstanceOf[Scala3EnumSerializer[ValueRemovedWithoutAnnotation & Product]]
     val formerSerializer = new Scala3EnumSerializer(
       evolution = derived.evolution,
-      version = 0,
       enumValueNames = derived.enumValueNames,
       enumValueSerializers = derived.enumValueSerializers
     )
     val currentSerializer = new Scala3EnumSerializer(
       evolution = derived.evolution,
-      version = 1,
       enumValueNames = derived.enumValueNames.dropRight(1),
       enumValueSerializers = derived.enumValueSerializers.dropRight(1)
     )
@@ -106,8 +105,8 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
   it should "resolve the schema compatibility of an enum restored by an outdated source code as incompatible" in {
     val derived          = createSerializer[RolledBackEnum].asInstanceOf[Scala3EnumSerializer[RolledBackEnum & Product]]
     val formerSerializer = new Scala3EnumSerializer(
-      evolution = derived.evolution,
-      version = derived.version + 1,
+      // Written at the next version, which this source code doesn't know
+      evolution = derived.evolution.map(current => new NoEvolution(current.currentClass, current.formerVersion + 1)),
       enumValueNames = derived.enumValueNames.dropRight(1),
       enumValueSerializers = derived.enumValueSerializers.dropRight(1)
     )
@@ -134,7 +133,6 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     // Failure v0 only had UNKNOWN and MISSING_KEY, in this order
     val formerSerializer = new Scala3EnumSerializer[Failure](
       evolution = derived.evolution,
-      version = 0,
       enumValueNames = Array("UNKNOWN", "MISSING_KEY"),
       enumValueSerializers = Array(valueSerializer("UNKNOWN"), valueSerializer("MISSING_KEY"))
     )

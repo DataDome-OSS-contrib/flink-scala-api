@@ -231,10 +231,10 @@ lazy val mimaSettings = Seq(
     ProblemFilters.exclude[IncompatibleResultTypeProblem](
       "org.apache.flinkx.api.serializers.cache()scala.collection.concurrent.TrieMap"
     ),
-    // The ADT serializers take the schema version and the former member names required by the schema evolution feature
+    // The ADT serializers take the evolution of their data and the member names required by the schema evolution feature
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CaseClassSerializer.this"),
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CoproductSerializer.this"),
-    ProblemFilters.exclude[DirectMissingMethodProblem](
+    ProblemFilters.exclude[IncompatibleMethTypeProblem](
       "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.this"
     ),
     ProblemFilters.exclude[IncompatibleMethTypeProblem](
@@ -266,9 +266,9 @@ lazy val mimaSettings = Seq(
     ProblemFilters.exclude[com.typesafe.tools.mima.core.IncompatibleMethTypeProblem](
       "org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable"
     ),
-    // The Scala 3 enum serializers take the schema version and the enum class instead of its companion module class
+    // The Scala 3 enum serializers take the evolution of the enum instead of its companion module class
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.Scala3EnumSerializer.this"),
-    ProblemFilters.exclude[DirectMissingMethodProblem](
+    ProblemFilters.exclude[IncompatibleMethTypeProblem](
       "org.apache.flinkx.api.serializer.Scala3EnumValueSerializer.this"
     ),
     ProblemFilters.exclude[DirectMissingMethodProblem](

@@ -12,11 +12,10 @@ import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flinkx.api.evolution.{Evolution, Evolutions, renamedOrDeletedHint}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 import org.apache.flinkx.api.serializer.CoproductSerializer.CoproductSerializerSnapshot
-import org.apache.flinkx.api.serializer.EvolvingSnapshot.isIncompatible
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 
 class CoproductSerializer[T](
     val evolution: Option[Evolution[T]],
-    val version: Int,
     val subtypeClasses: Array[Class[_]],
     val subtypeFqns: Array[String],
     val subtypeSerializers: Array[TypeSerializer[_]]
@@ -45,7 +44,7 @@ class CoproductSerializer[T](
     if (isImmutableSerializer) {
       this
     } else {
-      new CoproductSerializer[T](evolution, version, subtypeClasses, subtypeFqns, subtypeSerializers.map(_.duplicate()))
+      new CoproductSerializer[T](evolution, subtypeClasses, subtypeFqns, subtypeSerializers.map(_.duplicate()))
     }
   }
 
@@ -115,7 +114,6 @@ object CoproductSerializer {
     def this() = this(None)
 
     private var evolution: Option[Evolution[T]] = None
-    private[serializer] var adtVersion: Int     = 0
     private var subtypeClasses: Array[Class[_]] = Array.empty
     private var subtypeFqns: Array[String]      = Array.empty
 
@@ -128,7 +126,6 @@ object CoproductSerializer {
           // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
           setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
           evolution = s.evolution
-          adtVersion = s.version
           subtypeClasses = s.subtypeClasses
           subtypeFqns = s.subtypeFqns
         }
@@ -143,20 +140,15 @@ object CoproductSerializer {
         override def createOuterSerializerWithNestedSerializers(
             nestedSerializers: Array[TypeSerializer[_]]
         ): CoproductSerializer[T] =
-          new CoproductSerializer[T](evolution, adtVersion, subtypeClasses, subtypeFqns, nestedSerializers)
+          new CoproductSerializer[T](evolution, subtypeClasses, subtypeFqns, nestedSerializers)
 
         override def writeOuterSnapshot(out: DataOutputView): Unit = {
-          evolution.foreach { e =>
-            out.writeUTF(e.formerClassName)
-            out.writeInt(adtVersion)
-          }
+          evolution.foreach(writeEvolution(_, out))
           StringArraySerializer.INSTANCE.serialize(subtypeFqns, out)
         }
 
         override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-          val coproductClassName = if (readOuterSnapshotVersion > NoClassnameVersion) Some(in.readUTF()) else None
-          adtVersion = if (readOuterSnapshotVersion > NoClassnameVersion) in.readInt() else 0
-          evolution = coproductClassName.map(Evolutions.get(_, adtVersion, cl))
+          evolution = Option.when(readOuterSnapshotVersion > NoClassnameVersion)(readEvolution[T](in, cl))
           subtypeFqns = StringArraySerializer.INSTANCE.deserialize(in)
           subtypeClasses = subtypeFqns.map(Evolutions.get(_, adtVersion, cl).currentClass)
         }
@@ -172,7 +164,6 @@ object CoproductSerializer {
         val len = in.readInt()
 
         evolution = None // Written before 2.4.0, without the name of the sealed trait
-        adtVersion = 0
 
         subtypeFqns = (0 until len).map(_ => in.readUTF()).toArray
         subtypeClasses = subtypeFqns.map(Evolutions.get(_, 0, userCodeClassLoader).currentClass)
@@ -188,15 +179,11 @@ object CoproductSerializer {
 
     override private[serializer] def adtEvolution: Option[Evolution[T]] = evolution
 
+    override private[serializer] def memberNames: Array[String] = subtypeFqns
+
     override protected def resolveUnevolvedCompatibility(
         old: CoproductSerializerSnapshot[T]
     ): TypeSerializerSchemaCompatibility[T] = adapter.resolveSchemaCompatibility(old.adapter)
-
-    /** `old.evolution` holds the evolutions migrating the very version the former data was written at. The subtypes are
-      * compared by name: a reordered, added, renamed or deleted one requires the migration as well.
-      */
-    override protected def isEvolutionRequired(old: CoproductSerializerSnapshot[T]): Boolean =
-      evolution.isDefined && old.evolution.exists(!_.isEmpty || !old.subtypeFqns.sameElements(subtypeFqns))
 
     /** Check every former subtype is either declared deleted, or still a member of the current sealed trait, possibly
       * under another name, and that the schema of these surviving subtypes can itself be migrated.
