@@ -9,44 +9,44 @@ import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSe
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** Checks the declaration of a Scala 3 enum, whose value evolutions are declared on its values. */
+/** The ADT evolution of a Scala 3 enum, which holds the evolutions of its enum values. */
 class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import org.apache.flinkx.api.Scala3EnumTest.FailureCategory
   import EvolutionMacroEnumTest.*
 
   it should "declare the enum and the former name it was renamed from" in {
-    FailureCategory.evolutions.declarations.map(_.formerClassName).toSet shouldBe Set(
+    FailureCategory.evolutions.declarations.map(_.className).toSet shouldBe Set(
       classOf[FailureCategory].getName,
       classOf[FailureCategory].getName.replace("FailureCategory", "FailureType")
     )
   }
 
-  // A deleted value and a renamed value are both declared by the enum, not by the value
+  // The ADT evolution of the enum holds the deletion and the rename of its values: a value has no ADT evolution
   it should "declare the evolutions of the enum values" in {
     val evolution = evolutionOf(classOf[FailureCategory])
 
     evolution.currentEnumValueName("MISSING_TYPE") shouldBe Some("MISSING")
     evolution.currentEnumValueName("OTHER_TYPE") shouldBe None
-    intercept[DeletedInstanceException](evolution.restoreEnumValue("OTHER_TYPE")(_ => fail("A deleted value is read")))
+    intercept[DeletedInstanceException](evolution.migrateEnumValue("OTHER_TYPE")(_ => fail("A deleted value is read")))
   }
 
-  // The former name of a renamed value is borne again by a value added since
+  // A value added in version 1 reuses the former name of a renamed value
   it should "apply the evolution of an enum value only to the data written before it" in {
     evolutionOf(classOf[Letter]).currentEnumValueName("A") shouldBe Some("B")
     evolutionOf(classOf[Letter], 1).currentEnumValueName("A") shouldBe Some("A")
   }
 
-  it should "serialize an enum value bearing the former name of a renamed value as itself" in {
+  it should "serialize an enum value that reuses the former name of a renamed value as itself" in {
     val serializer = createSerializer[Letter]
     val out        = new DataOutputSerializer(64)
     serializer.serialize(Letter.A, out)
 
     serializer.deserialize(new DataInputDeserializer(out.getSharedBuffer)) shouldBe Letter.A
-    roundtrip(serializer, Letter.A) // Read by the serializer restored from its snapshot
+    roundtrip(serializer, Letter.A) // Read again by the restored serializer
   }
 
-  // The value names are the same as before, but they swapped: the evolution of the values is still required
+  // The two values exchange their names: the names stay the same, but the migration is necessary
   it should "migrate the values of an enum swapping their names" in {
     given TypeSerializer[Swapped] = createSerializer[Swapped]
     val v0                        = evolutionOf(classOf[Swapped])
@@ -69,7 +69,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
 object EvolutionMacroEnumTest {
 
-  /* Letter v0
+  /* Letter at version 0
   enum Letter { case A }
    */
 
@@ -80,7 +80,7 @@ object EvolutionMacroEnumTest {
   }
   object Letter extends Evolving[Letter] { val evolutions = Evolutions[Letter] }
 
-  /* Swapped v0
+  /* Swapped at version 0
   enum Swapped { case A, B }
    */
 

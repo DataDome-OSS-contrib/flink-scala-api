@@ -10,7 +10,7 @@ import org.apache.flinkx.api.serializer.CoproductSerializer
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** The changes an ADT declaring no evolution survives without any annotation. */
+/** The schema changes that need no evolution annotation. */
 class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "restore the reordered fields of an unversioned case class" in {
@@ -58,14 +58,14 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
     )
   }
 
-  // The former subtypes are matched to the current ones by name, whatever their order
+  // The migration finds the current subtype of each former subtype by its name, not by its position
   it should "restore the reordered subtypes of an unversioned sealed trait, a subtype being added" in {
     implicit val current: TypeSerializer[Shape] = createSerializer[Shape]
-    // Shape v0 only had Square and Circle, in this order
+    // At version 0, Shape had only Square and Circle, in this order
     val formerSerializer = new CoproductSerializer[Shape](
       evolution = Some(evolutionOf(classOf[Shape])),
       subtypeClasses = Array(classOf[Square], classOf[Circle]),
-      subtypeFqns = Array(classOf[Square].getName, classOf[Circle].getName),
+      subtypeNames = Array(classOf[Square].getName, classOf[Circle].getName),
       subtypeSerializers = Array(createSerializer[Square], createSerializer[Circle])
     )
 

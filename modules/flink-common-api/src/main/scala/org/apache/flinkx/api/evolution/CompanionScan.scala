@@ -10,24 +10,23 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import scala.util.Using
 
-/** Finds the companions extending [[Evolving]] in the jars and class directories a class loader loads from.
+/** Companion scan: finds the evolving companions in the jars and class directories of a class loader.
   *
-  * Only the companions of the job need to be found, and they are all in the jars of its class loader: a companion
-  * extends [[Evolving]], which the parent loaders can't see. Flink hands a wrapper of that loader, whose URLs are the
-  * ones of the loader it wraps. The class path of the JVM stands in when there is none: a job running in a MiniCluster,
-  * or a test, has its classes on the class path rather than in a jar of its own.
+  * The evolving companions of a job are all in the jars of its class loader: the parent class loaders cannot see
+  * [[Evolving]]. Flink gives a wrapper of this class loader, with the URLs of the class loader that it wraps. Without
+  * URLs, the scan reads the class path of the JVM: a job in a MiniCluster, or a test, has its classes there.
   *
-  * A companion may extend [[Evolving]] through a trait or a class of its own: only the header of a class file is
-  * parsed, and its supertypes are walked up, each read once per scan, skipping the JDK and the Scala library.
+  * A companion can extend [[Evolving]] through a trait or a class of its own. The scan reads only the header of each
+  * class file, then its supertypes. It reads each supertype once, and skips the JDK and the Scala library.
   */
 private[evolution] object CompanionScan {
 
   private val EvolvingName = classOf[Evolving[_]].getName.replace('.', '/')
 
-  // Packages that never extend Evolving, whose types are not read
+  /** Packages that contain no evolving companion: the scan does not read their types */
   private val LibraryPrefixes = Seq("java/", "javax/", "jdk/", "scala/")
 
-  /** Binary names of the classes extending [[Evolving]] found in what the given class loader loads from. */
+  /** Class names of the evolving companions in the jars and class directories of the given class loader. */
   def companionsOf(classLoader: ClassLoader): Seq[String] = {
     val supertypes = new Supertypes(classLoader)
     rootsOf(classLoader).flatMap(companionsIn(_, supertypes)).distinct
@@ -70,19 +69,19 @@ private[evolution] object CompanionScan {
         .toList
     }
 
-  /** A companion object is compiled to a class named after its type with a trailing `$`. */
+  /** The class of a companion object has the name of its type, with a final `$`. */
   private def isCompanionFile(name: String): Boolean = name.endsWith("$.class")
 
-  /** The binary name of the given class file if it extends [[Evolving]]. */
+  /** The class name of the given class file, if it extends [[Evolving]]. */
   private def companionNamed(classFile: Array[Byte], supertypes: Supertypes): Option[String] =
     headerOf(classFile).filter(supertypes.extendsEvolving).map(_.getClassName.replace('/', '.'))
 
-  /** The header of the given class file, none if its version is more recent than the ones ASM reads. */
+  /** The header of the given class file, or none if ASM cannot read its class file version. */
   private def headerOf(classFile: Array[Byte]): Option[ClassReader] =
     try Some(new ClassReader(classFile))
     catch { case _: IllegalArgumentException => None }
 
-  /** Tells whether a class extends [[Evolving]] through its supertypes, read from the class loader once per scan. */
+  /** Tells if a class extends [[Evolving]] through its supertypes. A scan reads each supertype once. */
   private final class Supertypes(classLoader: ClassLoader) {
 
     private val known = mutable.Map.empty[String, Boolean]
@@ -94,7 +93,7 @@ private[evolution] object CompanionScan {
       name == EvolvingName || !LibraryPrefixes.exists(name.startsWith) && known.getOrElse(name, resolve(name))
 
     private def resolve(name: String): Boolean = {
-      known(name) = false // Stops the walk on a cycle, which an inconsistent class path may hold
+      known(name) = false // Stops the walk on a cycle, which an inconsistent class path can contain
       val extending = classFile(name).flatMap(headerOf).exists(extendsEvolving)
       known(name) = extending
       extending

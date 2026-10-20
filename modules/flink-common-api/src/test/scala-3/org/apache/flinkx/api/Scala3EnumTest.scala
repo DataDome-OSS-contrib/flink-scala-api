@@ -4,7 +4,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.evolution.Evolution.NoEvolution
+import org.apache.flinkx.api.evolution.AdtEvolution.NoEvolution
 import org.apache.flinkx.api.evolution.{Evolutions, Evolving, deletedClasses, renamed, version}
 import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
@@ -18,7 +18,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     summon[TypeInformation[Example]] shouldNot be(null)
   }
 
-  // A value is a member of its enum, not an ADT of its own: what it records has to describe the enum it belongs to
+  // An enum value is not an ADT: its snapshot records the class name and the schema version of its enum
   it should "serialize an enum value with the version of its enum" in {
     val enumSerializer = createSerializer[FailureCategory].asInstanceOf[Scala3EnumSerializer[FailureCategory & Product]]
 
@@ -60,7 +60,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     testTypeInfoAndSerializer(FooEvent("a", Example.Foo("a", 2)))
   }
 
-  /* Test to serialize FailureType.PARSING_TYPE v0 code into Failure-Type-PARSING_TYPE-v0.snapshot file, uncomment both test and code to regenerate
+  /* Uncomment this test and FailureType at version 0 to write Failure-Type-PARSING_TYPE-v0.snapshot again
   it should "serialize FailureType.PARSING_TYPE v0" in {
     val failureType: FailureType = FailureType.PARSING_TYPE
     serializeToFile("Failure-Type-PARSING_TYPE-v0", failureType)
@@ -72,16 +72,16 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     testDeserializeFromFile("Failure-Type-PARSING_TYPE-v0", expected)
   }
 
-  // A state backend gates the restore on the schema compatibility resolution, before deserializing anything: the
-  // evolutions are applied by the restored former serializer, so the state has to be migrated with it.
+  // The restored serializer applies the evolutions, so the state needs a migration before the current serializer
+  // can use it
   it should "resolve the schema compatibility of FailureType v0 to FailureCategory v1 as compatible after migration" in {
     compatibilityWithFile[FailureCategory]("Failure-Type-PARSING_TYPE-v0") shouldBe Symbol(
       "compatibleAfterMigration"
     )
   }
 
-  it should "resolve the schema compatibility of an enum with a value removed without annotation as incompatible" in {
-    // The current schema drops the last enum value without declaring it with @deletedClasses
+  it should "resolve the schema compatibility of an enum with a value deleted without annotation as incompatible" in {
+    // The current schema deletes the last enum value without @deletedClasses
     val derived = createSerializer[ValueRemovedWithoutAnnotation]
       .asInstanceOf[Scala3EnumSerializer[ValueRemovedWithoutAnnotation & Product]]
     val formerSerializer = new Scala3EnumSerializer(
@@ -100,12 +100,11 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
       .resolveSchemaCompatibility(formerSerializer.snapshotConfiguration()) shouldBe Symbol("incompatible")
   }
 
-  // A checkpoint written by a more recent source code, typically after a rollback: the annotations describing the
-  // versions in between don't exist here, so nothing can drive the migration.
-  it should "resolve the schema compatibility of an enum restored by an outdated source code as incompatible" in {
+  // After a rollback, the evolutions of the higher versions are missing: the migration is not possible
+  it should "resolve the schema compatibility of an enum after a rollback as incompatible" in {
     val derived          = createSerializer[RolledBackEnum].asInstanceOf[Scala3EnumSerializer[RolledBackEnum & Product]]
     val formerSerializer = new Scala3EnumSerializer(
-      // Written at the next version, which this source code doesn't know
+      // Written at a version higher than the current version
       evolution = derived.evolution.map(current => new NoEvolution(current.currentClass, current.formerVersion + 1)),
       enumValueNames = derived.enumValueNames.dropRight(1),
       enumValueSerializers = derived.enumValueSerializers.dropRight(1)
@@ -114,23 +113,23 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     compatibilityWith[RolledBackEnum](formerSerializer) shouldBe Symbol("incompatible")
   }
 
-  // Two unrelated enums must never be migrated into one another, even with identical value names
+  // The migration never converts an enum to an unrelated enum, even if their value names are the same
   it should "resolve the schema compatibility of an unrelated enum as incompatible" in {
     compatibilityWith[SecondUnrelatedEnum](createSerializer[FirstUnrelatedEnum]) shouldBe Symbol(
       "incompatible"
     )
   }
 
-  it should "resolve the schema compatibility of an unevolved enum as compatible as is" in {
+  it should "resolve the schema compatibility of an enum declaring no evolution as compatible as is" in {
     compatibilityWith[Failure](createSerializer[Failure]) shouldBe Symbol("compatibleAsIs")
   }
 
-  // The former values are matched to the current ones by name, whatever their order
+  // The migration finds the current value of each former value by its name, not by its position
   it should "restore the reordered values of an unversioned enum, a value being added" in {
     given TypeSerializer[Failure]     = createSerializer[Failure]
     val derived                       = summon[TypeSerializer[Failure]].asInstanceOf[Scala3EnumSerializer[Failure]]
     def valueSerializer(name: String) = derived.enumValueSerializers(derived.enumValueNames.indexOf(name))
-    // Failure v0 only had UNKNOWN and MISSING_KEY, in this order
+    // At version 0, Failure had only UNKNOWN and MISSING_KEY, in this order
     val formerSerializer = new Scala3EnumSerializer[Failure](
       evolution = derived.evolution,
       enumValueNames = Array("UNKNOWN", "MISSING_KEY"),
@@ -141,7 +140,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     compatibilityWith[Failure](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
-  /* Test to serialize FailureType.OTHER_TYPE v0 code into Failure-Type-OTHER_TYPE-v0.snapshot file, uncomment both test and code to regenerate
+  /* Uncomment this test and FailureType at version 0 to write Failure-Type-OTHER_TYPE-v0.snapshot again
   it should "serialize FailureType.OTHER_TYPE v0" in {
     val failureType: FailureType = FailureType.OTHER_TYPE
     serializeToFile("Failure-Type-OTHER_TYPE-v0", failureType)
@@ -152,7 +151,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception = intercept[FlinkRuntimeException] {
       testDeserializeFromFile[FailureCategory]("Failure-Type-OTHER_TYPE-v0", null)
     }
-    exception.getMessage shouldBe "Encountered an instance of deleted 'org.apache.flinkx.api.Scala3EnumTest$FailureCategory#OTHER_TYPE' class during deserialization. Don't delete a class in usage or use @deletedClasses(since = <version>, throwOnInstance = false, ...) to deserialize it as null instead"
+    exception.getMessage shouldBe "The former data contains an instance of 'org.apache.flinkx.api.Scala3EnumTest$FailureCategory#OTHER_TYPE', a deleted class or enum value. Keep this class, or declare @deletedClasses(since = <version>, throwOnInstance = false, ...) to read it as null"
   }
 
 }
@@ -163,7 +162,7 @@ object Scala3EnumTest {
     case MISSING_KEY, PARSE_ERROR, UNKNOWN
   }
 
-  /* failure-type-v0
+  /* FailureType at version 0, which wrote the Failure-Type-*-v0.snapshot files
   enum FailureType(a: String) {
     case MISSING_TYPE extends FailureType("a")
     case PARSING_TYPE extends FailureType("b")

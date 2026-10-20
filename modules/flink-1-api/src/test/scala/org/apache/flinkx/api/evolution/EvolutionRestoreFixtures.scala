@@ -7,22 +7,21 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.functions.source.SourceFunction
 import org.apache.flink.util.Collector
 
-/** The ADT that wrote the savepoint, and the one restoring it: renamed, with a renamed field. */
+/** An ADT renamed since the savepoint, and the functions of the job that writes and restores the savepoint. */
 object EvolutionRestoreFixtures {
 
-  /** Versioned, so restoring it needs its declaration, and marked when restored from a former version. */
+  /** A versioned ADT: the restore needs its declaration. Its post-evolution mapper marks each migrated instance. */
   @version(1)
   @renamed(since = 1, "FormerOrder")
   @postEvolution(mark)
   case class Order(id: String, total: Int)
   object Order extends Evolving[Order] { val evolutions = Evolutions[Order] }
 
-  /** Applied to every instance restored from a former version, so a restored value tells the declaration was applied.
-    */
+  /** Adds `!` to the id of a migrated instance: the result shows that the restore applied the declaration. */
   def mark(version: Int, order: Order): Order =
     if (order.id.endsWith("!")) order else order.copy(id = order.id + "!")
 
-  /** Emits the given values, then stays open so a savepoint can be taken while the state is held. */
+  /** Emits the given values, then runs until cancel, so that the test can take a savepoint of the state. */
   class Endless[T](values: Seq[T]) extends SourceFunction[T] {
     @volatile private var running = true
 
@@ -34,13 +33,13 @@ object EvolutionRestoreFixtures {
     override def cancel(): Unit = running = false
   }
 
-  /** Keeps the last value per key, with the state descriptor built in `open`, on the TaskManager. */
+  /** Keeps the last value of each key. It creates its state descriptor in `open`, on the TaskManager. */
   class KeepLast[T: TypeInformation] extends KeyedProcessFunction[String, T, String] {
 
     @transient private var last: ValueState[T] = _
 
     override def open(context: OpenContext): Unit = {
-      // Built here, long after the job graph was serialized: nothing carries the evolutions but the jar
+      // Created after the serialization of the job graph: only the jar of the job contains the evolutions
       last = getRuntimeContext.getState(new ValueStateDescriptor[T]("last", implicitly[TypeInformation[T]]))
     }
 

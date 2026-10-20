@@ -2,20 +2,20 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
 
-/** Evidence that the evolutions of `T` are declared, required to derive its type information.
+/** Evidence that the derivation of the type information of `T` requires. It gives the current schema version of `T`.
   *
-  * Materialized by a macro wherever the derivation of `T` is expanded: a versioned ADT whose companion doesn't extend
-  * [[Evolving]] fails the build, rather than restoring without its evolutions.
+  * A macro creates it where the derivation of `T` expands. A versioned ADT without an evolving companion stops the
+  * compilation: a restore without its evolutions would give wrong data.
   *
   * @param version
-  *   Current schema version of `T`, read from its `@version` at compile time. The one of its enum for an enum value
+  *   Current schema version of `T`, from its `@version`. For an enum value, the version of its enum.
   */
 @Internal
 final class Evolvable[T](val version: Int)
 
 object Evolvable extends EvolvableDerivation {
 
-  /** Evidence for a type that declares no version. */
+  /** Evidence for a type without `@version`. */
   val unversioned: Evolvable[Any] = new Evolvable[Any](0)
 
 }

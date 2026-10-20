@@ -29,10 +29,9 @@ import org.scalatest.matchers.should.Matchers
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters._
 
-/** Restores a savepoint written by a former ADT, through a MiniCluster, with the state descriptor built in `open`.
+/** Restores in a MiniCluster a savepoint of a former ADT, with a state descriptor that `open` creates.
   *
-  * Nothing declares the evolutions here: the companion of the ADT is the only thing carrying them, which the first
-  * restore finds by scanning the jars of the job, whatever the shape of the descriptor.
+  * The job graph contains no evolution: the companion scan finds the evolving companion in the jars of the job.
   */
 class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
@@ -59,7 +58,7 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
     env
   }
 
-  /** Order as a job at version 0 wrote it, under its former name: only the data of a former version is post-evolved. */
+  /** Order at version 0, under its former class name. The post-evolution mapper applies only to such former data. */
   private def formerOrderInfo: TypeInformation[Order] = {
     val current    = implicitly[TypeInformation[Order]].asInstanceOf[CaseClassTypeInfo[Order]]
     val serializer = current.createSerializer(new SerializerConfigImpl()).asInstanceOf[CaseClassSerializer[Order]]
@@ -87,11 +86,10 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
       .addSink(new IntegrationTestSink[String])
     val written = writing.executeAsync("write")
     eventually(timeout(Span(30, Seconds)))(IntegrationTestSink.values.size should be >= 1)
-    // Stopping with a savepoint keeps the state, where a job reaching its end would have it cleaned up
+    // A stop with savepoint keeps the state. A finished job does not keep it.
     val savepoint = written.stopWithSavepoint(false, checkpoints.toUri.toString, SavepointFormatType.CANONICAL).get()
 
-    // A fresh TaskManager knows nothing: only the companion of the ADT declares the evolutions, which the restore asks
-    // for, long after the job graph was built
+    // Empty the registry, as on a new TaskManager: only the evolving companion gives the evolutions to the restore
     Evolutions.reset()
 
     IntegrationTestSink.values.clear()

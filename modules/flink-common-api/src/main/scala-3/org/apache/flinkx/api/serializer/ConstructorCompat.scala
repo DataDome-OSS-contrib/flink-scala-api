@@ -19,8 +19,8 @@ private[serializer] trait ConstructorCompat:
       else constructor.newInstance(args*).asInstanceOf[T]
     }
 
-  /** Names of the parameters [[lookupConstructor]] instantiates the given class with, in their order, empty when the
-    * class file doesn't record them.
+  /** Names of the constructor parameters that [[lookupConstructor]] uses for the given class, in their order. Empty if
+    * the class file does not record them.
     */
   final def lookupFieldNames(cls: Class[?]): Array[String] =
     try
@@ -33,7 +33,6 @@ private[serializer] trait ConstructorCompat:
   // Say you have a class `final case class Foo(a: String, b: Int)`.
   // The first parameter is an alias for `java.lang.String`, which the constructor uses.
   // The second parameter is an alias for `java.lang.Integer`, but the constructor actually takes an unboxed `int`.
-  // The longest constructor stands for the primary one, whatever the order the JVM lists them in.
   private def constructorOf(cls: Class[?]): Constructor[?] =
     try cls.getConstructors.maxBy(_.getParameterCount)
     catch
@@ -56,5 +55,5 @@ private[serializer] trait ConstructorCompat:
   private def isEnum(constructor: Constructor[_]): Boolean =
     (constructor.getDeclaringClass.getModifiers & EnumModifier) != 0
 
-/** Reads the constructor of a case class outside of its serializer, from its snapshot in particular. */
+/** Reads the constructor of a case class outside its serializer, for example from its snapshot. */
 private[api] object ConstructorCompat extends ConstructorCompat

@@ -5,12 +5,12 @@ import org.apache.flinkx.api.evolution.EvolutionRenamedTest.Pony
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** A misplaced or wrongly written evolution annotation declares nothing: it is rejected where it is read, at compile
-  * time, by `Evolutions[T]` in the companion of the ADT, or by the derivation of its type information.
+/** The compile-time checks of the evolution annotations: `Evolutions[T]` and the derivation of the type information
+  * reject a misplaced or wrong annotation.
   */
 class EvolutionValidationTest extends AnyFlatSpec with Matchers {
 
-  // An ADT at version 0 has no former version to evolve from
+  // An ADT at version 0 has no lower version to migrate from
   it should "reject an evolution annotation on an ADT without version" in {
     assertTypeError("Evolutions[WrongRenamedOnCaseClassWithoutVersion]")
     assertTypeError("Evolutions[WrongDeletedFieldsOnCaseClassWithoutVersion]")
@@ -47,8 +47,8 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     assertTypeError("Evolutions[WrongPostEvolutionTwiceOnSealedTrait]")
   }
 
-  // Its own snapshot always records version 0, so a former name could never be told apart by the version, and the
-  // evolutions of a subtype are declared by its own companion
+  // The snapshot of an unversioned subtype records version 0, so the version cannot identify its former name.
+  // A subtype declares its evolutions in its own companion.
   it should "reject an evolution annotation on an unversioned subtype" in {
     assertTypeError("Evolutions[RenamingUnversionedSubtype]")
     assertTypeError("Evolutions[WrongRenamedOnSealedTraitSubtypeWithoutVersion]")
@@ -58,7 +58,7 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     assertTypeError("Evolutions[WrongPostEvolutionOnSealedTraitSubtype]")
   }
 
-  // A case object is declared by the sealed trait it belongs to, which checks its annotations as an ADT of its own
+  // The sealed trait declares its case objects, and checks their annotations as for an ADT
   it should "reject a field annotation on a versioned case object" in {
     assertTypeError("Evolutions[WrongAddedOnSealedTraitSubtype]")
     assertTypeError("Evolutions[WrongTransformedOnSealedTraitSubtype]")
@@ -68,14 +68,14 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     assertTypeError("Evolutions[WrongCurrentVersion]")
   }
 
-  // The version and the since are read at compile time, where only a literal has a value
+  // The macros read the version and the since at compile time: only a literal has a value there
   it should "reject a version or a since that is not an integer literal" in {
     assertTypeError("Evolutions[WrongVersionNotLiteral]")
     assertTypeError("Evolutions[WrongSinceNotLiteral]")
   }
 
-  // An evolution outside the version range is never applied when it should. A subtype may be renamed in the versions
-  // of its sealed traits, as Horse is, but not above them
+  // The migration never applies an evolution outside the version range. The rename of a subtype, as Horse, can use
+  // the versions of its sealed traits, but no higher version.
   it should "reject an evolution whose since is outside the version range" in {
     assertTypeError("Evolutions[WrongSinceAboveVersion]")
     assertTypeError("Evolutions[WrongSinceBelowOne]")
@@ -95,8 +95,7 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     assertCompiles("Evolutions[CorrectPostEvolutionOnSubtype]")
   }
 
-  // Wherever the type information is summoned, whatever the shape of the state descriptor asking for it: a versioned ADT
-  // whose companion declares nothing would restore without any of its rules
+  // Without an evolving companion, a versioned ADT restores without its evolutions: the derivation rejects it
   it should "reject the derivation of a versioned ADT whose companion doesn't extend Evolving" in {
     assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[NeverDeclared] }")
   }
@@ -122,7 +121,7 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
 
   it should "build the message of a companion declaring nothing" in {
     companionNotEvolving("com.example.Outer$Order") shouldBe
-      "com.example.Outer$Order declares @version, so its companion must declare its evolutions:" +
+      "com.example.Outer$Order declares @version. Its companion must extend Evolving:" +
       " object Order extends Evolving[Order] { val evolutions = Evolutions[Order] }"
   }
 

@@ -6,8 +6,8 @@ import org.apache.flinkx.api.util.ClassUtil
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** A sealed trait whose subtypes are themselves sealed: an unchanged hierarchy restores as is, and a case object below
-  * an intermediate sealed trait is declared by the trait above it.
+/** A sealed trait with sealed subtypes. An unchanged hierarchy restores as is, and the top sealed trait declares the
+  * case objects below an intermediate sealed trait.
   */
 class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils {
 
@@ -17,7 +17,7 @@ class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils {
     compatibilityWith[Top](createSerializer[Top]) shouldBe Symbol("compatibleAsIs")
   }
 
-  // The derivation flattens the intermediate sealed traits: a case object below one is declared by the trait above it
+  // The derivation flattens the intermediate sealed traits, so the top sealed trait declares their case objects
   it should "resolve the former name of a case object below an intermediate sealed trait" in {
     val formerName = ClassUtil.resolveFormerClassName("FormerNested$", Nested.getClass) // As its snapshot records it
 

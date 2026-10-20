@@ -1,6 +1,6 @@
 package org.apache.flinkx.api.evolution
 
-/** Declares the evolutions of a versioned ADT, from its companion:
+/** Evolving companion: the companion object of a versioned ADT, which holds the evolutions of the ADT.
   * {{{
   * @version(2)
   * @renamed(since = 2, "FormerOrder")
@@ -10,19 +10,19 @@ package org.apache.flinkx.api.evolution
   * object Order extends Evolving[Order] {
   *   val evolutions = Evolutions[Order]
   *
-  *   private[example] def fix(version: Int, order: Order): Order = order // Visible where Order is declared
+  *   private[example] def fix(formerVersion: Int, order: Order): Order = order // Visible where Order is declared
   * }
   * }}}
   *
-  * Every ADT annotated with `@version` needs this on its companion, which the derivation of its type information checks
-  * at compile time. A case object has no companion of its own: the sealed trait it belongs to declares it.
+  * Each versioned ADT needs an evolving companion: the derivation of its type information checks it at compile time. A
+  * case object has no companion: its sealed trait declares its evolutions.
   *
-  * The annotations are read at compile time by [[Evolutions.apply]]. The registry reads the evolution from every
-  * companion of the job found in its classloader on first use, so they are available wherever the state is restored.
+  * [[Evolutions.apply]] reads the annotations at compile time. At the first lookup, the registry reads the evolutions
+  * of all the evolving companions in the class loader of the job.
   */
 trait Evolving[T] {
 
-  /** The evolutions of the ADT, built from its annotations by `Evolutions[T]`. */
+  /** The evolutions of the ADT: `Evolutions[T]` builds them from its annotations. */
   def evolutions: Evolutions[T]
 
 }

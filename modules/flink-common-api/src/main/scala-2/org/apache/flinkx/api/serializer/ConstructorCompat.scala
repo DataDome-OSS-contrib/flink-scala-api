@@ -28,8 +28,8 @@ private[serializer] trait ConstructorCompat {
     (args: Array[AnyRef]) => constructor.apply(args: _*).asInstanceOf[T]
   }
 
-  /** Names of the parameters [[lookupConstructor]] instantiates the given class with, in their order, empty when they
-    * can't be read.
+  /** Names of the constructor parameters that [[lookupConstructor]] uses for the given class, in their order. Empty if
+    * Scala reflection cannot read them.
     */
   final def lookupFieldNames(cls: Class[_]): Array[String] =
     try {
@@ -53,5 +53,5 @@ private[serializer] trait ConstructorCompat {
 
 }
 
-/** Reads the constructor of a case class outside of its serializer, from its snapshot in particular. */
+/** Reads the constructor of a case class outside its serializer, for example from its snapshot. */
 private[api] object ConstructorCompat extends ConstructorCompat

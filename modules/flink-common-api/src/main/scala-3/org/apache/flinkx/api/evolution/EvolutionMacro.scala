@@ -5,15 +5,15 @@ import org.apache.flinkx.api.AnnotationTrees
 import scala.quoted.*
 import scala.util.control.NonFatal
 
-/** Builds the [[Evolutions]] of an ADT from its annotations alone.
+/** Builds the [[Evolutions]] of an ADT from its annotations only.
   *
-  * Reads what `TypeInformationDerivation` reads, but emits only the registration code: no field typeclass is summoned,
-  * so it compiles wherever the ADT is visible, from its own companion in particular.
+  * It reads the annotations and generates the code to add these declarations in [[EvolutionBuilder]]. It compiles where
+  * the ADT is visible, in its companion for example.
   */
 private[evolution] object EvolutionMacro:
 
-  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived,
-    * and hand its version over to the derivation.
+  /** Check that a versioned ADT has an evolving companion, where the type information of the ADT is derived. Give its
+    * version to the derivation.
     */
   def evolvableImpl[T: Type](using Quotes): Expr[Evolvable[T]] =
     import quotes.reflect.*
@@ -21,13 +21,13 @@ private[evolution] object EvolutionMacro:
     val symbol = TypeRepr.of[T].typeSymbol
 
     rejectVersionedParameter(symbol)
-    // A version 0 declares nothing to evolve from, and a case object is declared by the sealed trait it belongs to
+    // At version 0 an ADT has no evolution, and the sealed trait of a case object declares it
     if versionOf(symbol) > 0 && !symbol.flags.is(Flags.Module) then
-      // An enum value is typed by its enum, which declares for it
+      // An enum value has the type of its enum, which declares its evolutions
       val companion = Option.when(symbol.companionModule.exists)(symbol.companionModule.termRef)
       val evolving  = Symbol.requiredClass(classOf[Evolving[?]].getName).typeRef.appliedTo(symbol.typeRef)
       if !companion.exists(_ <:< evolving) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
-    // An enum value case class is not versioned on its own: it's serialized with the version of its enum
+    // An enum value with parameters has no version of its own: its snapshot records the version of its enum
     val enumOfValue =
       if symbol.flags.is(Flags.Enum) && symbol.flags.is(Flags.Case) then
         TypeRepr.of[T].baseClasses.find(base => base != symbol && base.flags.is(Flags.Enum))
@@ -42,13 +42,13 @@ private[evolution] object EvolutionMacro:
     catch { case NonFatal(_) => false }
   }
 
-  /** The value parameters of the primary constructor of the given class, none for a trait. */
+  /** The value parameters of the primary constructor of the given class, or none for a trait. */
   private def parametersOf(using q: Quotes)(owner: q.reflect.Symbol): List[q.reflect.Symbol] =
     owner.primaryConstructor match
       case constructor if constructor.isNoSymbol => Nil
       case constructor                           => constructor.paramSymss.filterNot(_.exists(_.isTypeParam)).flatten
 
-  /** Reject a `@version` on a parameter: a version belongs to an ADT, and scalac does not enforce annotation targets.
+  /** Reject a `@version` on a parameter: only an ADT has a version, and the compiler does not check annotation targets.
     */
   private def rejectVersionedParameter(using q: Quotes)(symbol: q.reflect.Symbol): Unit =
     parametersOf(symbol)
@@ -67,7 +67,7 @@ private[evolution] object EvolutionMacro:
           .map(tag => '{ $tag.runtimeClass })
           .getOrElse(report.errorAndAbort(s"No ClassTag for ${tpe.show}"))
 
-  /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. Rejects a version
+  /** The schema version that the `@version` of the given symbol declares, or 0 without `@version`. Rejects a version
     * that is negative or not an integer literal.
     */
   private def versionOf(using q: Quotes)(symbol: q.reflect.Symbol): Int = {
@@ -80,7 +80,7 @@ private[evolution] object EvolutionMacro:
     }
   }
 
-  /** The literal `Int` the given annotation passes to the named parameter, its first one, if it is a literal. */
+  /** The integer literal that the given annotation passes to the named parameter, or as its first argument. */
   private def intArgument(using q: Quotes)(annotation: q.reflect.Term, name: String): Option[Int] = {
     import q.reflect.*
     annotation match
@@ -96,7 +96,7 @@ private[evolution] object EvolutionMacro:
     import quotes.reflect.*
 
     val symbol = TypeRepr.of[T].typeSymbol
-    // A case object has no companion of its own to declare it: the sealed traits above it declare it
+    // A case object has no companion: its sealed traits declare it
     def caseObjectsBelow(owner: Symbol): List[Symbol] =
       if owner.flags.is(Flags.Enum) then Nil
       else owner.children.flatMap(child => if child.isTerm then List(child) else caseObjectsBelow(child))
@@ -108,7 +108,7 @@ private[evolution] object EvolutionMacro:
     val clazz = classOfExpr(TypeRepr.of[T])
     '{ new Evolutions[T]($clazz.asInstanceOf[Class[T]], () => Seq(${ Varargs(builders) }*)) }
 
-  /** The code building the [[EvolutionBuilder]] of `T` from its annotations, once they are validated. */
+  /** The code that builds the [[EvolutionBuilder]] of `T` from its annotations, after their validation. */
   private def builderImpl[T: Type](using Quotes): Expr[EvolutionBuilder[T]] =
     import quotes.reflect.*
 
@@ -116,33 +116,33 @@ private[evolution] object EvolutionMacro:
     val isEnum   = symbol.flags.is(Flags.Enum)
     val children = symbol.children
     val version  = versionOf(symbol)
-    // An enum declares the evolutions of its values, while a subtype of a sealed trait declares its own
+    // An enum declares the evolutions of its values. A subtype of a sealed trait declares its own evolutions
     val enumValues = if isEnum then children else Nil
 
-    // The fields of a case class, in declaration order: a sealed trait or an enum compares its members in its snapshots
+    // The fields of a case class, in declaration order. The snapshots of a sealed trait or an enum compare its members
     val fieldNames = Expr(if children.isEmpty then parametersOf(symbol).map(_.name).toArray else Array.empty[String])
 
     def is[A: Type](term: Term): Boolean = term.tpe <:< TypeRepr.of[A]
 
     def nameOf(term: Term): String = term.tpe.typeSymbol.name
 
-    /** The evolution annotations of a symbol, read whole so that splicing them is safe. */
+    /** The evolution annotations of a symbol, read whole: a splice of them is then safe. */
     def evolutionAnnotationsOf(owner: Symbol): List[Term] = {
       AnnotationTrees.readWhole(List(owner))
       owner.annotations.filter(is[EvolutionAnnotation])
     }
 
-    // A subtype is also renamed or deleted in the versions of the sealed traits above it, which resolve its former name
+    // A rename or deletion of a subtype can count in the versions of its sealed traits, which record its name
     val classVersion = (version :: TypeRepr.of[T].baseClasses.filter(isVersioned).map(versionOf)).max
 
-    /** Reject a `since` that is not a literal, or outside the version range the annotation is declared in. */
+    /** Reject a `since` that is not an integer literal, or not from 1 to `lastVersion`. */
     def checkSince(term: Term, target: String, lastVersion: Int = version): Unit =
       val since = intArgument(term, "since").getOrElse(report.errorAndAbort(notLiteral(nameOf(term), "since", target)))
-      // An evolution outside the version range is never applied when it should
+      // An evolution with a `since` out of this range never applies to the correct data
       if since < 1 || since > lastVersion then
         report.errorAndAbort(sinceNotAllowed(symbol.fullName, since, lastVersion))
 
-    /** Reject the evolution annotations that declare nothing where they are, before anything is generated. */
+    /** Reject the misplaced evolution annotations, before the macro generates code. */
     def validate(): Unit = {
       val isCoproduct = children.nonEmpty
 
@@ -170,7 +170,7 @@ private[evolution] object EvolutionMacro:
         }
       }
 
-      // A subtype of a sealed trait declares its own evolutions, which its own declaration registers
+      // A versioned subtype of a sealed trait has its own builder, which validates its own annotations
       children.filter(child => isEnum || !isVersioned(child)).foreach { child =>
         evolutionAnnotationsOf(child).foreach { term =>
           if !AnnotationRules.allowedOnUnversionedSubtype(nameOf(term), version, isEnum) then
@@ -180,7 +180,7 @@ private[evolution] object EvolutionMacro:
       }
     }
 
-    /** Hands the annotations over to the builder, which reads them at runtime. */
+    /** Give the annotations to the builder, which reads them at runtime. */
     def declarations(builder: Expr[EvolutionBuilder[T]]): List[Expr[Unit]] =
       def annotation(term: Term) = term.asExprOf[EvolutionAnnotation]
       val ofClass  = evolutionAnnotationsOf(symbol).map(term => '{ $builder.declare(${ annotation(term) }) })

@@ -8,7 +8,7 @@ import org.apache.flink.api.java.typeutils.TupleTypeInfoBase
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flink.api.java.typeutils.runtime.kryo.KryoSerializer
 import org.apache.flink.core.memory._
-import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
+import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions}
 import org.apache.flinkx.api.semiauto.infoToSer
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
@@ -24,7 +24,7 @@ import scala.collection.immutable.TreeSet
 
 trait TestUtils extends Matchers with Inspectors {
 
-  /** Read the snapshot file of the given name from the test resources. */
+  /** Reads the snapshot file of the given name from the test resources. */
   protected def snapshotInput(fileName: String): InputStream =
     new ByteArrayInputStream(getClass.getResourceAsStream(s"/$fileName.snapshot").readAllBytes())
 
@@ -32,8 +32,8 @@ trait TestUtils extends Matchers with Inspectors {
   private def snapshotPath(fileName: String): String =
     s"modules/flink-common-api/src/test/resources/$fileName.snapshot"
 
-  /** Writes the snapshot of the given serializer and `data` into the snapshot file of the given name, which the former
-    * source code of a test calls to generate the file a test restores.
+  /** Writes the serializer snapshot and `data` in the snapshot file of the given name. The former source code of a test
+    * calls it, in a comment, to write the file again.
     */
   def serializeToFile[T](fileName: String, data: T)(implicit ser: TypeSerializer[T]): Unit = {
     val output = new DataOutputViewStreamWrapper(new FileOutputStream(snapshotPath(fileName)))
@@ -46,7 +46,7 @@ trait TestUtils extends Matchers with Inspectors {
     output.close()
   }
 
-  /** Reads the data of the snapshot file of the given name with the former serializer restored from its snapshot. */
+  /** Reads the former data of the snapshot file of the given name with the restored serializer. */
   def testDeserializeFromFile[T](
       fileName: String,
       expected: T,
@@ -67,31 +67,31 @@ trait TestUtils extends Matchers with Inspectors {
   def createSerializer[T: TypeInformation]: TypeSerializer[T] =
     implicitly[TypeInformation[T]].createSerializer(new SerializerConfigImpl())
 
-  /** The snapshot held in the snapshot file of the given name, as Flink reads it from a savepoint. */
+  /** The former snapshot of the snapshot file of the given name, as Flink reads it from a savepoint. */
   def snapshotFromFile[T](fileName: String): TypeSerializerSnapshot[T] = {
     val input = new DataInputViewStreamWrapper(snapshotInput(fileName))
     try TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader)
     finally input.close()
   }
 
-  /** The former serializer restored from the snapshot file of the given name, the way Flink restores a savepoint. */
+  /** The restored serializer of the snapshot file of the given name, as Flink creates it during a restore. */
   def restoreSerializerFromFile[T](fileName: String): TypeSerializer[T] =
     snapshotFromFile[T](fileName).restoreSerializer()
 
-  /** Resolves the compatibility of the current serializer against the snapshot of the given former serializer, written
-    * then read back the way a savepoint does: the former name it records goes through the evolution resolution, as a
-    * state backend gates the restore of a savepoint.
+  /** Resolves the schema compatibility of the current serializer with the snapshot of `formerSerializer`, the
+    * serializer of the former source code. The snapshot is written and read back as in a savepoint, so its class name
+    * goes through the lookup.
     */
   def compatibilityWith[T: TypeSerializer](formerSerializer: TypeSerializer[_]): TypeSerializerSchemaCompatibility[T] =
     implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(savepointed[T](formerSerializer))
 
-  /** Resolves the compatibility of the current serializer against the former snapshot of the given file. */
+  /** Resolves the schema compatibility of the current serializer with the former snapshot of the given file. */
   def compatibilityWithFile[T: TypeSerializer](fileName: String): TypeSerializerSchemaCompatibility[T] =
     implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(snapshotFromFile[T](fileName))
 
-  /** Resolves the compatibility of the value serializer of a `MapState[String, T]`, nested in a Flink
-    * [[org.apache.flink.api.common.typeutils.base.MapSerializer]] resolving the compatibility of its nested
-    * serializers, against the former one held in the given snapshot file.
+  /** Resolves the schema compatibility of the value serializer of a `MapState[String, T]` with the former snapshot of
+    * the given file. The Flink [[org.apache.flink.api.common.typeutils.base.MapSerializer]] resolves it for its nested
+    * serializer.
     */
   def nestedCompatibilityWithFile[T: TypeSerializer](
       fileName: String
@@ -103,11 +103,11 @@ trait TestUtils extends Matchers with Inspectors {
       .resolveSchemaCompatibility(formerMapSerializer.snapshotConfiguration())
   }
 
-  /** Migrates the given former form the way Flink does: `former` is serialized with `formerSerializer`, its snapshot is
-    * written then read back, and the data is read with the restored serializer, which applies the declared evolutions.
+  /** Migrates `former` as Flink does: `formerSerializer` writes it with its snapshot, then the restored serializer
+    * reads it back and applies the evolutions.
     *
     * @param former
-    *   The former form, possibly an instance of a class standing for a former class no longer declared
+    *   The former instance. Its class can take the place of a former class that the current source code deleted.
     */
   def deserializeFormerForm[T](formerSerializer: TypeSerializer[_], former: Any): T = {
     val out = new DataOutputSerializer(1024)
@@ -118,11 +118,11 @@ trait TestUtils extends Matchers with Inspectors {
     restoredSnapshot.restoreSerializer().deserialize(in)
   }
 
-  /** Migrates the form a case class had at `version`, when it was declared with the given former fields, in their
-    * former order: its snapshot is written then read back, and its fields are read with the restored serializer.
+  /** Migrates a case class written at `version` with the given former fields, in their former order. The former
+    * snapshot is written and read back, then the restored serializer reads the fields.
     *
     * @return
-    *   the restored snapshot, and the value read back
+    *   The former snapshot, and the migrated instance
     */
   def deserializeFormerFields[T <: Product](
       clazz: Class[T],
@@ -137,7 +137,7 @@ trait TestUtils extends Matchers with Inspectors {
     )
     val out = new DataOutputSerializer(1024)
     TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
-    // The former form: its arity, then its fields in their former order
+    // The former data: the arity, then the fields in their former order
     out.writeInt(formerFields.length)
     formerFields.foreach { case (_, serializer, value) =>
       serializer.asInstanceOf[TypeSerializer[Any]].serialize(value, out)
@@ -222,10 +222,9 @@ trait TestUtils extends Matchers with Inspectors {
       case _ => // ok
     }
 
-  /** Checks the serializer survives the Java serialization round trip the job graph puts it through.
+  /** Checks that the Java serialization of the job graph can write and read the serializer.
     *
-    * Reading it back matters as much as writing it: a class whose non-serializable base has no no-arg constructor is
-    * written without complaint and only fails on the way back.
+    * The read is necessary: a class whose non-serializable base class has no no-arg constructor fails only on the read.
     */
   def javaSerializable[T](ser: TypeSerializer[T]): Unit = {
     val bytes = new ByteArrayOutputStream()
@@ -400,8 +399,8 @@ trait TestUtils extends Matchers with Inspectors {
 
 object TestUtils {
 
-  /** The evolution of the data of `clazz` written at `version`, as the snapshot recording them resolves it. */
-  def evolutionOf[T](clazz: Class[T], version: Int = 0): Evolution[T] =
+  /** The ADT evolution of the data of `clazz` written at `version`, as a former snapshot looks it up. */
+  def evolutionOf[T](clazz: Class[T], version: Int = 0): AdtEvolution[T] =
     Evolutions.get[T](clazz.getName, version, clazz.getClassLoader)
 
 }

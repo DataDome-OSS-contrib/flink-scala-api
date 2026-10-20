@@ -57,7 +57,7 @@ class ClassUtilTest extends AnyFlatSpec with Matchers {
     val exception = intercept[FlinkRuntimeException] {
       ClassUtil.resolveFormerClassName("", classOf[Simple])
     }
-    exception.getMessage should include("Former binary name is mandatory")
+    exception.getMessage should include("The former class name is empty")
   }
 
   it should "resolve a renaming relative to a top level class" in {

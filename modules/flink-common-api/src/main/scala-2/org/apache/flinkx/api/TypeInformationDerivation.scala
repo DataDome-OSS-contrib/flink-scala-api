@@ -4,7 +4,7 @@ import magnolia1.{CaseClass, SealedTrait}
 import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerConfigImpl}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flinkx.api.evolution.Evolution.NoEvolution
+import org.apache.flinkx.api.evolution.AdtEvolution.NoEvolution
 import org.apache.flinkx.api.evolution.Evolvable
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer, nullable}
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
@@ -66,12 +66,12 @@ private[api] trait TypeInformationDerivation {
       case None         =>
         val clazz          = classTag.runtimeClass.asInstanceOf[Class[T]]
         val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[_]]
-        val subtypeFqns    = subtypeClasses.map(_.getName)
+        val subtypeNames   = subtypeClasses.map(_.getName)
 
         val serializer = new CoproductSerializer[T](
           evolution = Some(new NoEvolution(clazz, implicitly[Evolvable[T]].version)),
           subtypeClasses = subtypeClasses,
-          subtypeFqns = subtypeFqns,
+          subtypeNames = subtypeNames,
           subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
         )
 

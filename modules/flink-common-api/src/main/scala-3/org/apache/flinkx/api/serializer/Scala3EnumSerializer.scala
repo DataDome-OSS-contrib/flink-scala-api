@@ -9,19 +9,19 @@ import org.apache.flink.api.common.typeutils.{
   TypeSerializerSnapshot
 }
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.{Evolution, renamedOrDeletedHint}
+import org.apache.flinkx.api.evolution.{AdtEvolution, renamedOrDeletedHint}
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 
 /** Serializer for Scala 3 enum. Handle nullable value. */
 class Scala3EnumSerializer[T <: Product](
-    val evolution: Option[Evolution[T]],
+    val evolution: Option[AdtEvolution[T]],
     val enumValueNames: Array[String],
     val enumValueSerializers: Array[TypeSerializer[_]]
 ) extends MutableSerializer[T] {
 
   require(
-    // The serialized form holds the index of the enum value, so both arrays describe the same values in one order
+    // The serialized form contains the enum value index: both arrays describe the same values in the same order
     enumValueNames.length == enumValueSerializers.length,
     s"${evolution.fold("The enum")(_.currentClass.toString)} has ${enumValueNames.length} value names for ${enumValueSerializers.length} value serializers"
   )
@@ -77,9 +77,9 @@ class Scala3EnumSerializer[T <: Product](
     if (index == NullMarkerByte) {
       null.asInstanceOf[T]
     } else {
-      // A deleted former value throws or reads as null through the evolution of its own serializer
+      // The serializer of a deleted former value throws, or gives null
       val instance = enumValueSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.fold(instance)(_.restore(instance))
+      evolution.fold(instance)(_.migrate(instance))
     }
   }
 
@@ -102,13 +102,13 @@ class Scala3EnumSerializerSnapshot[T <: Product](
 ) extends CompositeTypeSerializerSnapshot[T, Scala3EnumSerializer[T]]
     with EvolvingSnapshot[T, Scala3EnumSerializerSnapshot[T]] {
 
-  import Scala3EnumSerializerSnapshot.{CurrentVersion, NoClassnameVersion}
+  import Scala3EnumSerializerSnapshot.{CurrentFormatVersion, PreEvolutionFormatVersion}
 
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
-  private var evolution: Option[Evolution[T]] = None
-  private var enumValueNames: Array[String]   = Array.empty
+  private var evolution: Option[AdtEvolution[T]] = None
+  private var enumValueNames: Array[String]      = Array.empty
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
@@ -117,8 +117,9 @@ class Scala3EnumSerializerSnapshot[T <: Product](
     enumValueNames = s.enumValueNames
   }
 
-  // Restored from a snapshot written before 2.4.0, the serializer knows no enum name: it writes that format again
-  override def getCurrentOuterSnapshotVersion: Int = if (evolution.isDefined) CurrentVersion else NoClassnameVersion
+  // A former serializer of a snapshot written before release 2.4.0 has no class name: it writes this format again
+  override def getCurrentOuterSnapshotVersion: Int =
+    if (evolution.isDefined) CurrentFormatVersion else PreEvolutionFormatVersion
 
   override protected def getNestedSerializers(outerSerializer: Scala3EnumSerializer[T]): Array[TypeSerializer[_]] =
     outerSerializer.enumValueSerializers
@@ -134,43 +135,43 @@ class Scala3EnumSerializerSnapshot[T <: Product](
   }
 
   override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
-    evolution = Option.when(readOuterSnapshotVersion > NoClassnameVersion)(readEvolution[T](in, cl))
+    evolution = Option.when(readOuterSnapshotVersion > PreEvolutionFormatVersion)(readEvolution[T](in, cl))
     enumValueNames = StringArraySerializer.INSTANCE.deserialize(in)
   }
 
-  override private[serializer] def adtEvolution: Option[Evolution[T]] = evolution
+  override private[serializer] def adtEvolution: Option[AdtEvolution[T]] = evolution
 
   override private[serializer] def memberNames: Array[String] = enumValueNames
 
-  override protected def resolveUnevolvedCompatibility(
-      old: Scala3EnumSerializerSnapshot[T]
+  override protected def resolveStandardCompatibility(
+      former: Scala3EnumSerializerSnapshot[T]
   ): TypeSerializerSchemaCompatibility[T] =
-    // No evolution: delegates schema compatibility to parent standard resolution
-    super[CompositeTypeSerializerSnapshot].resolveSchemaCompatibility(old)
+    // No migration is necessary: use the standard resolution of the parent class
+    super[CompositeTypeSerializerSnapshot].resolveSchemaCompatibility(former)
 
-  /** Check every former enum value is either declared deleted, or still a value of the current enum, possibly under
-    * another name, and that the schema of these surviving values can itself be migrated.
+  /** Check that each former enum value is deleted, or is still a value of the current enum, possibly under another
+    * name. The former schema of each remaining value must also be compatible.
     */
-  override protected def checkMigration(old: Scala3EnumSerializerSnapshot[T]): Option[String] = {
+  override protected def checkMigration(former: Scala3EnumSerializerSnapshot[T]): Option[String] = {
     val currentValueSnapshots = getNestedSerializerSnapshots
-    val formerValueSnapshots  = old.getNestedSerializerSnapshots
+    val formerValueSnapshots  = former.getNestedSerializerSnapshots
 
     def checkValue(formerIndex: Int, formerName: String, currentName: String): Option[String] = {
       val currentIndex = enumValueNames.indexOf(currentName)
       if (currentIndex < 0) {
-        Some(
-          s"former value '$formerName' is no longer a value of $adtName. " + renamedOrDeletedHint(formerName, "renamed")
-        )
+        Some(s"Former enum value '$formerName' is not in $adtName. ${renamedOrDeletedHint(formerName)}")
       } else if (isIncompatible(currentValueSnapshots(currentIndex), formerValueSnapshots(formerIndex))) {
-        Some(s"former value '$formerName' can't be migrated to '$currentName'")
+        Some(s"Former enum value '$formerName' is incompatible with '$currentName'")
       } else None
     }
 
-    old.enumValueNames.indices.iterator
+    former.enumValueNames.indices.iterator
       .flatMap { i =>
-        val formerName = old.enumValueNames(i)
-        // A deleted former value throws or reads as null through the evolution of its own serializer
-        old.evolution.fold(Option(formerName))(_.currentEnumValueName(formerName)).flatMap(checkValue(i, formerName, _))
+        val formerName = former.enumValueNames(i)
+        // A deleted former value has no current name, so it needs no check
+        former.evolution
+          .fold(Option(formerName))(_.currentEnumValueName(formerName))
+          .flatMap(checkValue(i, formerName, _))
       }
       .nextOption()
   }
@@ -178,8 +179,8 @@ class Scala3EnumSerializerSnapshot[T <: Product](
 }
 
 object Scala3EnumSerializerSnapshot {
-  // Last version written before 2.4.0, recording no name of the enum
-  private val NoClassnameVersion = 1
+  // Last snapshot format version before release 2.4.0, it doesn't record the class name of the enum
+  private val PreEvolutionFormatVersion = 1
 
-  private val CurrentVersion = 2
+  private val CurrentFormatVersion = 2
 }

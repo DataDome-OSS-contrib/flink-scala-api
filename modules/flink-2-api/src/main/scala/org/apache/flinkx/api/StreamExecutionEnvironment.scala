@@ -465,7 +465,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     asScalaStream(javaEnv.fromSource(source, watermarkStrategy, sourceName, typeInfo))
   }
 
-  /** Check if evolutions are correctly declared at startup, to avoid failures at the first restore. */
+  /** Registers the declared evolutions before the job submission: a wrong declaration stops the submission. */
   private def checked[A](submit: => A): A = {
     Evolutions.check()
     submit

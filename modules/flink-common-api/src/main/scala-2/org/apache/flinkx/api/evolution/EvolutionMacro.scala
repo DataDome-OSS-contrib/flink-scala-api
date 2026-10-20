@@ -5,10 +5,10 @@ import org.apache.flinkx.api.evolution.{evolutionNotAllowed => notAllowed}
 import scala.reflect.macros.blackbox
 import scala.util.control.NonFatal
 
-/** Builds the [[Evolutions]] of an ADT from its annotations alone.
+/** Builds the [[Evolutions]] of an ADT from its annotations only.
   *
-  * Reads what the derivation reads, but emits only the registration code: no field typeclass is summoned, so it
-  * compiles wherever the ADT is visible, from its own companion in particular.
+  * It reads the annotations and generates the code to add these declarations in [[EvolutionBuilder]]. It compiles where
+  * the ADT is visible, in its companion for example.
   */
 private[api] object EvolutionMacro {
 
@@ -17,7 +17,7 @@ private[api] object EvolutionMacro {
 
     val tpe    = weakTypeOf[T]
     val symbol = tpe.typeSymbol
-    // A case object has no companion of its own to declare it: the sealed trait it belongs to declares it
+    // A case object has no companion: its sealed trait declares it
     val moduleChildren = descendantsOf(c)(symbol).filter(_.isModuleClass).distinct
     val builders       = tpe :: moduleChildren.map(_.asType.toType)
     c.Expr[Evolutions[T]](q"""
@@ -30,8 +30,8 @@ private[api] object EvolutionMacro {
     """)
   }
 
-  /** Check the companion of a versioned ADT extends [[Evolving]], wherever the type information of the ADT is derived,
-    * and hand its version over to the derivation.
+  /** Check that a versioned ADT has an evolving companion, where the type information of the ADT is derived. Give its
+    * version to the derivation.
     */
   def evolvableImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Evolvable[T]] = {
     import c.universe._
@@ -41,7 +41,7 @@ private[api] object EvolutionMacro {
     val version = versionOf(c)(symbol)
 
     rejectVersionedParameter(c)(symbol, primaryParameters(c)(tpe))
-    // A version 0 declares nothing to evolve from, and a case object is declared by the sealed trait it belongs to
+    // At version 0 an ADT has no evolution, and the sealed trait of a case object declares it
     if (version > 0 && !symbol.isModuleClass) {
       val companion = symbol.companion
       val evolving  = appliedType(typeOf[Evolving[_]].typeConstructor, tpe)
@@ -52,19 +52,17 @@ private[api] object EvolutionMacro {
     c.Expr[Evolvable[T]](q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe]($version)")
   }
 
-  /** The subtypes of the given sealed type, and the ones of the intermediate sealed traits among them, none for a class
-    * that is not sealed.
-    */
+  /** The subtypes of the given sealed type, through intermediate sealed traits. None for a class that is not sealed. */
   private def descendantsOf(c: blackbox.Context)(parent: c.Symbol): List[c.Symbol] =
     if (!parent.isClass) Nil
     else {
       val children = parent.asClass.knownDirectSubclasses.toList
-      // Forces the signature, without which a child of the same compilation unit may not be known yet
+      // Forces the signature: else a subtype of the same compilation unit can be unknown
       children.foreach(_.typeSignature)
       children ++ children.filter(child => child.isAbstract && child.asClass.isSealed).flatMap(descendantsOf(c))
     }
 
-  /** The parameters of the primary constructor of the given type, none for a trait. */
+  /** The parameters of the primary constructor of the given type, or none for a trait. */
   private def primaryParameters(c: blackbox.Context)(tpe: c.Type): List[c.Symbol] = {
     import c.universe._
     tpe.decls
@@ -73,7 +71,7 @@ private[api] object EvolutionMacro {
       .flatMap(_.paramLists.flatten)
   }
 
-  /** Reject a `@version` on a parameter: a version belongs to an ADT, and scalac does not enforce annotation targets.
+  /** Reject a `@version` on a parameter: only an ADT has a version, and the compiler does not check annotation targets.
     */
   private def rejectVersionedParameter(c: blackbox.Context)(symbol: c.Symbol, parameters: List[c.Symbol]): Unit =
     parameters
@@ -85,11 +83,11 @@ private[api] object EvolutionMacro {
   /** Whether the given symbol declares a schema version of its own. */
   private def isVersioned(c: blackbox.Context)(symbol: c.Symbol): Boolean =
     try {
-      symbol.info // Forces the symbol, without which its annotations are not loaded
+      symbol.info // Forces the symbol: else its annotations are not loaded
       symbol.annotations.exists(_.tree.tpe.typeSymbol == versionSymbol(c))
     } catch { case NonFatal(_) => false }
 
-  /** Schema version the `version` annotation of the given symbol declares, 0 when it declares none. Rejects a version
+  /** The schema version that the `@version` of the given symbol declares, or 0 without `@version`. Rejects a version
     * that is negative or not an integer literal.
     */
   private def versionOf(c: blackbox.Context)(symbol: c.Symbol): Int =
@@ -100,7 +98,7 @@ private[api] object EvolutionMacro {
       version
     }
 
-  /** The literal `Int` the given annotation passes to the named parameter, its first one, if it is a literal. */
+  /** The integer literal that the given annotation passes to the named parameter, or as its first argument. */
   private def intArgument(c: blackbox.Context)(annotation: c.universe.Annotation, name: String): Option[Int] = {
     import c.universe._
     annotation.tree match {
@@ -117,20 +115,20 @@ private[api] object EvolutionMacro {
   private def versionSymbol(c: blackbox.Context): c.Symbol =
     c.mirror.staticClass("org.apache.flinkx.api.evolution.version")
 
-  /** The code building the [[EvolutionBuilder]] of the given ADT type from its annotations, once they are validated. */
+  /** The code that builds the [[EvolutionBuilder]] of the given ADT from its annotations, after their validation. */
   private def builderOf(c: blackbox.Context)(tpe: c.Type): c.Tree = {
     import c.universe._
 
     val symbol = tpe.typeSymbol
-    // The subtypes of a sealed trait, and the ones of the intermediate sealed traits among them
+    // The subtypes of a sealed trait, also through intermediate sealed traits
     val descendants = descendantsOf(c)(symbol)
 
     val parameters = primaryParameters(c)(tpe)
 
-    // The fields of a case class, in declaration order: a sealed trait compares its subtypes in its snapshots
+    // The fields of a case class, in declaration order. The snapshots of a sealed trait compare its subtypes
     val fieldNames = if (descendants.isEmpty) parameters.map(_.name.decodedName.toString) else Nil
 
-    // Compared by symbol rather than by type: the generic annotations have no type tag to compare against
+    // Compare by symbol, not by type: the generic annotations have no type tag
     def annotationSymbol(name: String): Symbol = c.mirror.staticClass(s"org.apache.flinkx.api.evolution.$name")
     val Renamed                                = annotationSymbol("renamed")
     val DeletedClasses                         = annotationSymbol("deletedClasses")
@@ -146,24 +144,24 @@ private[api] object EvolutionMacro {
 
     def isVersioned(owner: Symbol): Boolean = EvolutionMacro.isVersioned(c)(owner)
 
-    // Compared by base class: the erroneous type of an annotation that doesn't compile conforms to any type
+    // Compare by base class: the error type of an annotation that does not compile conforms to all types
     def evolutionAnnotationsOf(owner: Symbol): List[Annotation] =
       owner.annotations.filter(_.tree.tpe.baseClasses.contains(typeOf[EvolutionAnnotation].typeSymbol))
 
-    // A subtype is also renamed or deleted in the versions of the sealed traits above it, which resolve its former name
+    // A rename or deletion of a subtype can count in the versions of its sealed traits, which record its name
     val classVersion = (version :: tpe.baseClasses.filter(isVersioned).map(ancestor => versionOf(c)(ancestor))).max
 
-    /** Reject a `since` that is not a literal, or outside the version range the annotation is declared in. */
+    /** Reject a `since` that is not an integer literal, or not from 1 to `lastVersion`. */
     def checkSince(annotation: Annotation, target: String, lastVersion: Int = version): Unit = {
       val since = intArgument(c)(annotation, "since")
         .getOrElse(c.abort(c.enclosingPosition, notLiteral(nameOf(annotation), "since", target)))
-      // An evolution outside the version range is never applied when it should
+      // An evolution with a `since` out of this range never applies to the correct data
       if (since < 1 || since > lastVersion) {
         c.abort(c.enclosingPosition, sinceNotAllowed(symbol.fullName, since, lastVersion))
       }
     }
 
-    /** Reject the evolution annotations that declare nothing where they are, before anything is generated. */
+    /** Reject the misplaced evolution annotations, before the macro generates code. */
     def validate(): Unit = {
       rejectVersionedParameter(c)(symbol, parameters)
       val isCoproduct = descendants.nonEmpty
@@ -197,7 +195,7 @@ private[api] object EvolutionMacro {
         }
       }
 
-      // A subtype declares its own evolutions, which its own declaration registers
+      // A versioned subtype has its own builder, which validates its own annotations
       descendants.filterNot(isVersioned).foreach { child =>
         evolutionAnnotationsOf(child).foreach { annotation =>
           if (!AnnotationRules.allowedOnUnversionedSubtype(nameOf(annotation), version, isEnum = false)) {
@@ -207,7 +205,7 @@ private[api] object EvolutionMacro {
       }
     }
 
-    // The annotation as an expression to splice, untyped: it was typed in the context of the class declaring it
+    // The annotation as an untyped expression to splice: the compiler typed it in the context of the annotated class
     def instanceOf(annotation: Annotation): Tree = c.untypecheck(annotation.tree)
 
     validate()

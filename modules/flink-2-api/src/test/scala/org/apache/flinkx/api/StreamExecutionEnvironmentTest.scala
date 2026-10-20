@@ -33,7 +33,7 @@ class StreamExecutionEnvironmentTest extends AnyFlatSpec with Matchers with Inte
     stream.dataType shouldBe typeInfo
   }
 
-  // A job declaring its evolutions wrongly would fail at its first restore: it must not start
+  // The submission check stops a job with a wrong declaration, before its first restore
   it should "fail to execute a job whose evolutions are declared wrongly" in {
     ConflictingScan.withFixture("sharedFormerName") {
       intercept[FormerClassConflictException](env.execute())

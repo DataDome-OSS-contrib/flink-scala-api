@@ -27,54 +27,44 @@ object ClassUtil {
     )
   }
 
-  /** Resolve a former class binary name to its fully qualified binary name based on the current class.
+  /** Resolves the former class name based on the given current class.
     *
-    * The binary name is the class name format where nested classes are separated by `$` instead of dots. See "Binary
-    * names" section in [[java.lang.ClassLoader]] for more details or JLS 13.1 for the complete definition.
-    *
-    * The given `formerBinaryName` can be a relative or an absolute path.
-    *
-    * Any path referencing a package (dot-separated in binary name format) is an absolute path. Start with a `/` to
-    * force absolute path (should be useful to reference unnamed package only).
-    *
-    * Other paths are resolved relatively to the parent of the given `currentClass` (i.e. next to `currentClass`). They
-    * can contain `$` to reference nested classes.
+    * A class name is a binary name: a `$` separates a nested class from its enclosing class (see "Binary names" in
+    * [[java.lang.ClassLoader]], or JLS 13.1). The former class name is:
+    *   - absolute if it contains a package (with dots), or if it starts with `/`, for a class of the unnamed package;
+    *   - relative otherwise: it is resolved next to `currentClass`, and it can contain `$` for a nested class.
     *
     * ==Examples==
-    *
     * {{{
     * package org.example
     *
     * object Parent {
-    *
     *   @version(1)
-    *   @renamed(since = 1, formerName = "OldName")
-    *   case object NewName
+    *   @renamed(since = 1, "FormerName")
+    *   case object CurrentName
     * }
     * }}}
-    *
-    * With previous snippet, `formerName` can be:
-    *   - `"OldName"` is resolved as relative to `org.example.Parent$OldName` former binary name
-    *   - `"OldSubParent$OldName"` (relative) → `org.example.Parent$OldSubParent$OldName`
-    *   - `"org.example.OldName"` (absolute) → `org.example.OldName`
-    *   - `"old.example.OldName"` (absolute) → `old.example.OldName`
+    *   - `"FormerName"` → `org.example.Parent$FormerName`
+    *   - `"FormerParent$FormerName"` → `org.example.Parent$FormerParent$FormerName`
+    *   - `"org.example.FormerName"` → `org.example.FormerName`
+    *   - `"/FormerName"` → `FormerName`, in the unnamed package
     *
     * @param formerBinaryName
-    *   The former binary name
+    *   The former class name that the annotation gives
     * @param currentClass
-    *   A class currently existing, used as context for resolving relative former binary name
+    *   The annotated class, from which a relative name is resolved
     * @return
-    *   The fully qualified internal former binary name (e.g., `org.example.Outer$Inner`)
+    *   The former class name, for example `org.example.Outer$Inner`
     */
   def resolveFormerClassName(formerBinaryName: String, currentClass: Class[_]): String = {
     if (formerBinaryName == null || formerBinaryName.isEmpty) {
-      throw new FlinkRuntimeException("Former binary name is mandatory")
+      throw new FlinkRuntimeException("The former class name is empty")
     }
     val parentClass = currentClass.getDeclaringClass
     val packageName = currentClass.getPackageName
     if (formerBinaryName.head == '/') formerBinaryName.substring(1)
     else if (formerBinaryName.contains('.')) formerBinaryName
-    else if (parentClass == null) { // The unnamed package qualifies no name
+    else if (parentClass == null) { // A class of the unnamed package has no package in its name
       if (packageName.isEmpty) formerBinaryName else s"$packageName.$formerBinaryName"
     } else {
       val parentClassName = parentClass.getName
@@ -82,7 +72,7 @@ object ClassUtil {
     }
   }
 
-  /** Load the class of the given name, or why it can't be loaded: not found, or found but failing to link or init. */
+  /** Loads the class with the given name, or gives why it does not load: not found, link or initialization error. */
   def loadClass(className: String, initialize: Boolean, cl: ClassLoader): Try[Class[_]] =
     try Success(Class.forName(className, initialize, cl))
     catch {
@@ -91,7 +81,7 @@ object ClassUtil {
       case exception: Exception => Failure(exception)
     }
 
-  /** Default value of the `index`-th field of the given case class, evaluated anew at each call.
+  /** Default value of the field at `index` in the given case class, which each call of the function evaluates again.
     *
     * @throws java.lang.NoSuchMethodException
     *   if the field declares no default value
@@ -104,10 +94,10 @@ object ClassUtil {
       catch { case e: InvocationTargetException => throw e.getCause }
   }
 
-  /** The binary name of the companion object of the given class name, an object being its own companion. */
+  /** Class name of the companion object of the given class name. An object is its own companion. */
   def companionName(className: String): String = if (className.endsWith("$")) className else s"$className$$"
 
-  /** The companion object of the given class, or the object itself when the class is the one of an object.
+  /** The companion object of the given class. For the class of an object, the object itself.
     * @throws java.lang.ClassNotFoundException
     *   if the class has no companion object
     */
@@ -121,7 +111,7 @@ object ClassUtil {
   /** Whether the given class is the class of a Scala object, which holds its instance in a static `MODULE$` field. */
   def isObjectClass(clazz: Class[_]): Boolean = moduleField(clazz).isDefined
 
-  /** The instance of the given Scala object class, initializing it, none for another class. */
+  /** The instance of the given Scala object class, which this call initializes. None for another class. */
   def moduleOf(clazz: Class[_]): Option[AnyRef] = moduleField(clazz).map(_.get(null))
 
   private def moduleField(clazz: Class[_]): Option[Field] =

@@ -2,111 +2,112 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
+import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions}
 import org.slf4j.{Logger, LoggerFactory}
 
-/** Resolves the schema compatibility of the snapshot of an ADT serializer, applying the declared evolutions.
+/** Snapshot of an ADT serializer, which resolves the schema compatibility with the declared evolutions.
   *
   * @tparam T
   *   The ADT
   * @tparam S
-  *   The concrete snapshot, to compare with a former snapshot of the same kind
+  *   The concrete snapshot class. It is compatible only with a former snapshot of the same class.
   */
 private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] extends TypeSerializerSnapshot[T] {
 
   @transient private lazy val log: Logger = LoggerFactory.getLogger(getClass)
 
-  /** The evolution of the data this snapshot describes, none for the snapshot of a sealed trait or an enum written
-    * before 2.4.0, which records no name.
+  /** The ADT evolution of the data that this snapshot describes. None for the snapshot of a sealed trait or an enum
+    * written before release 2.4.0, which records no class name.
     */
-  private[serializer] def adtEvolution: Option[Evolution[T]]
+  private[serializer] def adtEvolution: Option[AdtEvolution[T]]
 
-  /** Names of the members the serialized form refers to, in their order: the fields of a case class, the subtypes of a
-    * sealed trait or the values of an enum.
+  /** Names of the members that the serialized form refers to, in their order: the fields of a case class, the subtypes
+    * of a sealed trait or the values of an enum.
     */
   private[serializer] def memberNames: Array[String]
 
-  /** The current ADT class, for the messages. */
+  /** Name of the current ADT class, for the messages. */
   protected def adtName: String = adtEvolution.fold("the ADT")(_.currentClass.toString)
 
-  /** Schema version of the data this snapshot describes, as declared by `@version` when it was written. */
+  /** Schema version of the data that this snapshot describes: the `@version` of the ADT when the job wrote it. */
   private[serializer] def adtVersion: Int = adtEvolution.fold(0)(_.formerVersion)
 
-  /** Whether reading the former data described by `old` requires applying the declared evolutions: an evolution is
-    * declared, or a member is reordered, added, renamed or deleted, its members being compared by name.
+  /** Whether the former data that `former` describes needs a migration. This is the case if an evolution applies to
+    * this data, or if a member is reordered, added, renamed or deleted. The members are compared by name.
     */
-  protected def isEvolutionRequired(old: S): Boolean =
-    adtEvolution.isDefined && old.adtEvolution.exists(!_.isEmpty || !old.memberNames.sameElements(memberNames))
+  protected def isEvolutionRequired(former: S): Boolean =
+    adtEvolution.isDefined && former.adtEvolution.exists(!_.isEmpty || !former.memberNames.sameElements(memberNames))
 
-  /** Check the declared evolutions entirely describe the migration from the former schema of `old`.
+  /** Check that the declared evolutions describe the full migration from the schema of `former`.
     *
     * @return
-    *   `None` if the migration is possible, the reason it isn't otherwise
+    *   `None` if the migration is possible, otherwise the reason why it is not possible
     */
-  protected def checkMigration(old: S): Option[String]
+  protected def checkMigration(former: S): Option[String]
 
-  /** Resolves the compatibility of `old` when no evolution applies, with the standard resolution. */
-  protected def resolveUnevolvedCompatibility(old: S): TypeSerializerSchemaCompatibility[T]
+  /** Resolves the compatibility of `former` with the standard resolution, when no migration is necessary. */
+  protected def resolveStandardCompatibility(former: S): TypeSerializerSchemaCompatibility[T]
 
-  /** Resolves the compatibility of a former snapshot of the same kind, migrating it when evolutions are required. */
+  /** Resolves the compatibility of a former snapshot of the same class: compatible after migration if the declared
+    * evolutions migrate its data.
+    */
   override def resolveSchemaCompatibility(
-      oldSnapshot: TypeSerializerSnapshot[T]
-  ): TypeSerializerSchemaCompatibility[T] = oldSnapshot match {
-    case old if old.getClass eq getClass => resolveSameKindCompatibility(old.asInstanceOf[S])
-    case _                               => TypeSerializerSchemaCompatibility.incompatible()
+      former: TypeSerializerSnapshot[T]
+  ): TypeSerializerSchemaCompatibility[T] = former match {
+    case _ if former.getClass eq getClass => resolveSameKindCompatibility(former.asInstanceOf[S])
+    case _                                => TypeSerializerSchemaCompatibility.incompatible()
   }
 
-  private def resolveSameKindCompatibility(old: S): TypeSerializerSchemaCompatibility[T] =
-    if (isOtherClass(old)) TypeSerializerSchemaCompatibility.incompatible()
-    else if (isEvolutionRequired(old)) resolveEvolvingCompatibility(old)
-    else resolveUnevolvedCompatibility(old)
+  private def resolveSameKindCompatibility(former: S): TypeSerializerSchemaCompatibility[T] =
+    if (isOtherClass(former)) TypeSerializerSchemaCompatibility.incompatible()
+    else if (isEvolutionRequired(former)) resolveEvolvingCompatibility(former)
+    else resolveStandardCompatibility(former)
 
-  private def resolveEvolvingCompatibility(old: S): TypeSerializerSchemaCompatibility[T] = {
+  private def resolveEvolvingCompatibility(former: S): TypeSerializerSchemaCompatibility[T] = {
     val reason =
-      if (old.adtVersion > adtVersion) {
-        Some(
-          s"the former version ${old.adtVersion} is more recent than the current version $adtVersion." +
-            s" Restore from a former savepoint."
-        )
-      } else checkMigration(old)
+      if (former.adtVersion > adtVersion)
+        Some(s"Rollback to version $adtVersion detected. Restore a savepoint of version $adtVersion or lower")
+      else checkMigration(former)
     reason.fold(TypeSerializerSchemaCompatibility.compatibleAfterMigration[T]()) { reason =>
-      log.warn(s"Cannot migrate $adtName from version ${old.adtVersion}: $reason")
+      log.warn(s"Cannot migrate $adtName from version ${former.adtVersion}: $reason")
       TypeSerializerSchemaCompatibility.incompatible()
     }
   }
 
-  /** Whether the former snapshot is known to describe another ADT. */
-  private def isOtherClass(old: S): Boolean = (adtEvolution, old.adtEvolution) match {
-    case (Some(current), Some(former)) => !EvolvingSnapshot.isSameClass(current, former)
-    case _                             => false
+  /** Whether the former snapshot describes another ADT, which is unknown if a snapshot records no class name. */
+  private def isOtherClass(former: S): Boolean = (adtEvolution, former.adtEvolution) match {
+    case (Some(currentEvolution), Some(formerEvolution)) =>
+      !EvolvingSnapshot.isSameClass(currentEvolution, formerEvolution)
+    case _ => false
   }
 
 }
 
 private[serializer] object EvolvingSnapshot {
 
-  /** Writes the name and the version of the data the given evolution migrates, which [[readEvolution]] reads back. */
-  def writeEvolution(evolution: Evolution[_], out: DataOutputView): Unit = {
+  /** Writes the class name and the schema version of the data that the given ADT evolution migrates. */
+  def writeEvolution(evolution: AdtEvolution[_], out: DataOutputView): Unit = {
     out.writeUTF(evolution.formerClassName)
     out.writeInt(evolution.formerVersion)
   }
 
-  /** Reads the name and the version of the data a snapshot describes, and resolves the evolution migrating it.
+  /** Reads the class name and the schema version that [[writeEvolution]] wrote, and gets from the registry the ADT
+    * evolution that migrates this data.
     *
     * @param hasVersion
-    *   `false` for a snapshot written before 2.4.0, which records no version: its data is at version 0
+    *   `false` for a snapshot written before release 2.4.0. It records no schema version: its data is at version 0.
     */
-  def readEvolution[T](in: DataInputView, cl: ClassLoader, hasVersion: Boolean = true): Evolution[T] = {
+  def readEvolution[T](in: DataInputView, cl: ClassLoader, hasVersion: Boolean = true): AdtEvolution[T] = {
     val className = in.readUTF()
     Evolutions.get(className, if (hasVersion) in.readInt() else 0, cl)
   }
 
-  /** Whether two evolutions migrate their data to the same current class, possibly from different former names. */
-  def isSameClass(current: Evolution[_], former: Evolution[_]): Boolean =
+  /** Whether two ADT evolutions migrate their data to the same current class, possibly from two class names. */
+  def isSameClass(current: AdtEvolution[_], former: AdtEvolution[_]): Boolean =
     current.currentClass.getName == former.currentClass.getName
 
-  /** Resolves the compatibility of a former member against its current one, which recursively applies the evolutions
-    * declared on the member type.
+  /** Whether the former snapshot of a member is incompatible with its current snapshot. This resolution also applies
+    * the evolutions that the type of the member declares.
     */
   def isIncompatible(current: TypeSerializerSnapshot[_], former: TypeSerializerSnapshot[_]): Boolean =
     current

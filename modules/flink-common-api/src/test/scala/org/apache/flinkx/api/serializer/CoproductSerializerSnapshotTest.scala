@@ -55,13 +55,13 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
       implicitly[TypeSerializer[Bar]]
     )
 
-    // Write a v2 snapshot payload (as CoproductSerializerSnapshot#writeSnapshot did when v2 was current)
+    // Write a snapshot of format version 2, as CoproductSerializerSnapshot#writeSnapshot did before
     val out = new DataOutputSerializer(1024 * 1024)
     out.writeInt(subtypeClasses.length)
     subtypeClasses.foreach(c => out.writeUTF(c.getName))
     subtypeSerializers.foreach(s => TypeSerializerSnapshot.writeVersionedSnapshot(out, s.snapshotConfiguration()))
 
-    // Restore the v2 snapshot as Flink would: no-arg constructor then readSnapshot with the persisted version
+    // Restore the snapshot of format version 2 as Flink does: no-arg constructor, then readSnapshot with its version
     val oldSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT]()
     oldSnapshot.readSnapshot(2, new DataInputDeserializer(out.getSharedBuffer), getClass.getClassLoader)
 
@@ -81,9 +81,9 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     compatibility.isIncompatible shouldBe false
   }
 
-  // A state restored but not accessed before the next checkpoint is snapshotted again by its restored serializer, which
-  // knows no trait name: it writes the format it was read from
-  it should "snapshot again a serializer restored from a v2 snapshot" in {
+  // A state that the job does not access before the next checkpoint keeps its restored serializer: this serializer has
+  // no sealed trait name, so its snapshot uses a format without this name
+  it should "snapshot again a serializer restored from a snapshot of format version 2" in {
     val subtypeClasses: Array[Class[?]]              = Array(classOf[Foo], classOf[Bar])
     val subtypeSerializers: Array[TypeSerializer[?]] = Array(
       implicitly[TypeSerializer[Foo]],

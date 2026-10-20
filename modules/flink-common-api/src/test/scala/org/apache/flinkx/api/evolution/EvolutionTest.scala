@@ -12,16 +12,15 @@ import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerialize
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** Restores the data a former source code wrote: the serializer restored from its snapshot reads it, applying the
-  * declared evolutions. The former code writing each snapshot file is kept, commented, next to the current one, with
-  * the test generating the file.
+/** Restores the former data of the snapshot files: the restored serializer reads them and applies the evolutions. Each
+  * file has, in comments, the test that wrote it and its former source code, next to the current source code.
   */
 class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import org.apache.flinkx.api.evolution.EvolutionTest._
 
-  /** Reads the data of the given snapshot file with the serializer restored from its snapshot, once shipped through
-    * Java serialization, as Flink may ship a serializer.
+  /** Reads the former data of the given snapshot file with the restored serializer, after a Java serialization of the
+    * restored serializer, as Flink can do.
     */
   private def deserializeShippedFromFile[T](fileName: String): T = {
     val input    = new DataInputViewStreamWrapper(snapshotInput(fileName))
@@ -30,7 +29,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     InstantiationUtil.clone(restored, getClass.getClassLoader).deserialize(input)
   }
 
-  /** Reads the record of the Click v0 snapshot file, migrating it with the evolutions `T` declares from version 0. */
+  /** Reads the record of Click-v0.snapshot with the ADT evolution of `T` for the data written at version 0. */
   private def readClickV0As[T <: Product](clazz: Class[T]): T = {
     val input   = new DataInputViewStreamWrapper(snapshotInput("Click-v0"))
     val clickV0 =
@@ -39,7 +38,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     clickV0As(clickV0, clazz).deserialize(input)
   }
 
-  /* Test to serialize Click v0 code into Click-v0.snapshot file, uncomment both test and code to regenerate
+  /* Uncomment this test and Click at version 0 to write Click-v0.snapshot again
   it should "serialize Click v0" in {
     val event: Click = Click("a", List(ClickEvent("2021-01-01", 1), ClickEvent("2022-02-02", 2)), 5, "id1", "b")
     serializeToFile("Click-v0", event)
@@ -50,7 +49,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     testDeserializeFromFile("Click-v0", ClickV3)
   }
 
-  /* Test to serialize Event v0 code into Event-v0.snapshot file, uncomment both test and code to regenerate
+  /* Uncomment this test and Event at version 0 to write Event-v0.snapshot again
   it should "serialize Event v0" in {
     val event: Event = View(123456789)
     serializeToFile("Event-v0", event)
@@ -61,13 +60,13 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     testDeserializeFromFile[Action]("Event-v0", Web(123456790))
   }
 
-  // A serializer must survive Java serialization, the one restored from a savepoint too, with the mappers it applies
+  // A restored serializer and its mappers must survive a Java serialization, as a current serializer does
   it should "apply @transformed and @postEvolution with a restored serializer shipped through Java serialization" in {
     deserializeShippedFromFile[Click]("Click-v0") shouldBe ClickV3
     deserializeShippedFromFile[Action]("Event-v0") shouldBe Web(123456790)
   }
 
-  // Each former version replays only the deletions that came after it, one of them deleting a field renamed in between
+  // Each plan applies only the deletions above its former version, one of them on a renamed field
   it should "deserialize Dog v0 to Dog v2" in {
     val (_, restored) = deserializeFormerFields(
       classOf[Dog],
@@ -88,7 +87,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     restored shouldBe Dog("Beethoven")
   }
 
-  /* Test to serialize Animal v0 code into Animal-v0.snapshot file, uncomment both test and code to regenerate
+  /* Uncomment this test and Animal at version 0 to write Animal-v0.snapshot again
   it should "serialize Animal v0" in {
     val animal: Animal = Horse("Spirit")
     serializeToFile("Animal-v0", animal)
@@ -99,22 +98,22 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     testDeserializeFromFile[Animal]("Animal-v0", null)
   }
 
-  // Horse was deleted in version 1, then a class took its name again in version 2
-  it should "deserialize a subtype bearing the name of a subtype deleted before" in {
+  // Version 1 deletes Horse, and a class of version 2 reuses its name
+  it should "deserialize a subtype that reuses the name of a subtype deleted at a lower version" in {
     roundtrip[Animal](createSerializer[Animal], Horse(4))
   }
 
-  // The default of @deletedClasses: deleting a class still in use loses data, unless the restore is told to
+  // By default, a deleted instance throws: the migration discards data only with throwOnInstance = false
   it should "throw when deserializing an instance of a deleted subtype" in {
     val tapeName         = classOf[Shelf].getName.replace("Shelf", "Tape")
     val formerSerializer = new CoproductSerializer[AnyRef](
-      evolution = Some(evolutionOf(classOf[Shelf]).asInstanceOf[Evolution[AnyRef]]),
+      evolution = Some(evolutionOf(classOf[Shelf]).asInstanceOf[AdtEvolution[AnyRef]]),
       subtypeClasses = Array[Class[_]](classOf[Book], classOf[FormerTape]),
-      subtypeFqns = Array(classOf[Book].getName, tapeName),
+      subtypeNames = Array(classOf[Book].getName, tapeName),
       subtypeSerializers = Array[TypeSerializer[_]](
         createSerializer[Book],
         new CaseClassSerializer[FormerTape](
-          new Evolution(tapeName, 0, classOf[FormerTape]),
+          new AdtEvolution(tapeName, 0, classOf[FormerTape]),
           isCaseClassImmutable = true,
           fieldNames = Array("title"),
           paramSerializers = Array(StringSerializer.INSTANCE)
@@ -126,11 +125,11 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception =
       intercept[DeletedInstanceException](deserializeFormerForm[Shelf](formerSerializer, FormerTape("Up")))
     exception.getMessage should startWith(
-      s"Encountered an instance of deleted '$tapeName' class during deserialization"
+      s"The former data contains an instance of '$tapeName', a deleted class or enum value."
     )
   }
 
-  // @postEvolution migrates the data of a former version only: the data of the current version is read as it was written
+  // The post-evolution mapper applies only to former data: data written at the current version reads as is
   it should "not apply @postEvolution to a case class written at the current version" in {
     roundtrip(createSerializer[Click], Click("id", Nil, 7, "5"))
   }
@@ -139,7 +138,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     roundtrip(createSerializer[Action], Cart(2))
   }
 
-  // A version raised for a @postEvolution alone changes nothing in the schema, yet the state must still be migrated
+  // A higher version with only @postEvolution does not change the schema, but the state must still migrate
   it should "apply @postEvolution to a case class written at a former version with an unchanged schema" in {
     val (snapshot, restored) = deserializeFormerFields(classOf[Ticket], 0, ("id", StringSerializer.INSTANCE, "t"))
 
@@ -149,7 +148,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
   }
 
-  // Whichever serializer Flink reads with, the restored or the current one, an evolution never applies to such snapshot
+  // The evolutions never apply to a snapshot without field names, with the restored or the current serializer
   it should "not apply @postEvolution to a case class snapshot recording no field name" in {
     val formerSerializer = new CaseClassSerializer[Ticket](
       evolution = evolutionOf(classOf[Ticket]),
@@ -162,7 +161,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     deserializeFormerForm[Ticket](formerSerializer, Ticket("t")) shouldBe Ticket("t")
   }
 
-  // A default value is evaluated for each restored instance, as the constructor does, not once for all of them
+  // The migration evaluates the default value for each instance, as the constructor does, not one time for all
   it should "evaluate the default value of an added field for each restored instance" in {
     val (_, first)  = deserializeFormerFields(classOf[Stamped], 0, ("id", StringSerializer.INSTANCE, "a"))
     val (_, second) = deserializeFormerFields(classOf[Stamped], 0, ("id", StringSerializer.INSTANCE, "b"))
@@ -172,23 +171,23 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "throw when deserializing Click v0 with a wrong added field" in {
     val exception = intercept[MigrationException](readClickV0As(classOf[WrongAddedField]))
-    exception.getMessage shouldBe s"Cannot migrate ${classOf[WrongAddedField]} from version 0: Cannot add 'a': field" +
-      " already exists. Existing fields: [\"a\"]"
+    exception.getMessage shouldBe s"Cannot migrate ${classOf[WrongAddedField]} from version 0: Cannot add field 'a':" +
+      " it is already one of [\"a\"]"
   }
 
   it should "throw when deserializing Click v0 with a wrong renamed field" in {
     val exception = intercept[MigrationException](readClickV0As(classOf[WrongRenamedField]))
-    exception.getMessage shouldBe s"Cannot migrate ${classOf[WrongRenamedField]} from version 0: Cannot rename" +
-      " 'wrongFieldName': field not found. Available fields: [\"a\"]"
+    exception.getMessage shouldBe s"Cannot migrate ${classOf[WrongRenamedField]} from version 0: Cannot rename field" +
+      " 'wrongFieldName': it is not one of [\"a\"]"
   }
 
   it should "throw when deserializing Click v0 with a wrong transformed field" in {
     val exception = intercept[MigrationException](readClickV0As(classOf[WrongTransformedField]))
     exception.getMessage shouldBe s"Cannot migrate ${classOf[WrongTransformedField]} from version 0: Cannot transform" +
-      " 'wrongFieldName': field not found. Available fields: [\"a\"]"
+      " field 'wrongFieldName': it is not one of [\"a\"]"
   }
 
-  // Restoring the oldest versions replays every deletion: a field renamed then deleted is no longer found
+  // The plan of the lowest version applies all the deletions: a field renamed, then deleted, is not found
   it should "ignore a deleted field not found when deserializing Click v0" in {
     readClickV0As(classOf[WrongDeletedField]) shouldBe WrongDeletedField("a")
   }
@@ -197,9 +196,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
 object EvolutionTest {
 
-  /** The serializer reading the data of Click v0 its restored serializer reads, migrating it with the evolutions `T`
-    * declares from version 0.
-    */
+  /** A serializer that reads the former data of Click at version 0, with the ADT evolution of `T` for version 0. */
   def clickV0As[T <: Product](clickV0: TypeSerializer[Click], clazz: Class[T]): CaseClassSerializer[T] = {
     val serializer = clickV0.asInstanceOf[CaseClassSerializer[Click]]
     new CaseClassSerializer[T](
@@ -212,7 +209,7 @@ object EvolutionTest {
 
   // API demonstration
 
-  /* click-v0
+  /* Click at version 0, which wrote Click-v0.snapshot
   case class Click(
       a: String,
       inFileClicks: List[ClickEvent],
@@ -247,14 +244,14 @@ object EvolutionTest {
   )
   object ClickAction extends Evolving[ClickAction] { val evolutions = Evolutions[ClickAction] }
 
-  /** Click v0 of the snapshot file, migrated to Click v3. */
+  /** The Click of Click-v0.snapshot, migrated to version 3. */
   val ClickV3: Click = Click("id1", List(ClickAction("1", "2021-01-01"), ClickAction("2", "2022-02-02")), 25, "5")
 
   def mapIntToString(a: Int): String                 = a.toString
   def updateClick(version: Int, click: Click): Click =
     click.copy(fieldInFile = click.fieldNotInFile.toInt * 5 + version)
 
-  /* event-v0
+  /* Event at version 0, which wrote Event-v0.snapshot
   sealed trait Event
   case class View(ts: Long) extends Event
   case class Purchase(price: Double) extends Event
@@ -322,7 +319,7 @@ object EvolutionTest {
     val evolutions = Evolutions[UnrelatedCurrentCaseClass]
   }
 
-  // Both traits are sealed in this file, so a single case class can be a member of each of them
+  // This file contains both sealed traits, so one case class can be a subtype of the two
   @version(1)
   sealed trait SharedSubtypeTrait
   object SharedSubtypeTrait extends Evolving[SharedSubtypeTrait] {
@@ -341,7 +338,7 @@ object EvolutionTest {
   case class RenamedCaseClass(a: String)
   object RenamedCaseClass extends Evolving[RenamedCaseClass] { val evolutions = Evolutions[RenamedCaseClass] }
 
-  /* RenamedCaseClass v0
+  /* RenamedCaseClass at version 0
   case class FormerRenamedCaseClass(a: String, removed: String)
    */
 
@@ -358,11 +355,11 @@ object EvolutionTest {
   }
   case class RemainingSubtype(a: String) extends SubtypeRemovedWithoutAnnotation
   case class RemovedSubtype(b: Int)      extends SubtypeRemovedWithoutAnnotation
-  /* Dog v0
+  /* Dog at version 0
   case class Dog(name: String, kind: String)
    */
 
-  /* Dog v1
+  /* Dog at version 1
   @version(1)
   case class Dog(
     name: String,
@@ -376,13 +373,13 @@ object EvolutionTest {
   case class Dog(name: String)
   object Dog extends Evolving[Dog] { val evolutions = Evolutions[Dog] }
 
-  /* Animal-v0
+  /* Animal at version 0, which wrote Animal-v0.snapshot
   sealed trait Animal
   case class Horse(name: String) extends Animal
   case class Lion(name: String) extends Animal
    */
 
-  /* Animal v1
+  /* Animal at version 1
   @version(1)
   @deletedClasses(since = 1, "Horse")
   sealed trait Animal
@@ -398,7 +395,7 @@ object EvolutionTest {
   object Horse                  extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
   case class Lion(name: String) extends Animal
 
-  /* Shelf v0
+  /* Shelf at version 0
   sealed trait Shelf
   case class Book(title: String) extends Shelf
   case class Tape(title: String) extends Shelf
@@ -410,7 +407,7 @@ object EvolutionTest {
   object Shelf                   extends Evolving[Shelf] { val evolutions = Evolutions[Shelf] }
   case class Book(title: String) extends Shelf
 
-  // Stands for Tape in the data of Shelf v0, under a name of its own: no class may bear the name of a deleted class
+  // Takes the place of the deleted Tape in the former data, with another name to avoid a name reuse
   case class FormerTape(title: String)
 
 }

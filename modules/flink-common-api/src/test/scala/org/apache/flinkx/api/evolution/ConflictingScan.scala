@@ -1,15 +1,15 @@
 package org.apache.flinkx.api.evolution
 
-/** Hands the scan of the jars the declarations of the fixtures conflicting on purpose, only while switched on. */
+/** Gives the declarations of the fixtures in conflict to the companion scan, only when a test switches them on. */
 object ConflictingScan {
 
   @volatile private var switchedOn: Option[String] = None
 
-  /** The evolutions the companion of a conflicting fixture declares, nothing until the given fixture is switched on. */
+  /** The evolutions of a fixture in conflict, or no evolution when the test does not switch this fixture on. */
   def evolutionsOf[T](clazz: Class[T], fixture: String, declaring: => Evolutions[T]): Evolutions[T] =
     if (switchedOn.contains(fixture)) declaring else new Evolutions(clazz, () => Nil)
 
-  /** Runs `body` with a registry declaring the given conflicting fixture, then empties it again. */
+  /** Runs `body` with a registry that contains the given fixture in conflict, then empties the registry. */
   def withFixture[A](fixture: String)(body: => A): A = {
     Evolutions.reset()
     switchedOn = Some(fixture)

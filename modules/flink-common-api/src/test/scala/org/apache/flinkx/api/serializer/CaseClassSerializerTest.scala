@@ -10,8 +10,6 @@ import org.scalatest.matchers.should.Matchers
 
 class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
 
-  // A serializer restored from a snapshot written before 2.4.0 legitimately holds no field name, but any other count
-  // than one name per field serializer describes no readable form
   "the constructor" should "reject a field name count other than one per field serializer" in {
     val exception = intercept[IllegalArgumentException] {
       new CaseClassSerializer[Immutable](

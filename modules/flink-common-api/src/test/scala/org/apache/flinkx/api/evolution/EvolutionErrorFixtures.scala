@@ -2,13 +2,13 @@ package org.apache.flinkx.api.evolution
 
 import EvolutionTest._
 
-/** ADTs whose evolutions are declared wrongly on purpose, to check what the feature reports. */
+/** ADTs with wrong evolution declarations on purpose, to check the messages of the feature. */
 object EvolutionErrorFixtures {
 
   @version(-1)
   case class WrongCurrentVersion()
 
-  // Not a literal, so the macros declaring the evolutions can't read it
+  // Not a literal: the macros cannot read its value
   val NotLiteral: Int = 1
 
   @version(NotLiteral)
@@ -44,11 +44,11 @@ object EvolutionErrorFixtures {
   @postEvolution(updateAction)
   case class WrongPostEvolutionTwiceOnCaseClass()
 
-  /** Versioned, and its companion declares nothing. */
+  /** A versioned ADT without an evolving companion. */
   @version(1)
   case class NeverDeclared(a: String)
 
-  /** Derives its type information while initializing, before the strict val declaring its evolutions. */
+  /** Its companion derives its type information during its initialization, before the strict val of its evolutions. */
   @version(1)
   @renamed(since = 1, "FormerDerivedBeforeDeclared")
   case class DerivedBeforeDeclared(a: String)

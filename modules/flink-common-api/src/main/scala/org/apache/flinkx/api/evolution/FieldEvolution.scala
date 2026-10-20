@@ -1,34 +1,33 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.Internal
-import org.apache.flinkx.api.evolution.FieldEvolution.{EvolvedField, Former, Phase}
+import org.apache.flinkx.api.evolution.FieldEvolution.{Former, MigratedField, Phase}
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.collection.mutable
 
-/** A single field-level evolution declared between two versions, replayed on the former fields to tell how they evolve.
+/** One evolution of a field, declared in version `since`. [[FieldEvolution.plan]] applies it to the former field names.
   *
-  * Evolutions execute in sorted order by `since` then `phase`. The phases form a canonical pipeline within a version:
-  * Delete → Rename → Transform → Add. This ordering enables compositions such as:
-  *   - rename a field, then transform its value
-  *   - delete a field (its serialized state is dropped), then re-add a field with the same name from a default value
+  * The field evolutions apply in the order of `since`, then of `phase`: Delete, Rename, Transform, Add. For example,
+  * this order accepts:
+  *   - the rename of a field, then the transform of its value
+  *   - the deletion of a field, then the add of a field with the same name and a default value
   *
   * @param since
-  *   Version in which the evolution was introduced
+  *   The first schema version that contains the evolution
   * @param phase
-  *   Operation phase, defining sort order within a single version
+  *   The rank of the evolution among the field evolutions with the same `since`
   */
 @Internal
 abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] with Serializable {
 
-  /** Mutate the given field-name to evolved-field map in place to apply this evolution.
-    *
-    * Initially, the fields are only the [[Former]] ones, including the fields that have been deleted since.
+  /** Apply this evolution to the given migrated fields, by field name. At the start of the plan, they are the
+    * [[Former]] fields, the deleted fields included.
     *
     * @return
-    *   The failure the evolution hits, if any
+    *   Why the evolution fails, if it fails
     */
-  def apply(fields: mutable.Map[String, EvolvedField]): Option[String]
+  def apply(fields: mutable.Map[String, MigratedField]): Option[String]
 
   override def compare(that: FieldEvolution): Int = {
     val sinceComparison = since.compare(that.since)
@@ -40,47 +39,48 @@ abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[
 
 object FieldEvolution {
 
-  /** Replay the given sorted field evolutions on the former field names, once for all the records written with them.
+  /** Plan the migration of the former fields: apply the sorted field evolutions to their names. The plan is valid for
+    * all the records.
     *
     * @return
-    *   The first failure an evolution hits, or how every field left evolves, by field name
+    *   The first failure of an evolution, or the migrated fields that remain, by field name
     */
-  private[evolution] def replay(
+  private[evolution] def plan(
       fieldEvolutions: Array[FieldEvolution],
       formerFieldNames: Array[String]
-  ): Either[String, Map[String, EvolvedField]] = {
+  ): Either[String, Map[String, MigratedField]] = {
     val fields = mutable.Map.from(formerFieldNames.zipWithIndex.map { case (name, i) =>
-      name -> (Former(i): EvolvedField)
+      name -> (Former(i): MigratedField)
     })
-    // The iterator is lazy, so it stops on the first failing evolution
+    // The lazy iterator stops at the first evolution that fails
     fieldEvolutions.iterator.flatMap(_.apply(fields)).nextOption().toLeft(fields.toMap)
   }
 
-  /** A current field evolved from the former fields, applied to every record read. */
+  /** One current field of the migration plan: how the restored serializer gets its value from the former values. */
   @Internal
-  sealed trait EvolvedField {
+  sealed trait MigratedField {
 
-    /** Evolve the values of the former fields to their current forms. */
-    def evolve(formerValues: Array[AnyRef]): AnyRef
+    /** Migrate the values of the former fields to the current value of this field. */
+    def migrate(formerValues: Array[AnyRef]): AnyRef
 
   }
 
-  /** A former field, unchanged, reordered or renamed: the only one whose former serializer still reads it. */
-  final case class Former(index: Int) extends EvolvedField {
-    override def evolve(formerValues: Array[AnyRef]): AnyRef = formerValues(index)
+  /** A former field, unchanged, reordered or renamed: its current value is its former value. */
+  final case class Former(index: Int) extends MigratedField {
+    override def migrate(formerValues: Array[AnyRef]): AnyRef = formerValues(index)
   }
 
-  /** A field converted by a mapper, from however it evolved before. */
-  final case class Transformed(field: EvolvedField, mapper: AnyRef => AnyRef) extends EvolvedField {
-    override def evolve(formerValues: Array[AnyRef]): AnyRef = mapper(field.evolve(formerValues))
+  /** A field that a field mapper converts, from the result of the evolutions that apply before it. */
+  final case class Transformed(field: MigratedField, mapper: AnyRef => AnyRef) extends MigratedField {
+    override def migrate(formerValues: Array[AnyRef]): AnyRef = mapper(field.migrate(formerValues))
   }
 
-  /** An added field, given its default value evaluated anew for each record. */
-  final case class Added(default: () => AnyRef) extends EvolvedField {
-    override def evolve(formerValues: Array[AnyRef]): AnyRef = default()
+  /** An added field: its value is its default value, evaluated again for each record. */
+  final case class Added(default: () => AnyRef) extends MigratedField {
+    override def migrate(formerValues: Array[AnyRef]): AnyRef = default()
   }
 
-  /** Operation phase used to order evolutions within a single version (lower rank applied first). */
+  /** Rank of a field evolution among the field evolutions with the same `since`. A lower rank applies first. */
   @Internal
   sealed abstract class Phase(val rank: Int) extends Serializable
   object Phase {
@@ -90,32 +90,26 @@ object FieldEvolution {
     case object Add       extends Phase(3)
   }
 
-  /** Why `operation` can't find the former field `name` among the given fields. */
-  private def notFound(operation: String, name: String, fields: Iterable[String]): Option[String] =
-    Some(s"Cannot $operation '$name': field not found. Available fields: ${quoted(fields)}")
-
-  private def quoted(names: Iterable[String]): String = names.mkString("[\"", "\",\"", "\"]")
-
-  /** Remove a field from the field map. Backs the `@deletedFields` annotation.
+  /** Delete the field `formerName`. Declared by `@deletedFields`.
     *
-    * A field already absent is ignored: restoring the oldest versions replays every deletion, so a field renamed then
-    * deleted is legitimately named by a deletion that no longer finds it.
+    * This evolution ignores a field that is not there. The plan of a low version applies all the deletions: a field
+    * renamed, then deleted, has a deletion that does not find it.
     */
   private[evolution] final case class Delete(override val since: Int, formerName: String)
       extends FieldEvolution(since, Phase.Delete) {
 
-    override def apply(fields: mutable.Map[String, EvolvedField]): Option[String] = {
+    override def apply(fields: mutable.Map[String, MigratedField]): Option[String] = {
       fields.remove(formerName)
       None
     }
 
   }
 
-  /** Move the entry under `formerName` to the new key `currentName`. Backs the `@renamed` annotation on a field. */
+  /** Rename the field `formerName` to `currentName`. Declared by `@renamed` on a field. */
   private[evolution] final case class Rename(override val since: Int, formerName: String, currentName: String)
       extends FieldEvolution(since, Phase.Rename) {
 
-    override def apply(fields: mutable.Map[String, EvolvedField]): Option[String] =
+    override def apply(fields: mutable.Map[String, MigratedField]): Option[String] =
       fields.remove(formerName) match {
         case Some(field) => fields.put(currentName, field); None
         case _           => notFound("rename", formerName, fields.keys)
@@ -123,11 +117,11 @@ object FieldEvolution {
 
   }
 
-  /** Replace the value at `name` with `mapper(value)`. Backs the `@transformed` annotation. */
+  /** Convert the value of the field `name` with the field mapper `mapper`. Declared by `@transformed`. */
   private[evolution] final case class Transform(override val since: Int, name: String, mapper: AnyRef => AnyRef)
       extends FieldEvolution(since, Phase.Transform) {
 
-    override def apply(fields: mutable.Map[String, EvolvedField]): Option[String] =
+    override def apply(fields: mutable.Map[String, MigratedField]): Option[String] =
       fields.get(name) match {
         case Some(field) => fields.update(name, Transformed(field, mapper)); None
         case _           => notFound("transform", name, fields.keys)
@@ -135,7 +129,7 @@ object FieldEvolution {
 
   }
 
-  /** Insert field `name` with the case class default value, evaluated for each record. Backs the `@added` annotation.
+  /** Add the field `name` with its default value, evaluated for each record. Declared by `@added`.
     *
     * @param fieldIndex
     *   Position of the field in the constructor of `currentClass`, which declares its default value
@@ -149,14 +143,18 @@ object FieldEvolution {
 
     @transient private lazy val defaultValue: () => AnyRef = ClassUtil.defaultFieldValue(currentClass, fieldIndex)
 
-    override def apply(fields: mutable.Map[String, EvolvedField]): Option[String] =
+    override def apply(fields: mutable.Map[String, MigratedField]): Option[String] =
       if (fields.contains(name)) {
-        Some(s"Cannot add '$name': field already exists. Existing fields: ${quoted(fields.keys)}")
+        Some(s"Cannot add field '$name': it is already one of ${fields.keys.mkString("[\"", "\",\"", "\"]")}")
       } else {
         fields.put(name, Added(() => defaultValue()))
         None
       }
 
   }
+
+  /** Why `operation` cannot find the field `name` among the given fields. */
+  private def notFound(operation: String, name: String, fields: Iterable[String]): Option[String] =
+    Some(s"Cannot $operation field '$name': it is not one of ${fields.mkString("[\"", "\",\"", "\"]")}")
 
 }

@@ -1,0 +1,142 @@
+# Schema Evolution Ubiquitous Language
+
+This glossary defines the words of the schema evolution feature. Use each word only with the meaning that this
+glossary gives. This rule applies to the code, the scaladoc, the messages, the tests and the documentation.
+
+The definitions follow the writing rules of ASD-STE100 (Simplified Technical English). The terms are technical names of
+this project. Nobody checked them word by word against the STE dictionary.
+
+The "Code" column gives the identifiers that the code uses for the term.
+
+## Writing rules
+
+- Use one term for one meaning, and one meaning for one term. Do not use the words of the "Do not use" columns.
+- Use "former" and "current" only for the two sides of a restore.
+- To compare two versions, use "lower" and "higher". Do not use time words for versions or for source code: old, new,
+  previous, prior, earlier, later, recent, outdated.
+- A class name refers to a class. A class has a name. Do not write that a class bears a name, or that a name stands for
+  a class.
+- Use the verb "migrate" for the conversion of data. Use the verb "evolve" only for a schema: "the schema evolves".
+- Write descriptive sentences of 25 words or fewer. Write instructions, for example the hint of a message, of 20 words
+  or fewer.
+- Use the active voice and the simple present tense. Write one topic in each sentence.
+- In a message, write the problem first, then the instruction that solves it.
+- Write the annotations in messages and documentation as in code: `@added(since = <version>)`.
+- Write "class loader" in two words.
+- In test names and resource file names only, "Click v0" means schema version 0 of `Click`.
+
+## 1. Former and current
+
+| Term    | Definition                                                                                                                                                                     | Code                                                                                   | Do not use                                        |
+|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|---------------------------------------------------|
+| Former  | Qualifies an item as the savepoint records it: version, class name, field, subtype, enum value, data or snapshot. Usually, it is the item of the job that wrote the savepoint. | `formerVersion`, `formerClassName`, `formerFieldNames`, `former` (the former snapshot) | old, previous, prior, source, restored (snapshot) |
+| Current | Qualifies an item as the source code of the job that restores the savepoint declares it.                                                                                       | `currentClass`, `currentVersion`, `currentFieldNames`                                  | new, latest, target, actual                       |
+
+"Former" refers to the savepoint, not to the time of a write. A state backend such as RocksDB serializes a record when
+the job writes it, not when the job takes the savepoint.
+
+A current serializer writes its current class name and its current version in its snapshot. The next restore reads
+them as the former class name and the former version.
+
+## 2. Flink state
+
+| Term                          | Definition                                                                                                                                                                                          | Code                                                 | Do not use                                                       |
+|-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------|------------------------------------------------------------------|
+| Savepoint                     | The state of a job that Flink writes and that a job restores. Flink guarantees schema evolution only for a savepoint in canonical format. A retained checkpoint also works, without this guarantee. | —                                                    | checkpoint (except for the Flink checkpoint mechanism), snapshot |
+| Restore                       | To start a job from a savepoint. During the restore, Flink resolves the schema compatibility of each state, then migrates the state if necessary.                                                   | `restoreSerializer()` (Flink API)                    | "restore" for one instance: use "migrate"                        |
+| Serializer snapshot, snapshot | The description of a serializer that Flink writes in the savepoint (`TypeSerializerSnapshot`). Use "snapshot" only with this meaning.                                                               | `*SerializerSnapshot`, `EvolvingSnapshot`            | serializer configuration                                         |
+| Former snapshot               | The serializer snapshot that the savepoint records. Flink gives it to the current snapshot to resolve the schema compatibility.                                                                     | `former`                                             | old snapshot, restored snapshot                                  |
+| Current snapshot              | The serializer snapshot of the current serializer.                                                                                                                                                  | `this` in `resolveSchemaCompatibility`               | new snapshot                                                     |
+| ADT serializer                | The serializer of an ADT: case class, case object, sealed trait, Scala 3 enum or enum value.                                                                                                        | `CaseClassSerializer`, `CoproductSerializer`, …      |                                                                  |
+| Restored serializer           | The serializer that the former snapshot creates. It reads the former data and applies the migration. Its nested serializers are also restored serializers.                                          | `restoreSerializer()`                                | former serializer, prior serializer, old serializer              |
+| Current serializer            | The serializer that the derivation of the current source code creates. It writes the current schema. Its nested serializers are also current serializers.                                           | `TypeInformationDerivation`                          | new serializer                                                   |
+| Snapshot format version       | The version of the binary format of a serializer snapshot. It is not a schema version.                                                                                                              | `getCurrentVersion`, `CurrentVersion`, `readVersion` | version (alone), "v2 snapshot"                                   |
+| Library version               | A release of flink-scala-api, for example 2.4.0.                                                                                                                                                    | —                                                    | version (alone)                                                  |
+| Former data                   | The bytes that the restored serializer reads.                                                                                                                                                       | —                                                    | old data, former form                                            |
+| Record                        | The serialized form of one instance in the former data.                                                                                                                                             | `record`                                             | entry, element                                                   |
+| Instance                      | One object of an ADT class.                                                                                                                                                                         | `instance`                                           | value (for an ADT object)                                        |
+
+## 3. Schema
+
+| Term                    | Definition                                                                                                                                                     | Code                                                                 | Do not use                                                      |
+|-------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------|
+| ADT                     | A case class, a case object, a sealed trait or a Scala 3 enum. An enum value is not an ADT: its enum declares its evolutions.                                  | `adtEvolution`, `adtVersion`                                         | type, class (alone), coproduct (except in existing class names) |
+| Member                  | A part of an ADT that the serialized form refers to: a field of a case class, a subtype of a sealed trait or a value of an enum.                               | `memberNames`                                                        | element, child                                                  |
+| Field                   | A parameter of the primary constructor of a case class.                                                                                                        | `fieldNames`                                                         | parameter (except in macro code), property, attribute           |
+| Field value             | The object that a field contains in an instance.                                                                                                               | `formerValues`                                                       |                                                                 |
+| Subtype                 | A case class or a case object that extends a sealed trait, directly or through another sealed trait.                                                           | `subtypeClasses`, `subtypeNames`                                     | child, descendant, subclass, case (except in compiler APIs)     |
+| Enum value              | A case of a Scala 3 enum, with or without parameters.                                                                                                          | `enumValueNames`                                                     | enum case, enum member                                          |
+| Schema                  | The structure that a serializer snapshot records for an ADT: its class name, its schema version, and the names and the types of its members.                   | —                                                                    | format, layout, shape                                           |
+| Schema version, version | The integer that `@version` declares on an ADT. Use "version" alone only for a schema version.                                                                 | `@version(current)`, `formerVersion`, `currentVersion`, `adtVersion` | revision                                                        |
+| Unversioned ADT         | An ADT without `@version`. Its schema version is 0.                                                                                                            | `Evolvable.unversioned`                                              | ADT without version                                             |
+| Versioned ADT           | An ADT with `@version(n)`, where n is 1 or more. Its companion must extend `Evolving`.                                                                         | `isVersioned` (also true for `@version(0)`)                          |                                                                 |
+| Class name              | The binary name of a class, as `Class.getName` gives it. A `$` separates a nested class from its enclosing class. The class of an object ends with `$`.        | `className`, `formerClassName`                                       | FQN, fully qualified name, full name, internal name             |
+| Relative class name     | A former class name in an annotation, without a package. The library resolves it from the enclosing class, or from the package, of the annotated class.        | `resolveFormerClassName`                                             |                                                                 |
+| Name reuse              | A class takes the former class name of another class. This class must declare a schema version equal to or higher than the `since` of that rename or deletion. | `checkNameReuse`                                                     | bear, bearer, carry, stand for                                  |
+
+## 4. Evolution (in the source code)
+
+| Term                  | Definition                                                                                                                                                                       | Code                                                      | Do not use                                       |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|--------------------------------------------------|
+| Schema evolution      | The feature of this library that restores a savepoint after a change of the schema of an ADT.                                                                                    | package `evolution`                                       | state evolution                                  |
+| Evolution             | One change of the schema of an ADT, in one schema version. The developer declares it with an evolution annotation.                                                               | `FieldEvolution`, `EnumValueEvolution`, `Evolutions[T]`   | change (in identifiers), modification, migration |
+| ADT evolution         | All the evolutions that the migration applies to the data written under one former class name, at one former version.                                                            | `AdtEvolution[T]`, `adtEvolution`, `DeletedEvolution`     | migration (for this meaning)                     |
+| No evolution          | The ADT evolution of an ADT that declares none. It accepts only reordered members, and added subtypes and enum values.                                                           | `NoEvolution`                                             | built-in migration                               |
+| Evolution annotation  | `@added`, `@renamed`, `@transformed`, `@deletedFields`, `@deletedClasses` or `@postEvolution`. `@version` is not an evolution annotation.                                        | `EvolutionAnnotation`                                     |                                                  |
+| since                 | The first schema version that contains the evolution. The migration applies the evolution only to data written at a lower version.                                               | `since`                                                   | introduced in, occurred in, took effect in       |
+| Add                   | An evolution after which the case class contains one more field. The migration gives this field its default value, which it evaluates for each instance.                         | `@added`, `Add`, `Added`                                  | append, insert                                   |
+| Rename                | An evolution that changes the name of a field or of an enum value, or the class name of an ADT. A move to another package or enclosing class is a rename.                        | `@renamed`, `Rename`, `Renamed`                           | move (alone)                                     |
+| Transform             | An evolution that changes the value of a field, and possibly its type, with a field mapper.                                                                                      | `@transformed`, `Transform`, `Transformed`                | type change, type-change, conversion             |
+| Delete                | An evolution after which the current source code no longer contains a field, a subtype, an enum value or a class. The migration reads and discards the value of a deleted field. | `@deletedFields`, `@deletedClasses`, `Delete`, `Deletion` | remove, drop                                     |
+| Deleted class         | A class that the former snapshots refer to, and that the current source code no longer contains: a subtype, an enum value or the type of a deleted field.                        | `@deletedClasses`, `isDeletedClass`                       | removed class                                    |
+| Phase                 | The rank of a field evolution among the field evolutions with the same `since`: Delete, then Rename, then Transform, then Add. Do not use "phase" for other processes.           | `FieldEvolution.Phase`                                    | canonical pipeline, stage, step                  |
+| Field mapper          | The function of `@transformed`. It converts the former value of a field to its current value.                                                                                    | `transformed.mapper`                                      |                                                  |
+| Post-evolution mapper | The function of `@postEvolution`. The migration applies it to the migrated instance, after the evolutions, if the former version is lower than the current version.              | `PostEvolutionMapper`                                     |                                                  |
+| Successive evolutions | Two or more evolutions of the same member, with different `since`. Declare all of them to restore the savepoints of all the versions.                                            | —                                                         | outdated former evolution, overwritten evolution |
+| Obsolete evolution    | An evolution whose `since` is equal to or lower than the version of all the savepoints that you restore. You do not need its annotation.                                         | —                                                         | old evolution, former evolution                  |
+
+## 5. Migration (at restore)
+
+| Term                            | Definition                                                                                                                                                                                                                                              | Code                                          | Do not use                                     |
+|---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|------------------------------------------------|
+| Migration                       | The conversion of the former data to the current schema during the restore. The restored serializer applies the evolutions with a `since` higher than the former version, then the post-evolution mapper.                                               | `MigrationException`, `checkMigration`        | evolution (for this meaning), conversion       |
+| Migrate                         | To do the migration of the former data, or of one instance.                                                                                                                                                                                             | `migrate`                                     | restore, evolve                                |
+| Migration plan                  | For each current field, how the restored serializer gets its value from the former field values. The restored serializer computes it once, then applies it to each record.                                                                              | `migrationPlan`, `MigratedField`              | evolution plan                                 |
+| Plan                            | To compute the migration plan. `AdtEvolution.plan` plans the ADT: it checks that each current field gets a value, then orders the fields. `FieldEvolution.plan` plans the fields: it applies the field evolutions, in order, to the former field names. | `AdtEvolution.plan`, `FieldEvolution.plan`    | replay, "plan" as a noun: use "migration plan" |
+| As is                           | Without migration. The restored serializer creates the current instance directly from the former field values.                                                                                                                                          | `isAsIs`, `compatibleAsIs`                    | fast path, avoidable, unevolved                |
+| Deleted instance                | An instance of a deleted class or of a deleted enum value in the former data. The restored serializer throws `DeletedInstanceException`, or gives `null` if `throwOnInstance = false`.                                                                  | `DeletedInstanceException`, `throwOnInstance` |                                                |
+| Deletion marker                 | The class that the registry gives for a deleted class name. No instance has this class.                                                                                                                                                                 | `DeletedClass`                                |                                                |
+| Schema compatibility resolution | The check that Flink does during the restore. The current snapshot compares itself with the former snapshot and gives a compatibility result.                                                                                                           | `resolveSchemaCompatibility`                  |                                                |
+| Compatibility result            | Compatible as is, compatible after migration, compatible with a reconfigured serializer, or incompatible.                                                                                                                                               | `TypeSerializerSchemaCompatibility`           | verdict                                        |
+| Standard resolution             | The schema compatibility resolution of Flink for composite serializers. It compares the members by position. The library uses it when no migration is necessary.                                                                                        | `resolveStandardCompatibility`                | unevolved, positional resolution               |
+| Rollback                        | A restore by a source code whose schema version is lower than the former version. The compatibility result is incompatible.                                                                                                                             | —                                             | outdated source code, more recent savepoint    |
+
+## 6. Declaration and registry
+
+| Term               | Definition                                                                                                                                                   | Code                     | Do not use                 |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------|----------------------------|
+| Declare            | To write `@version` or an evolution annotation in the source code. An ADT declares its evolutions, and its evolving companion holds them.                    | `Evolutions[T]`          | "declare" for the registry |
+| Evolving companion | The companion object of a versioned ADT. It extends `Evolving[T]` and holds `val evolutions = Evolutions[T]`. A sealed trait also declares its case objects. | `Evolving`               |                            |
+| Declaration        | What one ADT declares for one class name: the current class or the deletion marker, and the ADT evolution of each version up to the last version.            | `Evolutions.Declaration` |                            |
+| Last version       | The highest schema version of the data written under a class name. For a former class name, it is the `since` of its rename or deletion, minus 1.            | `lastVersion`            |                            |
+| Registry           | The declarations of all the evolving companions of a job, by class name. Each class loader has its own registry.                                             | `Evolutions`, `Registry` |                            |
+| Register           | To put the declarations of the evolving companions in the registry. The first lookup, or the submission check, does it.                                      | `registerCompanions`     | declare                    |
+| Companion scan     | The search of the evolving companions in the jars of the class loader of the job, or in the class path of the JVM.                                           | `CompanionScan`          |                            |
+| Lookup             | To get from the registry the ADT evolution of a former class name at a former version.                                                                       | `Evolutions.get`         | resolve                    |
+| Submission check   | The registration that the Scala execution environment does before it submits the job. A wrong declaration then stops the submission, not the first restore.  | `Evolutions.check()`     | startup, job start         |
+
+## 7. Flink vocabulary
+
+Flink uses several words for one concept. This table gives the term of this feature for each of them.
+
+| Flink                                                                                    | This feature            |
+|------------------------------------------------------------------------------------------|-------------------------|
+| state schema evolution                                                                   | schema evolution        |
+| old serializer snapshot (`oldSerializerSnapshot`), previous or prior serializer snapshot | former snapshot         |
+| new serializer snapshot, on which Flink calls `resolveSchemaCompatibility`               | current snapshot        |
+| previous or prior serializer, serializer from `restoreSerializer()`                      | restored serializer     |
+| new serializer                                                                           | current serializer      |
+| state migration, `compatibleAfterMigration`, `TypeSerializerSnapshot.migrate` (master)   | migration               |
+| savepoint, checkpoint, state snapshot                                                    | savepoint               |
+| `TypeSerializerSnapshot`                                                                 | serializer snapshot     |
+| snapshot version (`getCurrentVersion`)                                                   | snapshot format version |

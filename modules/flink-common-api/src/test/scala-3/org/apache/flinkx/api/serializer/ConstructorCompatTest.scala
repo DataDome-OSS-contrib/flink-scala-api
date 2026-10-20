@@ -54,8 +54,7 @@ class ConstructorCompatTest extends AnyFlatSpec with Matchers {
     exception.getMessage should startWith("wrong number of arguments")
   }
 
-  // The constructor lookup no longer fills the missing arguments with the case class default values: a field added to
-  // a case class has to be declared with the @added annotation, which is what supplies its default value.
+  // The constructor gives no default value to a missing argument: only @added gives one to an added field
   it should "throw when an argument is missing, even for a parameter having a default value" in {
     val constructor = ConstructorCompat.lookupConstructor(classOf[DefaultValues])
     val exception   = intercept[IllegalArgumentException] {

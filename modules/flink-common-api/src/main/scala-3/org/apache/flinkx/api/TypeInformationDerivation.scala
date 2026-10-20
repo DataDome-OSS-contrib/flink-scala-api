@@ -5,8 +5,8 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flinkx.api.evolution.Evolution.NoEvolution
-import org.apache.flinkx.api.evolution.{Evolution, Evolvable}
+import org.apache.flinkx.api.evolution.AdtEvolution.NoEvolution
+import org.apache.flinkx.api.evolution.{AdtEvolution, Evolvable}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -76,7 +76,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz = classTag.runtimeClass.asInstanceOf[Class[T]]
-        // An enum value is named by its enum, and has no class of its own to serialize
+        // An enum value has no class of its own: the enum serializer refers to its values by name
         val subtypeClasses: Array[Class[?]] =
           if typeTag.isEnum then Array.empty else ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[?]]
         val memberNames: Array[String] =
@@ -87,7 +87,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
-              evolution = Some(evolution.asInstanceOf[Evolution[T & Product]]),
+              evolution = Some(evolution.asInstanceOf[AdtEvolution[T & Product]]),
               enumValueNames = memberNames,
               enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             ).asInstanceOf[TypeSerializer[T]]
@@ -95,7 +95,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
             new CoproductSerializer[T](
               evolution = Some(evolution),
               subtypeClasses = subtypeClasses,
-              subtypeFqns = memberNames,
+              subtypeNames = memberNames,
               subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             )
 

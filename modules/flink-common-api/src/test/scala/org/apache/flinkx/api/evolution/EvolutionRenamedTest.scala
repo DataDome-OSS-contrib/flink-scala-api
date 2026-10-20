@@ -5,12 +5,12 @@ import org.apache.flinkx.api.auto._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** A sealed trait renamed along with its subtypes and their fields, a subtype taking the former name of another one. */
+/** Renames of a sealed trait, of its subtypes and of their fields, and the name reuse of a subtype. */
 class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import org.apache.flinkx.api.evolution.EvolutionRenamedTest._
 
-  /* Test to serialize Animal v0 code into Pet-v0.snapshot file, uncomment both test and code to regenerate
+  /* Uncomment this test and Animal at version 0 to write Pet-v0.snapshot again
   it should "serialize Animal v0" in {
     val animal: Animal = Horse("Spirit")
     serializeToFile("Pet-v0", animal)
@@ -21,8 +21,8 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
     testDeserializeFromFile[Pet]("Pet-v0", Pony("Spirit"))
   }
 
-  // Horse was renamed Pony in version 1, then Cat took the name Horse in version 2
-  it should "deserialize a subtype bearing the former name of another subtype" in {
+  // Version 1 renames Horse to Pony and Lion to Cat, then version 2 renames Cat to Horse
+  it should "deserialize a subtype that reuses the former name of another subtype" in {
     roundtrip[Pet](createSerializer[Pet], Horse("Spirit"))
   }
 
@@ -30,13 +30,13 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
 
 object EvolutionRenamedTest {
 
-  /* Animal-v0
+  /* Animal at version 0, which wrote Pet-v0.snapshot
   sealed trait Animal
   case class Horse(name: String) extends Animal
   case class Lion(name: String) extends Animal
    */
 
-  /* Pet-v1
+  /* Pet at version 1
   @version(1)
   @renamed(since = 1, "Animal")
   sealed trait Pet

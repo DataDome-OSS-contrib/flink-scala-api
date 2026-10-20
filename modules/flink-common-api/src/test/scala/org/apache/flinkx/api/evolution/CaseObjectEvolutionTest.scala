@@ -7,29 +7,29 @@ import org.apache.flinkx.api.serializer.{CoproductSerializer, ScalaCaseObjectSer
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** A snapshot records a case object by the name of its class, ending with `$`, which the former name of a renamed case
-  * object may omit, and which tells it apart from a case class of the same name.
+/** A snapshot records a case object with the class name of the object, which ends with `$`. The former name of a
+  * renamed case object can omit this `$`. The `$` makes a case object different from a case class with the same name.
   */
 class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import CaseObjectEvolutionTest._
 
-  /** The binary name of the class `name` next to Litter. */
+  /** The class name of the class `name` next to Litter. */
   private def named(name: String): String = classOf[Litter].getName.replace("Litter", name)
 
-  /** The name the former case object `name` was recorded under, the name of its class. */
+  /** The former class name of the case object `name`, as its snapshot records it. */
   private def recorded(name: String): String = named(s"$name$$")
 
-  /** The serializer of Litter v0, recording its case objects under their former names. */
+  /** The serializer of Litter at version 0. Its snapshot records the case objects with their former class names. */
   private def formerSerializer: CoproductSerializer[Litter] = {
     def formerCaseObject(name: String, caseObject: Litter): TypeSerializer[_] = {
       val clazz = caseObject.getClass.asInstanceOf[Class[Litter]]
-      new ScalaCaseObjectSerializer[Litter](new Evolution(recorded(name), 0, clazz))
+      new ScalaCaseObjectSerializer[Litter](new AdtEvolution(recorded(name), 0, clazz))
     }
     new CoproductSerializer[Litter](
-      evolution = Some(new Evolution(classOf[Litter].getName, 0, classOf[Litter])),
+      evolution = Some(new AdtEvolution(classOf[Litter].getName, 0, classOf[Litter])),
       subtypeClasses = Array[Class[_]](Cat.getClass, Dog.getClass),
-      subtypeFqns = Array(recorded("Kitten"), recorded("Puppy")),
+      subtypeNames = Array(recorded("Kitten"), recorded("Puppy")),
       subtypeSerializers = Array(formerCaseObject("Kitten", Cat), formerCaseObject("Puppy", Dog))
     )
   }
@@ -46,7 +46,7 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     compatibilityWith[Litter](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
-  // The deleted class no longer tells whether it was a case object: its name stands for both
+  // A deleted class name without `$` refers to the case class and to the case object of that name
   it should "resolve a class deleted under a name without the $ ending the class name of a case object" in {
     val cl = getClass.getClassLoader
 
@@ -54,18 +54,18 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     Evolutions.get[Litter](named("Bird"), 0, cl).isDeleted shouldBe true
   }
 
-  // Each deletion keeps its own window and behavior, the case class deleted in version 1 reading as null
+  // Each deletion keeps its versions and its throwOnInstance: the case class deleted in version 1 reads as null
   it should "keep each deletion of a name taken again in between" in {
     def restored(name: String, version: Int): Nest =
       Evolutions
         .get[Nest](named(name), version, getClass.getClassLoader)
-        .restore(fail("A deleted class builds nothing"))
+        .migrate(fail("A deleted class builds nothing"))
 
     restored("Egg", 0) shouldBe null
     intercept[DeletedInstanceException](restored("Egg$", 2))
   }
 
-  it should "not mistake a case class bearing the former name of a renamed case object for it" in {
+  it should "not mistake a case class that reuses the former name of a renamed case object for it" in {
     Evolutions.get[Any](named("Kitten"), 0, getClass.getClassLoader).currentClass shouldBe classOf[Kitten]
   }
 
@@ -73,7 +73,7 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
 object CaseObjectEvolutionTest {
 
-  /* Litter v0
+  /* Litter at version 0
   sealed trait Litter
   case object Kitten extends Litter
   case object Puppy  extends Litter
@@ -93,16 +93,16 @@ object CaseObjectEvolutionTest {
   @renamed(since = 1, "Puppy$")
   case object Dog extends Litter
 
-  // Bears the name of the former case object Kitten, which its snapshots tell apart by the $ ending its class name
+  // Reuses the name of the former case object Kitten: the `$` at the end of the object class name makes them different
   case class Kitten(a: String)
 
-  /* Nest v0
+  /* Nest at version 0
   sealed trait Nest
   case class Egg(a: String) extends Nest
   case object Hen           extends Nest
    */
 
-  /* Nest v1 and v2, a case object taking the name of the case class deleted
+  /* Nest at versions 1 and 2: a case object reuses the name of the deleted case class
   @version(2)
   @deletedClasses(since = 1, throwOnInstance = false, "Egg")
   sealed trait Nest

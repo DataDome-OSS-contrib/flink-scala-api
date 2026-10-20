@@ -63,15 +63,14 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
 
     val in = new DataInputDeserializer(out.getSharedBuffer)
     in.readInt() should be(911108)                   // CompositeTypeSerializerSnapshot.MAGIC_NUMBER
-    in.readInt() should be(4)                        // outer-snapshot version
+    in.readInt() should be(4)                        // snapshot format version
     in.readUTF() should be(classOf[Evolved].getName) // outer snapshot: class name
-    in.readInt() should be(0)                        // schema version, since outer-snapshot version 4
-    in.readBoolean() should be(false)                // immutability, since outer-snapshot version 3
-    StringArraySerializer.INSTANCE.deserialize(in) should be(Array("a")) // field names, since version 4
+    in.readInt() should be(0)                        // schema version, since snapshot format version 4
+    in.readBoolean() should be(false)                // immutability, since snapshot format version 3
+    StringArraySerializer.INSTANCE.deserialize(in) should be(Array("a")) // field names, since snapshot format version 4
   }
 
-  // Savepoints of 2.3.x and before record neither the schema version nor the field names: the fields are read by position
-  "a snapshot written before 2.4.0" should "restore a serializer reading the fields by position" in {
+  "a snapshot written before release 2.4.0" should "restore a serializer reading the fields by position" in {
     val out = new DataOutputSerializer(1024)
     out.write(writtenBefore240(serializerOf(stringSer, intSer)))
     serializerOf(stringSer, intSer).serialize(Evolved("x", 1), out)
@@ -108,8 +107,8 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
 
 object ScalaCaseClassSerializerSnapshotTest {
 
-  /** The versioned snapshot of the given serializer, as 2.3.x wrote it: the outer snapshot version 3 records the class
-    * name and the immutability only.
+  /** The snapshot of the given serializer, as 2.3.x wrote it: the snapshot format version 3 records only the class name
+    * and the immutability.
     */
   def writtenBefore240(serializer: CaseClassSerializer[_]): Array[Byte] = {
     val current  = new DataOutputSerializer(1024)
@@ -117,7 +116,7 @@ object ScalaCaseClassSerializerSnapshotTest {
     snapshot.writeSnapshot(current)
     val in          = new DataInputDeserializer(current.getCopyOfBuffer)
     val magicNumber = in.readInt()
-    in.readInt() // Outer snapshot version
+    in.readInt() // Snapshot format version
     val className = in.readUTF()
     in.readInt() // Schema version
     val isCaseClassImmutable = in.readBoolean()

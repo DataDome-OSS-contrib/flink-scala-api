@@ -1,339 +1,159 @@
-# Getting the Evolution Declarations to the TaskManagers
+# Distribution of the Evolutions to the TaskManagers
 
-## Why this document exists
+## Purpose
 
-[STATE_DESCRIPTOR_PATTERNS.md](STATE_DESCRIPTOR_PATTERNS.md) establishes that most real state declarations (P1–P5)
-never carry their evolution rules to the TaskManager in time, and that the library may not constrain how a
-`StateDescriptor` is declared. This document is the remediation side: it fixes the facts about *when* a TaskManager
-needs the rules and *where* they could come from, then catalogues every option found, with its coverage, its cost and
-its failure modes. It ends with the combinations worth considering, not with a decision.
+The restore needs the evolutions of the current source code before it reads the state. This note explains how the
+evolutions get to the TaskManagers. A survey of the state declarations in real applications sets the requirements, then
+the facts of the restore and the options lead to the decision. The facts come from the Flink sources, version 2.0 and
+version 1.20.1.
 
-The facts below were checked against the Flink sources in `../flink` (master, `2.0-SNAPSHOT`) and, where it matters,
-against the `flink-core` 1.20.1 sources. Line numbers refer to that checkout.
+## 1. State descriptor declaration patterns
 
-## How the rules are produced today
+The survey covers four Flink applications: about 1500 Scala files, Scala 2.13, Flink 1.x and 2.x, and about 110 state
+declarations. The counts are approximate.
 
-- The derivation body (`join`/`split` in `TypeInformationDerivation`) is **runtime code**: Magnolia generates the call at
-  compile time, but the annotations are instantiated and `Evolutions.register` runs when the derived
-  `TypeInformation` expression is *evaluated*. Nothing is registered by merely loading the ADT class.
-- The registry is a JVM global keyed by class name. A snapshot resolves the former names it recorded through
-  `Evolutions.get(formerName, formerVersion, cl)` **inside `readOuterSnapshot`**, i.e. as soon as the snapshot is read
-  (`ScalaCaseClassSerializerSnapshot`, `CoproductSerializerSnapshot`, `ScalaCaseObjectSerializerSnapshot`).
-- The annotations are `StaticAnnotation`s: they exist only in the Scala 2 pickle (`ScalaSignature`) or in TASTy. Java
-  reflection cannot see them, and a classfile scan cannot find them without a pickle or TASTy reader. Verified with
-  `scala-cli` on 2.13.18 and 3.3.8; the same check shows both compilers **do** emit `MethodParameters` (constructor
-  parameter names are reflectively available) and neither emits `PermittedSubclasses` (sealed children cannot be
-  enumerated at runtime).
-- The local diff makes every ADT serializer carry its whole declaration and re-register it in `readObject`. This is
-  correct and stays useful, but it only reaches the TaskManager for the types whose serializer travels in the job graph:
-  record types and P6–P9.
+### Invariant
 
-## What a TaskManager does, in order
+Java serialization keeps the instance fields, not the static fields. A TaskManager deserializes the operator chain
+before it restores the state. Thus the evolutions arrive in time only if the serialized function instance refers to
+the descriptor, or to the type information of the state.
 
-1. `Task.doRun` creates the user class loader, then Java-deserializes the `ExecutionConfig` with it
-   (`Task.java:630-632`). The `SerializerConfigImpl` inside it carries registered Kryo serializer **instances**
-   (`SerializerConfigImpl.java:58,134-140`), Java-serialized; `GlobalJobParameters` is stored as a `Map<String,String>`
-   (`ExecutionConfig.java:450-468`), the same in 1.20.
-2. `StreamTask.restoreInternal` builds the `OperatorChain` (`StreamTask.java:774-791`): the operator factories, the user
-   functions inside them and the `StreamConfig` serializers are Java-deserialized with the user class loader
-   (`OperatorChain.java:169,553,693,914`). A `StreamOperatorFactory` gets `StreamOperatorParameters`, hence the
-   containing task, its `Environment` and its `ExecutionConfig`.
-3. `restoreStateAndGates` → `initializeStateAndOpenOperators` (`StreamTask.java:812,858`): the backends are restored,
-   then `initializeState`, then `open`. **The only user code that runs before the restore is Java deserialization**:
-   `readObject` hooks and the static initializers of the classes it loads. Companion objects are separate classes
-   (`Foo$`) and are not initialized by deserializing a `Foo`.
+- The client does not evaluate a `lazy val` field: the serialized function does not contain its value.
+- A `val` of a companion object is a singleton for each JVM. The TaskManager initializes its own copy at the first
+  use, in `open()` or `processElement`, after the restore.
 
-### Eager restores: the rules are needed during step 3, before any user code
+### Patterns
 
-- **Heap keyed state.** `HeapRestoreOperation` reads the `KeyedBackendSerializationProxy`, which calls `readSnapshot` on
-  every state serializer snapshot (`HeapRestoreOperation.java:132-135`), then deserializes every value with
-  `stateTable.getStateSerializer()` (`StateTableByKeyGroupReaders.java:72-79`). That serializer is
-  `StateSerializerProvider.currentSchemaSerializer()`, which, with no new serializer registered yet, is
-  `previousSerializerSnapshot.restoreSerializer()` (`StateSerializerProvider.java:149-186`). When the user later calls
-  `getState`, `HeapKeyedStateBackend.tryRegisterStateTable` only rejects an `incompatible` result: the objects are
-  already in the heap, there is no migration pass.
-- **Operator state, whatever the keyed backend.** `OperatorStateRestoreOperation` deserializes list, union and
-  broadcast values with the restored serializer (`OperatorStateRestoreOperation.java:222-263`);
-  `DefaultOperatorStateBackend` only rejects `incompatible` afterwards. `CheckpointedFunction` and broadcast state are
-  therefore in the eager family even on RocksDB.
-- **Heap timers.** `InternalTimersSnapshotReaderWriters` restores the key and namespace serializers eagerly
-  (`InternalTimersSnapshotReaderWriters.java:220-223`). Both types travel in the `StreamConfig`, so this only bites a
-  user-defined window type.
+| #   | Pattern                                                       | Type information derived on | Evolutions in time |
+|-----|---------------------------------------------------------------|-----------------------------|--------------------|
+| P1  | Companion `val` descriptor, state handle in a `lazy val`      | TaskManager                 | no                 |
+| P2  | Companion `val` descriptor, state handle in `open()`          | TaskManager                 | no                 |
+| P3  | Descriptor built in `open()`                                  | TaskManager                 | no                 |
+| P4  | Descriptor built in a `lazy val`                              | TaskManager                 | no                 |
+| P5  | Descriptor from a `def` with a parameter of the configuration | TaskManager                 | no                 |
+| P6  | Descriptor in a `val` field of the function                   | client                      | yes                |
+| P7  | Descriptor as a constructor parameter of the function         | client                      | yes                |
+| P8  | Descriptor given to a job graph API, for example `broadcast`  | client                      | yes                |
+| P9  | Type information in a field, descriptor built in `open()`     | client                      | yes                |
+| P10 | Descriptor built from a `Class[T]`                            | never                       | no evolution       |
 
-### Lazy restores: the rules are needed at `getState`, after the user's own derivation
+P1, the most frequent pattern, looks safe because only the state handle is lazy:
 
-- **RocksDB keyed state.** The restore operations copy raw bytes; no state value is deserialized (the only
-  `deserialize` call in the restore package is the heap-timers one). At `getState`,
-  `updateRestoredStateMetaInfo` first materializes the previous serializer (`getStateSerializer()`, hence
-  `restoreSerializer()`), then `updateStateSerializer(new)` runs
-  `new.snapshotConfiguration().resolveSchemaCompatibility(old)`, and `compatibleAfterMigration` triggers
-  `migrateStateValues`, which reads with the previous serializer and writes with the new one
-  (`RocksDBKeyedStateBackend.java:752-797,806`). By then `initializeSerializerUnlessSet` has run on the descriptor
-  (`AbstractKeyedStateBackend.java:379-381`), so a P3 derivation, or the P1/P2 companion initialization, has just
-  happened on the same thread.
-- **ForSt.** In this checkout `compatibleAfterMigration` throws `UnsupportedOperationException("State migration not
-  support yet.")` (`ForStKeyedStateBackend.java:433-438`). Evolutions needing a migration cannot work on ForSt yet,
-  whatever the library does.
-- **First checkpoint after a restore.** `RegisteredKeyValueStateBackendMetaInfo.computeSnapshot` calls
-  `getStateSerializer().snapshotConfiguration()` (`RegisteredKeyValueStateBackendMetaInfo.java:260-281`): a state the
-  new code never accesses gets its previous serializer materialized *at checkpoint time*. Any lazy resolution must
-  survive that call.
+```scala
+class MyFunction extends KeyedProcessFunction[K, I, O] {
+  @transient private lazy val state = getRuntimeContext.getState(MyFunction.Descriptor)
+}
+object MyFunction {
+  private val Descriptor = new ValueStateDescriptor("s", implicitly[TypeInformation[MyState]])
+}
+```
 
-### Other verified facts
+The serialized `MyFunction` does not refer to `Descriptor`: the TaskManager initializes `MyFunction$` at the first
+record.
 
-- `StateDescriptor.typeInfo` is a plain serialized field (`StateDescriptor.java:101`); only the default value has custom
-  serialization. P6/P7 really do ship the `TypeInformation`, hence the serializer, hence its evolution.
-- The user class loader is a `MutableURLClassLoader`; `SafetyNetWrapperClassLoader.getURLs()` delegates to it
-  (`FlinkUserCodeClassLoaders.java:158,228-229`). The jars of a job can be listed from the class loader a snapshot
-  receives in `readSnapshot`.
-- Snapshot API in 2.x: `readSnapshot(version, in, userCodeClassLoader)`, `restoreSerializer()`,
-  `resolveSchemaCompatibility(TypeSerializerSnapshot old)` called on the **new** serializer's snapshot
-  (`TypeSerializerSnapshot.java:134`); 1.20 additionally keeps the deprecated old direction.
-- On the client, `StreamExecutionEnvironment.getTransformations()` and `getStreamGraph(false)` expose the graph before
-  submission, and `UdfStreamOperatorFactory.getUserFunction()` exposes the user function instances
-  (`StreamExecutionEnvironment.java:2034,2455`).
-- `TypeExtractor` honours a class-keyed `TypeInfoFactory` registry filled from `pipeline.serialization-config`
-  (`SerializerConfigImpl.java:459-475`), but the state restore path never goes through `TypeExtractor`.
+P5 cannot move to a field: its state name depends on the runtime configuration. P9 shows that the type information,
+not the descriptor, decides.
 
-## The two independent sub-problems
+### Distribution
 
-**A — Timing.** Eager restores (heap keyed, operator/broadcast state, heap timers) need the rules before any user code
-runs. Lazy restores (RocksDB, ForSt once it migrates) need them at `getState`, which the user's own derivation precedes.
+1. P1 is the large majority.
+2. P2, P3 and P4 are most of the other declarations.
+3. P5 is rare, but it prevents the obvious solution.
+4. P6 to P9 are about 12 declarations of 110. One application has none.
 
-**B — Source.** On a TaskManager the rules can only come from three places: shipped from the client (which only knows
-what *it* evaluated), produced on the TaskManager by evaluating a derivation (which needs a trigger the library
-controls), or read from class metadata (which needs metadata the compiler does not currently retain). A **rename**
-adds a twist to every source: the snapshot knows the *former* name, the declaration sits on the *current* class, and
-nothing links the two without a reverse index or a trace left under the former name.
+Most real state declarations do not bring their evolutions to the TaskManager in time.
 
-Every option below attacks A, B, or both. None attacks the rename twist for free.
+Window accumulators (`aggregate`, `reduce`) get their type information on the client: they are safe. Operator state
+was almost absent from the survey.
 
-## Option catalogue
+### Requirements
 
-Coverage uses the pattern numbers of the survey. "Eager" means heap keyed state and operator state; "lazy" means
-RocksDB keyed state.
+1. Do not expect the job graph to contain the serializer, the descriptor or the type information of a state.
+2. Do not expect that a descriptor can move to a value of the client (P5).
+3. Expect derived type information for the record types, but not for the state types.
+4. Expect code that does not follow a declaration rule. Detect and report a missing declaration.
 
-### Group 1 — Move the resolution later (attacks A only)
+## 2. Restore facts
 
-**O1. Deferred resolution.** `readSnapshot` only stores the former names, versions and field names; resolution
-against the registry moves to `restoreSerializer()` and `resolveSchemaCompatibility()`, or to the first `deserialize`.
-- Covers: every pattern on lazy backends. Nothing new on eager restores.
-- Pros: no user-facing change; small, local; strictly better than today; the new-direction
-  `resolveSchemaCompatibility(old)` even lets the new snapshot hand its resolved `Evolution` to the old one, without any
-  registry at all for that path.
-- Cons: partial. An unresolved snapshot must still round-trip through `writeSnapshot`, and `restoreSerializer()` must
-  tolerate a state the new code never accesses (see "first checkpoint after a restore"): it needs an unresolved
-  pass-through serializer that can snapshot itself but throws on `deserialize`, otherwise a renamed-but-unused state
-  fails the first checkpoint instead of the restore.
-- Effort: low.
+A TaskManager does these steps in this order:
 
-**O1'. Fail-fast diagnostics.** Not a fix, a required companion of every other option: when a former name cannot be
-resolved during an eager restore, name the state, the operator, the pattern and the remediation instead of a
-`ClassNotFoundException` or an arity mismatch from the constructor. A `postDeserialize`-only or `@version`-only change
-restores *silently* without rules; the new snapshot can detect at `getState` time that the restored serializer ran
-without the rules it now knows, and fail there rather than let migrated-less data through.
+1. It creates the user class loader, and deserializes the `ExecutionConfig`.
+2. It deserializes the operator chain: the operator factories, the user functions and the `StreamConfig` serializers.
+3. It restores the state backends, then calls `initializeState`, then `open`.
 
-### Group 2 — Trigger the user's derivation on the TaskManager before the restore (attacks A for P1/P2)
+Before the restore, only Java deserialization runs user code: `readObject` and the static initializers. A companion
+object is a different class (`Foo$`): the deserialization of a `Foo` does not initialize it.
 
-**O2. Companion pre-initialization on the TaskManager.** Something library-owned that is Java-deserialized in step 2
-initializes, by name, the companion of each user function class (`Class.forName(name + "$", true, cl)`) and of its
-enclosing objects. The P1/P2 `val Descriptor = new ValueStateDescriptor(..., implicitly[TypeInformation[S]])`
-evaluates, the derivation runs, the registry fills, before step 3.
-- Vehicles: (a) a library `StreamOperatorFactory` wrapping the real factory, installed by the library's
-  `DataStream`/`KeyedStream` API; (b) a per-job carrier object registered through
-  `SerializerConfigImpl.registerTypeWithKryoSerializer(dummyClass, carrierInstance)`, deserialized in step 1 with a
-  client-computed list of companion names (see O4); (c) the record serializers already in the graph, made to carry
-  the list.
-- Covers: P1, P2 (companion `val`s only — a companion `lazy val` is not evaluated by initialization), P9. Not P3, P4,
-  P5, nor descriptors held in unrelated objects unless the class's bytecode is scanned for `GETSTATIC X$.MODULE$`
-  references and those are initialized too (broader, riskier).
-- Pros: zero user change on the dominant pattern; semantically neutral, the companion would have initialized on the
-  TaskManager anyway, just later; the library already ships an ASM-based `ClosureCleaner`, so bytecode inspection is
-  not new territory.
-- Cons: (a) only sees operators created through the library wrappers, must delegate every `StreamOperatorFactory`
-  sub-interface (`CoordinatedOperatorFactory`, `YieldingOperatorFactory`, `ProcessingTimeServiceAware`, ...) and changes
-  the factory class recorded in the graph; (b) abuses the Kryo registration channel and depends on it staying
-  Java-serialized in 2.x; early initialization of arbitrary enclosing objects may have side effects (a `Config`
-  object connecting somewhere) and P5 is exactly the shape where the companion may need runtime configuration.
-- Effort: medium.
+Some restores are eager. They deserialize all the values with the restored serializers in step 3, before any user code:
 
-**O3. Static analysis of the function to find the derivation sites.** Read `open`, the lazy-val initializers and
-`processElement` with ASM to locate `TypeInformation` derivations and evaluate them ahead of time.
-- Rejected: locating a call site is possible, evaluating it out of its method is not. Listed so it is not reopened.
+- heap keyed state;
+- operator state (list, union and broadcast), also with RocksDB;
+- heap timers.
 
-### Group 3 — Compute the rules on the client and ship them (attacks B for what the client can see)
+The restore of RocksDB keyed state is lazy. It copies bytes, and Flink resolves the schema compatibility at `getState`.
+Then `compatibleAfterMigration` reads the values with the restored serializer and writes them with the current
+serializer.
 
-**O4. Client-side pre-initialization plus a shipped manifest.** In the library's `execute()`, walk
-`getTransformations()`/`getStreamGraph(false)`, take every `UdfStreamOperatorFactory.getUserFunction()`, initialize
-its companion and enclosing objects on the client (O2's trick, run where `main` runs), then ship the whole client
-registry to the TaskManagers.
-- Vehicles: the Kryo carrier (O2-b, one copy per job, `readObject` re-registers in step 1); the library operator
-  factory wrapper (O2-a, carrying the declarations as a field); every record serializer in the graph (N copies, no new
-  channel); `GlobalJobParameters` as a base64 blob (string channel, needs an operator wrapper to read it in step 2).
-- Covers: P1, P2, P6–P9 and every record type, on eager and lazy restores alike. Not P3, P4, P5: their expressions
-  never evaluate on the client.
-- Pros: the rules are computed once, on the client, with the user's own implicit scope; deterministic; the manifest is
-  exactly the `AdtDeclaration` objects the diff already makes serializable.
-- Cons: same wrapper or channel caveats as O2; walking the transformations means handling each `Transformation`
-  subtype (one-input, two-input, broadcast, sink v2, legacy sink, ...), with a silent miss being a safe no-op.
-- Effort: medium.
+Other facts:
 
-**O5. Client-side classpath scan.** Find every evolved ADT in the user jar on the client and derive from there.
-- Rejected as stated: static annotations are invisible to a scan, and a runtime `Class[_]` cannot feed a compile-time
-  derivation. It only works as "O9 run on the client", i.e. after O8, and then brings nothing O9 does not.
+- The serializer snapshots resolve their former class names in `readSnapshot`, thus during an eager restore.
+- ForSt does not support `compatibleAfterMigration` in Flink 2.0: a migration fails on ForSt.
+- The first checkpoint after a restore snapshots the restored serializer of a state that the job does not access.
+- Java reflection does not see the Scala static annotations: they exist only in the Scala 2 pickle or in TASTy.
+- The compilers do not write `PermittedSubclasses`: the subtypes of a sealed trait are not known at runtime.
+- The user class loader gives the URLs of the jars of the job.
 
-### Group 4 — A build-time index (attacks B in full, including renames)
+A rename adds a difficulty: the snapshot records the former class name, but the declaration is on the current class.
+An index from the former class names to the current classes is necessary.
 
-**O6. Compiler plugin.** A plugin for Scala 2.13 and Scala 3 sees every `@version`-annotated ADT at compile time and
-generates, next to it, a synthetic entry (`Foo$EvolutionIndex implements EvolutionIndex`) whose body is a call to a
-rules-only macro `Evolutions.declare[Foo]` (annotations, field names, defaults and mappers, no field typeclasses), plus
-an index (`META-INF/services/...EvolutionIndex`, merged with the existing file to survive incremental compilation;
-`sbt-assembly` concatenates services files by default). On the TaskManager, `Evolutions` runs the index of a class
-loader at first need, in `readSnapshot`, before any eager restore.
-- Covers: everything, every pattern, every backend, renames included.
-- Pros: no constraint on user code; the index can also carry compile-time validation; the rules-only macro is the same
-  building block O7 and O2/O4 need.
-- Cons: two plugins to write and maintain, released per Scala minor (Scala 2 plugins are binary-bound to the compiler
-  version); a `addCompilerPlugin` line in every user build, and the plugin's absence must be detected (a `@version`
-  seen by the derivation macro with no index entry can fail compilation); the incremental-compilation merge leaves
-  stale entries that the runtime must tolerate; the derivation of a synthesized call site does not see the user's
-  implicits, which is fine for the *rules* (they only depend on annotations, defaults and mappers) but forbids using
-  it for the full `TypeInformation`.
-- Effort: high.
+## 3. Options
 
-**O6'. Build-tool plugin.** An sbt/Mill/Gradle plugin reading TASTy or pickles after compilation and generating the
-index.
-- Cons: one plugin per build tool, a second compilation pass for the generated declarations; strictly less attractive
-  than O6.
+The requirements exclude the options that depend on the pattern of the state declaration: O1, O2 and O4. They also
+exclude O7, which asks for a declaration far from the ADT.
 
-**O6''. Macro annotation.** Make `@version` (or a new `@evolved`) a macro annotation that adds the registration to the
-companion at expansion time.
-- Cons: Scala 2.13 has `-Ymacro-annotations`, but Scala 3's `MacroAnnotation` is experimental in 3.3 LTS; and it only
-  provides code, not a trigger: someone must still initialize the companion (see O10), so renames stay unsolved.
+| Option | Principle                                                              | Verdict                                                         |
+|--------|------------------------------------------------------------------------|-----------------------------------------------------------------|
+| O1     | Resolve the former class names at the first use, not in `readSnapshot` | Lazy restores only. Not kept                                    |
+| O2     | Initialize the companions of the user functions on the TaskManager     | P1 and P2 only, wraps the operator factories. Not kept          |
+| O3     | Find the derivations in the functions by static analysis               | Rejected: a derivation cannot run out of its method             |
+| O4     | Initialize the companions on the client, send the evolutions           | Not P3 to P5. Not kept                                          |
+| O5     | Scan the class path of the client for the annotations                  | Rejected: the static annotations are not visible                |
+| O6     | Compiler plugin that writes an index of the evolutions                 | All patterns, but two plugins to maintain. Not kept             |
+| O7     | Explicit declaration of each ADT in `main` or in `META-INF/services`   | One line for each ADT, far from its annotations. Not kept       |
+| O8     | Java annotations, read by reflection                                   | API change, renames not solved. Not kept                        |
+| O9     | Scan the jars of the job on the TaskManager                            | Kept, for the companions that extend `Evolving`                 |
+| O10    | Companion that declares the evolutions of its ADT                      | Kept                                                            |
+| O11    | Stub class under the former class name                                 | Keeps the former names in the code. Not kept                    |
+| O12    | Restore placeholder values, migrate them later                         | Rejected: user code gets the placeholder values                 |
+| O13    | State backend wrapper                                                  | Rejected: it gives no evolution                                 |
+| O14    | Support matrix in the documentation only                               | Minimum level only. Not kept                                    |
+| O15    | Offline migration with the State Processor API                         | One operational step for each job. Not kept                     |
+| O16    | Resolution on the JobManager                                           | Rejected: the JobManager does not read the serializer snapshots |
 
-### Group 5 — Explicit, central registration by the user (a different constraint than the descriptor one)
+## 4. Decision
 
-**O7. `Evolutions.declare[T]` in one place.** The rules-only macro of O6, called by the user once per evolved ADT:
-- (a) in `main`, before `execute()`, shipped through O4's channel; or
-- (b) in an `EvolutionsProvider` implementation listed in `META-INF/services`, run by the library on the TaskManager
-  at first need, through `ServiceLoader.load(..., userCodeClassLoader)`; or
-- (c) as a list of ADT class names in the job configuration, with the library initializing the named companions on
-  the TaskManager (needs O10's self-registering companions to have any effect).
-- Covers: everything, including renames (the *current* class is what the user names).
-- Pros: simple, explicit, no plugin, both backends.
-- Cons: a constraint on user code, milder than the descriptor one (central, one line per ADT, not per state) but a
-  constraint; a forgotten declaration is only detectable when the restore fails (class not found, arity mismatch) or
-  through O1' at `getState` time; duplicates knowledge the annotations already carry.
-- Effort: low.
+- **Evolving companion (O10).** The companion of a versioned ADT extends `Evolving` and holds
+  `val evolutions = Evolutions[T]`. If it is missing, the derivation of the type information does not compile.
+- **Companion scan (O9).** The first lookup of a class loader scans the jars of the job for the companions that extend
+  `Evolving`. It initializes them and registers their declarations. The scan reads only the header of the class files.
+- **Timing.** The lookup occurs in `readSnapshot`, thus before an eager restore, whatever the pattern of the state.
+- **Renames.** The companion of the current class declares the former class name, so the registry finds it.
+- **Submission check.** The Scala `StreamExecutionEnvironment` registers the declarations when it submits the job. A
+  wrong declaration stops the submission, not the first restore.
+- **Failure.** A former class name that no class has and no evolution declares stops the restore with a
+  `MissingEvolutionException`.
 
-### Group 6 — Read the rules from class metadata on the TaskManager (attacks B without evaluation)
+The decision meets the requirements:
 
-**O8. Java annotations plus a reflective rules reader.** Redefine the evolution annotations in Java with `RUNTIME`
-retention. On an unresolved former name that still loads, the TaskManager reads `@version`, `@renamed`,
-`@deletedFields`, `@deletedClasses`, `@added` reflectively, takes constructor parameter names from
-`MethodParameters`, defaults from `apply$default$N`, and feeds the existing `EvolutionBuilder`.
-- Covers: field-level evolutions and deletions on any name that still exists, eager and lazy alike. Not top-level
-  renames (needs O9 or O11). Renamed *subtypes* need either the declaration moved to the parent
-  (`@renamedMembers` on the sealed trait, since children cannot be enumerated) or a narrow jar scan of the parent's
-  package.
-- Pros: no plugin, no registration for the unrenamed majority; works for operator state and heap.
-- Cons: an API break on a feature just released: Java annotations cannot hold the `postDeserialize`/`transformed`
-  lambdas, which become `Class[_ <: Mapper]` or method references; Magnolia cannot instantiate Java annotations, so
-  both macros must read annotation arguments from trees; a second rules reader (reflective) that must stay equivalent
-  to the first (macro); still incomplete for renames.
-- Effort: high.
+- Requirements 1 to 3: the evolutions come from the jars of the job, not from the job graph. Thus all the patterns,
+  P1 to P9, work, and the declaration of a state descriptor has no rule to follow.
+- Requirement 4: a missing declaration fails at compile time (no evolving companion), at submission (submission
+  check), or at restore (`MissingEvolutionException`).
 
-**O9. Runtime jar scan on the TaskManager.** Once per class loader, list the jars of the `MutableURLClassLoader`, scan
-the constant pool of each class (flink-shaded ASM, or a minimal parser) for the library's annotation descriptors,
-restricted to configured package prefixes, and build the reverse index of `@renamed`.
-- Requires O8 (nothing to find in a classfile otherwise).
-- Covers: renames, therefore everything when combined with O8.
-- Pros: zero configuration for the user beyond an optional package filter.
-- Cons: scanning a fat jar takes seconds without a filter; directories and nested jars must be supported for tests,
-  IDEs and some deployments; the scan can only see classes physically present in the jars.
-- Effort: medium, on top of O8.
+Consequences:
 
-**O10. Self-registering companions, triggered by name.** The ADT's companion registers its own rules when it
-initializes (`object Dog extends Evolved[Dog]`, where `Evolved[T]` takes an implicit or given built by the rules-only
-macro of O6; the `semiauto` style, `implicit val ti = deriveTypeInformation[Dog]` in the companion, already has this
-effect). The library, when a snapshot names a former class it cannot resolve, initializes that class's companion by
-name and retries: the *snapshot pulls the registration in* during the restore, before any eager deserialization,
-whatever the backend and the descriptor pattern. A sealed trait's companion declares the whole family, so a renamed or
-deleted subtype resolves through its parent.
-- Covers: every pattern, eager and lazy, for every name that still exists; renamed subtypes through the parent;
-  `@deletedClasses` field types through the enclosing class. Not a renamed *top-level* state type (its former name
-  loads nothing), unless combined with O9 scanning for classes implementing the marker, or O11.
-- Pros: no plugin, no Java annotations, one line per evolved ADT at the *declaration* site (the same place as the
-  annotations), free for `semiauto` users; the derivation macro can require the companion to extend the marker when
-  `@version` is present, turning a forgotten registration into a compile error.
-- Cons: a constraint on the ADT declaration, mild but real; relies on companion initialization order (a companion
-  whose initializer needs runtime configuration would fail during restore); top-level rename still open.
-- Effort: low to medium.
-
-**O11. Forwarding stub under the former name.** `@movedTo[NewName] class OldName` (or an empty object) keeps a loadable
-class under the former name; resolving a rename then starts from something that loads, and O8 or O10 do the rest.
-- Pros: trivial mechanism, no index, no scan.
-- Cons: the point of a rename is usually to get rid of the old name; leaves stubs in the code base for as long as old
-  savepoints must restore; covers only renames.
-
-### Group 7 — Change the restore mechanics so that the rules are not needed during the restore
-
-**O12. Two-phase restore with an opaque intermediate value.** The restored serializer reads former values into a
-library placeholder (former name, version, field values); the conversion happens when the new serializer arrives.
-- Rejected: the heap `StateTable` and the operator `ListState` hand the stored objects straight to user code; there is
-  no library hook between the two, so placeholders would leak into `state.value()`.
-
-**O13. Library state backend wrapper.** A delegating `StateBackend` that runs a hook before `createKeyedStateBackend`
-restores.
-- Rejected as a solution: it is a hook point, not a source of rules, and it constrains `state.backend`. Mentioned only
-  because it is the one place besides step 1 and 2 where library code could run before an eager restore without
-  wrapping operators.
-
-**O14. Support matrix.** O1 alone, documented as "evolutions on eager restores need P6–P9 or an explicit declaration".
-- Honest, cheap, and exactly what the user wants to avoid; kept as the floor every combination must beat.
-
-### Group 8 — Rewrite the savepoint instead of the restore
-
-**O15. Offline migration with the State Processor API.** A library-provided job or CLI reads the old savepoint with the
-old serializers and writes a new one with the new code; its `main` derives every state type explicitly, so the rules
-exist where it runs.
-- Pros: works for every pattern and backend; battle-tested Flink path; no runtime constraint.
-- Cons: an operational step between two versions, per job; the user must still list the state types for the tool,
-  which is O7 in another form.
-
-### Group 9 — Resolve on the JobManager
-
-**O16. Pre-resolution at submission.** In application mode `main` runs on the JobManager, which also reads the
-savepoint at submission.
-- Rejected: the `_metadata` file holds state handles, not serializer snapshots; the keyed state files are opened by
-  the TaskManagers only. There is nothing to resolve on the JobManager.
-
-## Coverage at a glance
-
-| Option | P1/P2 | P3/P4 | P5 | Top-level rename | Eager restores | Lazy restores | User constraint | Build constraint | Effort |
-|---|---|---|---|---|---|---|---|---|---|
-| O1 deferred resolution | lazy only | lazy only | lazy only | lazy only | no | yes | none | none | low |
-| O2 TM companion init | yes | no | no | with O4 manifest | yes | yes | none | none | medium |
-| O4 client init + manifest | yes | no | no | if derived on client | yes | yes | none | none | medium |
-| O6 compiler plugin | yes | yes | yes | yes | yes | yes | none | plugin | high |
-| O7 explicit `declare` | yes | yes | yes | yes | yes | yes | one line per ADT | none | low |
-| O8 Java annotations + reflection | yes | yes | yes | no | yes | yes | API change | none | high |
-| O8 + O9 jar scan | yes | yes | yes | yes | yes | yes | API change, package filter | none | high |
-| O10 self-registering companion | yes | yes | yes | no (O9/O11) | yes | yes | one line per ADT | none | low–medium |
-| O11 forwarding stub | rename only | rename only | rename only | yes | yes | yes | keep stubs | none | low |
-| O15 offline migration | yes | yes | yes | yes | n/a | n/a | operational step | none | medium |
-
-## Combinations worth considering
-
-1. **Floor.** O1 + O1'. RocksDB users get every pattern at once; eager restores fail with an actionable message.
-   Nothing else is acceptable without at least this.
-2. **Pragmatic, no build change.** O1 + O4 (client companion initialization, manifest in a single Kryo-carrier or in
-   the record serializers) + O10-lite (initialize a former name's companion on demand, which already serves `semiauto`
-   users) + O7(b) as the documented escape hatch for P3–P5 on eager restores + O1'. Covers the survey's dominant
-   patterns with no user change, and every remaining case with one central line.
-3. **Complete, zero user constraint.** O6, with O1 and O1' underneath. Pays with two compiler plugins and a build line.
-4. **Complete, metadata-driven.** O8 + O9 + O1. Pays with an API redesign of the annotations and a second rules reader.
-
-Whatever the combination, two properties are worth requiring of it: the restore must **fail loudly** when a rule it
-needed was not available, and a state the new code never touches must **round-trip unresolved** through the next
-checkpoint.
+- The first restore initializes all the evolving companions of the job. An initializer that needs the runtime
+  configuration fails there.
+- Each class loader has its own registry. In the `lib` directory of the cluster, the registry keeps the class loaders
+  of the stopped jobs.
+- A migration does not work on ForSt.

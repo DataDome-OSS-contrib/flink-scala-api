@@ -2,7 +2,7 @@ package org.example
 
 import org.apache.flinkx.api.evolution._
 
-/** A user ADT using every evolution annotation, outside the package of the library. */
+/** A user ADT with all the evolution annotations, outside the package of the library. */
 object UserFixtures {
 
   @version(2)
@@ -20,7 +20,7 @@ object UserFixtures {
   def intToLabel(i: Int): String              = i.toString
   def bump(version: Int, order: Order): Order = order.copy(note = order.note + version)
 
-  /** Its mappers are private to the package, the narrowest scope the annotations of the ADT can see. */
+  /** Its mappers are private to the package: the smallest scope that the annotations of the ADT can see. */
   @version(1)
   @postEvolution(Invoice.stamp)
   case class Invoice(@transformed(since = 1, Invoice.toAmount) amount: String)

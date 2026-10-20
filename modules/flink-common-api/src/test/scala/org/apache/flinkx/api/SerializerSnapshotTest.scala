@@ -157,16 +157,16 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
     // Serialize the "old" data with "old" serializer
     oldSerializer.serialize(expectedData, output)
 
-    // Now, application is restarted with the new (current) code
+    // The job restarts with the current source code
     val newSerializer = implicitly[TypeSerializer[WithDefault]]
 
-    // Deserialize the old serializer
+    // Read the former snapshot and its restored serializer
     val input                   = new DataInputDeserializer(output.getSharedBuffer)
     val deserializedOldSnapshot = TypeSerializerSnapshot
       .readVersionedSnapshot[WithDefault](input, getClass.getClassLoader) // Flink always calls this
     val deserializedOldSerializer = deserializedOldSnapshot.restoreSerializer()
 
-    // Deserialize the old data with the deserialized old serializer
+    // Read the former data with the restored serializer
     val deserializedData = deserializedOldSerializer.deserialize(input)
     deserializedData should be(expectedData)
 
