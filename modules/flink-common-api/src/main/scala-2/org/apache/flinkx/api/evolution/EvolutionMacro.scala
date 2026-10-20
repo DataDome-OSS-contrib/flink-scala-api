@@ -165,8 +165,6 @@ private[api] object EvolutionMacro {
 
     /** Reject the evolution annotations that declare nothing where they are, before anything is generated. */
     def validate(): Unit = {
-      val hasVersionedAncestor = tpe.baseClasses.filterNot(_ == symbol).exists(ancestor => isVersioned(ancestor))
-
       rejectVersionedParameter(c)(symbol, parameters)
       val isCoproduct = descendants.nonEmpty
 
@@ -174,7 +172,7 @@ private[api] object EvolutionMacro {
         c.abort(c.enclosingPosition, notAllowed(nameOf(annotation), target))
 
       evolutionAnnotationsOf(symbol).foreach { annotation =>
-        if (!AnnotationRules.allowedOnAdt(nameOf(annotation), version, isCoproduct, hasVersionedAncestor)) {
+        if (!AnnotationRules.allowedOnAdt(nameOf(annotation), version, isCoproduct)) {
           reject(annotation, AnnotationRules.target(symbol.fullName, None, version))
         }
         if (is(annotation, Renamed) || is(annotation, DeletedClasses)) {

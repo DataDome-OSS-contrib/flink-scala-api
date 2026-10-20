@@ -8,8 +8,10 @@ import org.apache.flink.api.java.typeutils.TupleTypeInfoBase
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flink.api.java.typeutils.runtime.kryo.KryoSerializer
 import org.apache.flink.core.memory._
+import org.apache.flinkx.api.evolution.{Evolution, Evolutions}
 import org.apache.flinkx.api.semiauto.infoToSer
 import org.apache.flinkx.api.serializer.CaseClassSerializer
+import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, MappedTypeInformation}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, Inspectors}
@@ -19,7 +21,6 @@ import java.lang.reflect.{Field, Modifier}
 import java.time.{LocalDate, LocalDateTime, LocalTime}
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeSet
-import scala.reflect.ClassTag
 
 trait TestUtils extends Matchers with Inspectors {
 
@@ -31,6 +32,9 @@ trait TestUtils extends Matchers with Inspectors {
   private def snapshotPath(fileName: String): String =
     s"modules/flink-common-api/src/test/resources/$fileName.snapshot"
 
+  /** Writes the snapshot of the given serializer and `data` into the snapshot file of the given name, which the former
+    * source code of a test calls to generate the file a test restores.
+    */
   def serializeToFile[T](fileName: String, data: T)(implicit ser: TypeSerializer[T]): Unit = {
     val output = new DataOutputViewStreamWrapper(new FileOutputStream(snapshotPath(fileName)))
     TypeSerializerSnapshot.writeVersionedSnapshot(output, ser.snapshotConfiguration())
@@ -42,14 +46,15 @@ trait TestUtils extends Matchers with Inspectors {
     output.close()
   }
 
-  def testDeserializeFromFile[T: TypeSerializer](
+  /** Reads the data of the snapshot file of the given name with the former serializer restored from its snapshot. */
+  def testDeserializeFromFile[T](
       fileName: String,
       expected: T,
       assertion: (T, T) => Assertion = (_: T) shouldBe (_: T)
-  )(implicit classTag: ClassTag[T]): Unit = {
+  ): Unit = {
     val input            = new DataInputViewStreamWrapper(snapshotInput(fileName))
     val totalsize        = input.available()
-    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, classTag.runtimeClass.getClassLoader)
+    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader)
     val snapSize         = totalsize - input.available()
     snapSize shouldBe input.readInt()
     val restoredSerializer = restoredSnapshot.restoreSerializer()
@@ -62,82 +67,84 @@ trait TestUtils extends Matchers with Inspectors {
   def createSerializer[T: TypeInformation]: TypeSerializer[T] =
     implicitly[TypeInformation[T]].createSerializer(new SerializerConfigImpl())
 
-  /** Restores the former serializer held in the snapshot of the given file, the way Flink restores a savepoint.
-    *
-    * @param fileName
-    *   Name of the snapshot file, without its extension
-    */
-  def restoreSerializerFromFile[T](fileName: String)(implicit classTag: ClassTag[T]): TypeSerializer[T] = {
+  /** The snapshot held in the snapshot file of the given name, as Flink reads it from a savepoint. */
+  def snapshotFromFile[T](fileName: String): TypeSerializerSnapshot[T] = {
     val input = new DataInputViewStreamWrapper(snapshotInput(fileName))
-    try
-      TypeSerializerSnapshot
-        .readVersionedSnapshot[T](input, classTag.runtimeClass.getClassLoader)
-        .restoreSerializer()
+    try TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader)
     finally input.close()
   }
 
-  /** Resolves the compatibility of the current serializer against the snapshot of the given former serializer, the way
-    * a state backend gates the restore of a savepoint.
-    */
-  def resolveSchemaCompatibility[T: TypeSerializer](
-      formerSerializer: TypeSerializer[T]
-  ): TypeSerializerSchemaCompatibility[T] =
-    implicitly[TypeSerializer[T]]
-      .snapshotConfiguration()
-      .resolveSchemaCompatibility(formerSerializer.snapshotConfiguration())
+  /** The former serializer restored from the snapshot file of the given name, the way Flink restores a savepoint. */
+  def restoreSerializerFromFile[T](fileName: String): TypeSerializer[T] =
+    snapshotFromFile[T](fileName).restoreSerializer()
 
-  /** Writes the snapshot of the given former serializer then restores it, the way Flink does with a savepoint, so the
-    * former class name it records goes through the evolution resolution, and resolves the compatibility of the current
-    * serializer against it.
+  /** Resolves the compatibility of the current serializer against the snapshot of the given former serializer, written
+    * then read back the way a savepoint does: the former name it records goes through the evolution resolution, as a
+    * state backend gates the restore of a savepoint.
     */
-  def resolveSchemaCompatibilityAfterRestore[T: TypeSerializer](
-      formerSerializer: TypeSerializer[_]
-  )(implicit classTag: ClassTag[T]): TypeSerializerSchemaCompatibility[T] = {
-    val out = new DataOutputSerializer(1024 * 1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
-    val in               = new DataInputDeserializer(out.getCopyOfBuffer)
-    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, classTag.runtimeClass.getClassLoader)
-    implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(restoredSnapshot)
-  }
+  def compatibilityWith[T: TypeSerializer](formerSerializer: TypeSerializer[_]): TypeSerializerSchemaCompatibility[T] =
+    implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(savepointed[T](formerSerializer))
 
-  /** Resolves the compatibility of the current serializer against the former one held in the given snapshot file. */
-  def resolveSchemaCompatibilityFromFile[T: TypeSerializer](
-      fileName: String
-  )(implicit classTag: ClassTag[T]): TypeSerializerSchemaCompatibility[T] =
-    resolveSchemaCompatibility(restoreSerializerFromFile[T](fileName))
-
-  /** Migrates the given former form the way Flink does: `former` is serialized with `formerSerializer`, its snapshot is
-    * restored, and the data is read back with the restored serializer, which applies the declared evolutions.
-    *
-    * The current serializer is required to derive the current schema, as a job does, so its evolutions are registered.
-    *
-    * @return
-    *   the migrated value read with the restored serializer
-    */
-  def deserializeFormerForm[T: TypeSerializer](
-      formerSerializer: TypeSerializer[T],
-      former: T
-  )(implicit classTag: ClassTag[T]): T = {
-    val out = new DataOutputSerializer(1024 * 1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
-    formerSerializer.serialize(former, out)
-    val in               = new DataInputDeserializer(out.getCopyOfBuffer)
-    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, classTag.runtimeClass.getClassLoader)
-    restoredSnapshot.restoreSerializer().deserialize(in)
-  }
+  /** Resolves the compatibility of the current serializer against the former snapshot of the given file. */
+  def compatibilityWithFile[T: TypeSerializer](fileName: String): TypeSerializerSchemaCompatibility[T] =
+    implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(snapshotFromFile[T](fileName))
 
   /** Resolves the compatibility of the value serializer of a `MapState[String, T]`, nested in a Flink
     * [[org.apache.flink.api.common.typeutils.base.MapSerializer]] resolving the compatibility of its nested
     * serializers, against the former one held in the given snapshot file.
     */
-  def resolveNestedSchemaCompatibilityFromFile[T: TypeSerializer](
+  def nestedCompatibilityWithFile[T: TypeSerializer](
       fileName: String
-  )(implicit classTag: ClassTag[T]): TypeSerializerSchemaCompatibility[java.util.Map[String, T]] = {
+  ): TypeSerializerSchemaCompatibility[java.util.Map[String, T]] = {
     val formerMapSerializer =
       new MapSerializer[String, T](StringSerializer.INSTANCE, restoreSerializerFromFile[T](fileName))
     new MapSerializer[String, T](StringSerializer.INSTANCE, implicitly[TypeSerializer[T]])
       .snapshotConfiguration()
       .resolveSchemaCompatibility(formerMapSerializer.snapshotConfiguration())
+  }
+
+  /** Migrates the given former form the way Flink does: `former` is serialized with `formerSerializer`, its snapshot is
+    * written then read back, and the data is read with the restored serializer, which applies the declared evolutions.
+    *
+    * @param former
+    *   The former form, possibly an instance of a class standing for a former class no longer declared
+    */
+  def deserializeFormerForm[T](formerSerializer: TypeSerializer[_], former: Any): T = {
+    val out = new DataOutputSerializer(1024)
+    TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
+    formerSerializer.asInstanceOf[TypeSerializer[Any]].serialize(former, out)
+    val in               = new DataInputDeserializer(out.getCopyOfBuffer)
+    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, getClass.getClassLoader)
+    restoredSnapshot.restoreSerializer().deserialize(in)
+  }
+
+  /** Migrates the form a case class had at `version`, when it was declared with the given former fields, in their
+    * former order: its snapshot is written then read back, and its fields are read with the restored serializer.
+    *
+    * @return
+    *   the restored snapshot, and the value read back
+    */
+  def deserializeFormerFields[T <: Product](
+      clazz: Class[T],
+      version: Int,
+      formerFields: (String, TypeSerializer[_], Any)*
+  ): (TypeSerializerSnapshot[T], T) = {
+    val formerSerializer = new CaseClassSerializer[T](
+      evolution = TestUtils.evolutionOf(clazz, version),
+      isCaseClassImmutable = true,
+      fieldNames = formerFields.map(_._1).toArray,
+      paramSerializers = formerFields.map(_._2).toArray
+    )
+    val out = new DataOutputSerializer(1024)
+    TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
+    // The former form: its arity, then its fields in their former order
+    out.writeInt(formerFields.length)
+    formerFields.foreach { case (_, serializer, value) =>
+      serializer.asInstanceOf[TypeSerializer[Any]].serialize(value, out)
+    }
+    val in       = new DataInputDeserializer(out.getCopyOfBuffer)
+    val snapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, getClass.getClassLoader)
+    (snapshot, snapshot.restoreSerializer().deserialize(in))
   }
 
   /** Serializes and deserializes the given object using the provided serializer, then asserts that the result matches
@@ -155,23 +162,8 @@ trait TestUtils extends Matchers with Inspectors {
       ser: TypeSerializer[T],
       expected: T,
       assertion: (T, T) => Assertion = (_: T) shouldBe (_: T)
-  ): Assertion = {
-    val out = new ByteArrayOutputStream()
-    ser.serialize(expected, new DataOutputViewStreamWrapper(out))
-    val snapBytes = new ByteArrayOutputStream()
-    TypeSerializerSnapshot.writeVersionedSnapshot(
-      new DataOutputViewStreamWrapper(snapBytes),
-      ser.snapshotConfiguration()
-    )
-    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](
-      new DataInputViewStreamWrapper(new ByteArrayInputStream(snapBytes.toByteArray)),
-      ser.getClass.getClassLoader
-    )
-    val restoredSerializer = restoredSnapshot.restoreSerializer()
-    val result             =
-      restoredSerializer.deserialize(new DataInputViewStreamWrapper(new ByteArrayInputStream(out.toByteArray)))
-    assertion(result, expected)
-  }
+  ): Assertion =
+    assertion(deserializeFormerForm[T](ser, expected), expected)
 
   /** Checks the instance copy functionality.
     * @param ser
@@ -403,5 +395,13 @@ trait TestUtils extends Matchers with Inspectors {
   private val LocalDateClass     = classOf[LocalDate]
   private val LocalTimeClass     = classOf[LocalTime]
   private val LocalDateTimeClass = classOf[LocalDateTime]
+
+}
+
+object TestUtils {
+
+  /** The evolution of the data of `clazz` written at `version`, as the snapshot recording them resolves it. */
+  def evolutionOf[T](clazz: Class[T], version: Int = 0): Evolution[T] =
+    Evolutions.get[T](clazz.getName, version, clazz.getClassLoader)
 
 }

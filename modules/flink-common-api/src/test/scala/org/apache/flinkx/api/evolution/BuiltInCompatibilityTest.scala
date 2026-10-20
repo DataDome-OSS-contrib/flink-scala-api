@@ -1,12 +1,12 @@
 package org.apache.flinkx.api.evolution
 
+import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
-import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
-import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.TestUtils
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.BuiltInCompatibilityTest._
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
+import org.apache.flinkx.api.serializer.CoproductSerializer
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -15,8 +15,9 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
 
   it should "restore the reordered fields of an unversioned case class" in {
     val (snapshot, restored) =
-      restoreFormerOrder(
+      deserializeFormerFields(
         classOf[Pair],
+        0,
         ("last", StringSerializer.INSTANCE, "Doe"),
         ("first", StringSerializer.INSTANCE, "John")
       )
@@ -29,8 +30,9 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
 
   it should "restore the reordered fields of different types of an unversioned case class" in {
     val (snapshot, restored) =
-      restoreFormerOrder(
+      deserializeFormerFields(
         classOf[Counter],
+        0,
         ("count", IntSerializer.INSTANCE, 42),
         ("id", StringSerializer.INSTANCE, "a")
       )
@@ -43,8 +45,9 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
 
   it should "restore an unchanged unversioned case class as is" in {
     val (snapshot, restored) =
-      restoreFormerOrder(
+      deserializeFormerFields(
         classOf[Pair],
+        0,
         ("first", StringSerializer.INSTANCE, "John"),
         ("last", StringSerializer.INSTANCE, "Doe")
       )
@@ -60,40 +63,14 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
     implicit val current: TypeSerializer[Shape] = createSerializer[Shape]
     // Shape v0 only had Square and Circle, in this order
     val formerSerializer = new CoproductSerializer[Shape](
-      evolution = Some(Evolutions.get(classOf[Shape], 0)),
+      evolution = Some(evolutionOf(classOf[Shape])),
       subtypeClasses = Array(classOf[Square], classOf[Circle]),
       subtypeFqns = Array(classOf[Square].getName, classOf[Circle].getName),
       subtypeSerializers = Array(createSerializer[Square], createSerializer[Circle])
     )
 
     deserializeFormerForm[Shape](formerSerializer, Circle(1)) shouldBe Circle(1)
-    resolveSchemaCompatibilityAfterRestore[Shape](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
-  }
-
-  /** Restores the snapshot of `clazz` written when its fields were declared in the given former order, as Flink
-    * restores a savepoint, and reads back the given former field values with the restored serializer.
-    */
-  private def restoreFormerOrder[T <: Product](
-      clazz: Class[T],
-      formerFields: (String, TypeSerializer[_], Any)*
-  ): (TypeSerializerSnapshot[T], T) = {
-    val formerSerializer = new CaseClassSerializer[T](
-      evolution = Evolutions.get(clazz, 0),
-      isCaseClassImmutable = true,
-      fieldNames = formerFields.map(_._1).toArray,
-      paramSerializers = formerFields.map(_._2).toArray
-    )
-    val out = new DataOutputSerializer(256)
-    TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
-    // The former form: its arity, then its fields in their former order
-    out.writeInt(formerFields.length)
-    formerFields.foreach { case (_, serializer, value) =>
-      serializer.asInstanceOf[TypeSerializer[Any]].serialize(value, out)
-    }
-
-    val in       = new DataInputDeserializer(out.getCopyOfBuffer)
-    val snapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, clazz.getClassLoader)
-    (snapshot, snapshot.restoreSerializer().deserialize(in))
+    compatibilityWith[Shape](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
 }

@@ -4,18 +4,15 @@ import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.serializer.{CoproductSerializer, ScalaCaseObjectSerializer}
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** A snapshot records a case object by the name of its class, ending with `$`, which the former name of a renamed case
   * object may omit, and which tells it apart from a case class of the same name.
   */
-class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
+class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import CaseObjectEvolutionTest._
-
-  override protected def beforeEach(): Unit = Evolutions.reset()
 
   /** The binary name of the class `name` next to Litter. */
   private def named(name: String): String = classOf[Litter].getName.replace("Litter", name)
@@ -46,7 +43,7 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils w
   }
 
   it should "resolve the schema compatibility of renamed case objects as compatible after migration" in {
-    resolveSchemaCompatibilityAfterRestore[Litter](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
+    compatibilityWith[Litter](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // The deleted class no longer tells whether it was a case object: its name stands for both

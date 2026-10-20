@@ -44,7 +44,7 @@ object EvolutionErrorFixtures {
   @postEvolution(updateAction)
   case class WrongPostEvolutionTwiceOnCaseClass()
 
-  /** Versioned, and no provider declares it. */
+  /** Versioned, and its companion declares nothing. */
   @version(1)
   case class NeverDeclared(a: String)
 

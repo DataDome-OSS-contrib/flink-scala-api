@@ -12,42 +12,42 @@ class ConstructorCompatTest extends AnyFlatSpec with Matchers {
   import ConstructorCompatTest.EnumWithApplyInObject.*
 
   it should "lookup constructor with no parameter" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[NoParameter])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[NoParameter])
     constructor.apply(Array.empty) shouldBe a[NoParameter]
   }
 
   it should "lookup constructor with a boxed parameter" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[Boxed])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[Boxed])
     constructor.apply(Array((1.asInstanceOf[AnyRef]))) shouldBe a[Boxed]
   }
 
-  it should "lookup constructor with only default values" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[DefaultValues])
+  it should "lookup the primary constructor of a case class declaring default values" in {
+    val constructor = ConstructorCompat.lookupConstructor(classOf[DefaultValues])
     constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[DefaultValues]
   }
 
   it should "lookup constructor with an apply in the case class" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[ApplyInCaseClass])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[ApplyInCaseClass])
     constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[ApplyInCaseClass]
   }
 
   it should "lookup constructor with an apply in the companion object" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[ApplyInObject])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[ApplyInObject])
     constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[ApplyInObject]
   }
 
   it should "lookup constructor with the longest apply in the companion object" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[LongestApplyInObject])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[LongestApplyInObject])
     constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[LongestApplyInObject]
   }
 
   it should "lookup constructor with a secondary constructor" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[SecondaryConstructor])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[SecondaryConstructor])
     constructor.apply(Array(1.asInstanceOf[AnyRef], "b")) shouldBe a[SecondaryConstructor]
   }
 
   it should "throw when the longest constructor is a secondary constructor" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[LongestSecondaryConstructor])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[LongestSecondaryConstructor])
     val exception   = intercept[IllegalArgumentException] {
       constructor.apply(Array(1.asInstanceOf[AnyRef], "b"))
     }
@@ -57,7 +57,7 @@ class ConstructorCompatTest extends AnyFlatSpec with Matchers {
   // The constructor lookup no longer fills the missing arguments with the case class default values: a field added to
   // a case class has to be declared with the @added annotation, which is what supplies its default value.
   it should "throw when an argument is missing, even for a parameter having a default value" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[DefaultValues])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[DefaultValues])
     val exception   = intercept[IllegalArgumentException] {
       constructor.apply(Array.empty)
     }
@@ -65,20 +65,18 @@ class ConstructorCompatTest extends AnyFlatSpec with Matchers {
   }
 
   it should "lookup apply with an enum case class" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[EnumCaseClass])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[EnumCaseClass])
     constructor.apply(Array("a", 2.asInstanceOf[AnyRef])) shouldBe a[EnumCaseClass]
   }
 
   it should "lookup apply with an enum case class with the longest apply in the companion object" in {
-    val constructor = ConstructorCompatImpl.lookupConstructor(classOf[EnumCaseClassWithLongestApplyInObject])
+    val constructor = ConstructorCompat.lookupConstructor(classOf[EnumCaseClassWithLongestApplyInObject])
     constructor.apply(Array("a", 2.asInstanceOf[AnyRef])) shouldBe a[EnumCaseClassWithLongestApplyInObject]
   }
 
 }
 
 object ConstructorCompatTest {
-
-  case object ConstructorCompatImpl extends ConstructorCompat
 
   case class NoParameter()
 

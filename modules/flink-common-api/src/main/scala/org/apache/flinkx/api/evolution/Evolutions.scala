@@ -199,20 +199,6 @@ object Evolutions extends EvolutionsFactory {
     */
   private[api] def check(): Unit = registryOf(Thread.currentThread.getContextClassLoader).declarations
 
-  /** Return the [[Evolution]] of the given class at the given version, as a snapshot recording them restores it. */
-  @VisibleForTesting
-  private[api] def get[T](clazz: Class[T], version: Int): Evolution[T] =
-    get[T](clazz.getName, version, clazz.getClassLoader)
-
-  /** Every [[Declaration]] registered by the given class loader, by class name. */
-  @VisibleForTesting
-  private[api] def declaredEvolutions(cl: ClassLoader): Map[String, Seq[Declaration]] =
-    registries.get(cl).fold(Map.empty[String, Seq[Declaration]])(_.declarations)
-
-  /** Names of every class declared by any class loader, such as the one Flink hands the snapshots. */
-  @VisibleForTesting
-  private[api] def declaredClassNames: Set[String] = registries.values.flatMap(_.declarations.keySet).toSet
-
   /** Empty the registries: the declarations are registered again on the next lookup. */
   @VisibleForTesting
   private[api] def reset(): Unit = registries.clear()

@@ -1,18 +1,16 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.TestUtils
-import org.scalatest.BeforeAndAfterEach
+import org.apache.flinkx.api.auto._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
+/** A sealed trait renamed along with its subtypes and their fields, a subtype taking the former name of another one. */
+class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import org.apache.flinkx.api.evolution.EvolutionRenamedTest._
 
-  override protected def beforeEach(): Unit = Evolutions.reset()
-
-  /* Test to serialize Pet v0 code into Pet-v0.snapshot file, uncomment both test and code to regenerate
+  /* Test to serialize Animal v0 code into Pet-v0.snapshot file, uncomment both test and code to regenerate
   it should "serialize Animal v0" in {
     val animal: Animal = Horse("Spirit")
     serializeToFile("Pet-v0", animal)
@@ -20,20 +18,12 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils with
    */
 
   it should "deserialize Horse v0 to Pony v2" in {
-    val expected: Pet = Pony("Spirit")
-    testDeserializeFromFile("Pet-v0", expected)
+    testDeserializeFromFile[Pet]("Pet-v0", Pony("Spirit"))
   }
 
-  /* Test to serialize Pet v2 code into Pet-v2.snapshot file, uncomment to regenerate
-  it should "serialize Pet v2" in {
-    val pet: Pet = Horse("Spirit")
-    serializeToFile("Pet-v2", pet)
-  }
-   */
-
-  it should "deserialize Horse v2" in {
-    val expected: Pet = Horse("Spirit")
-    testDeserializeFromFile("Pet-v2", expected)
+  // Horse was renamed Pony in version 1, then Cat took the name Horse in version 2
+  it should "deserialize a subtype bearing the former name of another subtype" in {
+    roundtrip[Pet](createSerializer[Pet], Horse("Spirit"))
   }
 
 }
@@ -54,12 +44,12 @@ object EvolutionRenamedTest {
   @renamed(since = 1, "Horse")
   case class Pony(
     @renamed(since = 1, "name") nickname: String
-  ) extends Animal
+  ) extends Pet
   @version(1)
   @renamed(since = 1, "Lion")
   case class Cat(
     @renamed(since = 1, "name") nickname: String
-  ) extends Animal
+  ) extends Pet
    */
 
   @version(2)

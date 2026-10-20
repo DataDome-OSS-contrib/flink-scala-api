@@ -6,6 +6,7 @@ import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnap
 import org.apache.flink.core.memory._
 import org.apache.flink.util.ChildFirstClassLoader
 import org.apache.flinkx.api.SerializerSnapshotTest._
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.{Evolutions, Evolving, added, version}
@@ -142,7 +143,7 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val expectedData = WithDefault(null)
     // Serializer before schema change: without serializers for the second "new" default fields
     val oldSerializer = new CaseClassSerializer[WithDefault](
-      evolution = Evolutions.get(classOf[WithDefault], 0),
+      evolution = evolutionOf(classOf[WithDefault]),
       isCaseClassImmutable = false,
       fieldNames = Array("sc1"),
       paramSerializers = Array(implicitly[TypeSerializer[SimpleClass1]])

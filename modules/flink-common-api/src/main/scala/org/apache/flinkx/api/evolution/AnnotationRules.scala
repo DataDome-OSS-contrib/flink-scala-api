@@ -6,14 +6,9 @@ private[evolution] object AnnotationRules {
   private val OnVersionedAdt = Set("renamed", "deletedClasses", "postEvolution")
   private val OnField        = Set("added", "renamed", "transformed")
 
-  /** Whether the given annotation may describe the ADT itself.
-    *
-    * @param hasVersionedAncestor
-    *   Whether the ADT is a subtype of a versioned sealed trait, which may rename it at version 0
-    */
-  def allowedOnAdt(annotation: String, version: Int, isCoproduct: Boolean, hasVersionedAncestor: Boolean): Boolean =
-    if (version == 0) annotation == "renamed" && hasVersionedAncestor
-    else OnVersionedAdt(annotation) || (annotation == "deletedFields" && !isCoproduct)
+  /** Whether the given annotation may describe the ADT itself: a version 0 declares nothing to evolve from. */
+  def allowedOnAdt(annotation: String, version: Int, isCoproduct: Boolean): Boolean =
+    version > 0 && (OnVersionedAdt(annotation) || (annotation == "deletedFields" && !isCoproduct))
 
   /** Whether the given annotation may describe a field of the ADT. */
   def allowedOnField(annotation: String, version: Int): Boolean = version > 0 && OnField(annotation)

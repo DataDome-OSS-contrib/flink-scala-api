@@ -3,18 +3,21 @@ package org.apache.flinkx.api.evolution
 /** Hands the scan of the jars the declarations of the fixtures conflicting on purpose, only while switched on. */
 object ConflictingScan {
 
-  /** Switches on the fixtures claiming the same former name. */
-  @volatile var on = false
+  @volatile private var switchedOn: Option[String] = None
 
-  /** Switches on the fixtures of one case of a class bearing a former name its version can't tell apart. */
-  @volatile var bearing: Option[String] = None
+  /** The evolutions the companion of a conflicting fixture declares, nothing until the given fixture is switched on. */
+  def evolutionsOf[T](clazz: Class[T], fixture: String, declaring: => Evolutions[T]): Evolutions[T] =
+    if (switchedOn.contains(fixture)) declaring else new Evolutions(clazz, () => Nil)
 
-  def evolutionsOf[T](clazz: Class[T], claiming: => Evolutions[T]): Evolutions[T] =
-    if (on) claiming else none(clazz)
-
-  def bearingEvolutionsOf[T](clazz: Class[T], fixture: String, declaring: => Evolutions[T]): Evolutions[T] =
-    if (bearing.contains(fixture)) declaring else none(clazz)
-
-  private def none[T](clazz: Class[T]): Evolutions[T] = new Evolutions(clazz, () => Nil)
+  /** Runs `body` with a registry declaring the given conflicting fixture, then empties it again. */
+  def withFixture[A](fixture: String)(body: => A): A = {
+    Evolutions.reset()
+    switchedOn = Some(fixture)
+    try body
+    finally {
+      switchedOn = None
+      Evolutions.reset()
+    }
+  }
 
 }

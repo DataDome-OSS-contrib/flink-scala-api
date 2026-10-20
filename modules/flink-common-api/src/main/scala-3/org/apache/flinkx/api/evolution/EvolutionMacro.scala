@@ -144,15 +144,14 @@ private[evolution] object EvolutionMacro:
 
     /** Reject the evolution annotations that declare nothing where they are, before anything is generated. */
     def validate(): Unit = {
-      val hasVersionedAncestor = TypeRepr.of[T].baseClasses.filterNot(_ == symbol).exists(isVersioned)
-      val isCoproduct          = children.nonEmpty
+      val isCoproduct = children.nonEmpty
 
       def reject(term: Term, target: String): Nothing = report.errorAndAbort(evolutionNotAllowed(nameOf(term), target))
 
       rejectVersionedParameter(symbol)
 
       evolutionAnnotationsOf(symbol).foreach { term =>
-        if !AnnotationRules.allowedOnAdt(nameOf(term), version, isCoproduct, hasVersionedAncestor) then
+        if !AnnotationRules.allowedOnAdt(nameOf(term), version, isCoproduct) then
           reject(term, AnnotationRules.target(symbol.fullName, None, version))
         if is[renamed](term) || is[deletedClasses](term) && !isEnum then checkSince(term, symbol.fullName, classVersion)
         else if !is[postEvolution[?]](term) then checkSince(term, symbol.fullName)

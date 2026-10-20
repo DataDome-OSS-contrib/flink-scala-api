@@ -1,6 +1,6 @@
 package org.apache.flinkx.api.serializer
 
-import org.apache.flinkx.api.evolution.Evolutions
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializerTest._
 import org.apache.flinkx.api.serializer.SnapshotTestUtil._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -23,7 +23,7 @@ class ScalaCaseObjectSerializerTest extends AnyFlatSpec with Matchers {
   }
 
   private def caseObjectSerializer[T](caseObject: T) =
-    new ScalaCaseObjectSerializer[T](Evolutions.get(caseObject.getClass.asInstanceOf[Class[T]], 0))
+    new ScalaCaseObjectSerializer[T](evolutionOf(caseObject.getClass.asInstanceOf[Class[T]]))
 
 }
 

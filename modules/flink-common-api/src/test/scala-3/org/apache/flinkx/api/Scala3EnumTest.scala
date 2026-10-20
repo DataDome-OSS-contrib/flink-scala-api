@@ -75,7 +75,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
   // A state backend gates the restore on the schema compatibility resolution, before deserializing anything: the
   // evolutions are applied by the restored former serializer, so the state has to be migrated with it.
   it should "resolve the schema compatibility of FailureType v0 to FailureCategory v1 as compatible after migration" in {
-    resolveSchemaCompatibilityFromFile[FailureCategory]("Failure-Type-PARSING_TYPE-v0") shouldBe Symbol(
+    compatibilityWithFile[FailureCategory]("Failure-Type-PARSING_TYPE-v0") shouldBe Symbol(
       "compatibleAfterMigration"
     )
   }
@@ -111,18 +111,18 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
       enumValueSerializers = derived.enumValueSerializers.dropRight(1)
     )
 
-    resolveSchemaCompatibility(formerSerializer) shouldBe Symbol("incompatible")
+    compatibilityWith[RolledBackEnum](formerSerializer) shouldBe Symbol("incompatible")
   }
 
   // Two unrelated enums must never be migrated into one another, even with identical value names
   it should "resolve the schema compatibility of an unrelated enum as incompatible" in {
-    resolveSchemaCompatibilityAfterRestore[SecondUnrelatedEnum](createSerializer[FirstUnrelatedEnum]) shouldBe Symbol(
+    compatibilityWith[SecondUnrelatedEnum](createSerializer[FirstUnrelatedEnum]) shouldBe Symbol(
       "incompatible"
     )
   }
 
   it should "resolve the schema compatibility of an unevolved enum as compatible as is" in {
-    resolveSchemaCompatibility[Failure](createSerializer[Failure]) shouldBe Symbol("compatibleAsIs")
+    compatibilityWith[Failure](createSerializer[Failure]) shouldBe Symbol("compatibleAsIs")
   }
 
   // The former values are matched to the current ones by name, whatever their order
@@ -138,7 +138,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     )
 
     deserializeFormerForm[Failure](formerSerializer, Failure.MISSING_KEY) shouldBe Failure.MISSING_KEY
-    resolveSchemaCompatibilityAfterRestore[Failure](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
+    compatibilityWith[Failure](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
   /* Test to serialize FailureType.OTHER_TYPE v0 code into Failure-Type-OTHER_TYPE-v0.snapshot file, uncomment both test and code to regenerate

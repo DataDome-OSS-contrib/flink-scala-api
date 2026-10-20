@@ -3,23 +3,18 @@ package org.apache.flinkx.api.evolution
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.util.ClassUtil
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** A sealed trait whose subtypes are themselves sealed: an unchanged hierarchy restores as is, and a case object below
   * an intermediate sealed trait is declared by the trait above it.
   */
-class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils with BeforeAndAfterEach {
+class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import org.apache.flinkx.api.evolution.NestedHierarchyTest._
 
-  override protected def beforeEach(): Unit = Evolutions.reset()
-
   it should "resolve an unchanged nested hierarchy as compatible as is" in {
-    implicit val serializer: org.apache.flink.api.common.typeutils.TypeSerializer[Top] = createSerializer[Top]
-
-    resolveSchemaCompatibility(serializer) shouldBe Symbol("compatibleAsIs")
+    compatibilityWith[Top](createSerializer[Top]) shouldBe Symbol("compatibleAsIs")
   }
 
   // The derivation flattens the intermediate sealed traits: a case object below one is declared by the trait above it
