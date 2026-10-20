@@ -5,14 +5,9 @@ import org.apache.flink.api.common.serialization.{SerializerConfig, SerializerCo
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
-import org.apache.flinkx.api.serializer.{
-  CaseClassSerializer,
-  CoproductSerializer,
-  Scala3EnumSerializer,
-  Scala3EnumValueSerializer,
-  ScalaCaseObjectSerializer,
-  nullable
-}
+import org.apache.flinkx.api.evolution.Evolution.NoEvolution
+import org.apache.flinkx.api.evolution.{Evolution, Evolvable}
+import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
 
@@ -31,7 +26,8 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
   // Need to mix in via `& Product`.
   override def join[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T] =
     val cacheKey = DerivationCacheKey(classTag.runtimeClass, typeTag.toString, ctx.params.map(_.typeclass).toSeq)
     cache.get(cacheKey) match
@@ -40,32 +36,38 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
+        val fieldNames = ctx.parameters.map(_.label).toArray
+
+        val evolution = new NoEvolution(clazz, evolvable.version, fieldNames)
+
         val serializer =
-          if typeTag.isEnum then
-            new Scala3EnumValueSerializer[T & Product](typeTag.companion.get.runtimeClass, ctx.typeInfo.short)
-          else if typeTag.isModule then new ScalaCaseObjectSerializer[T & Product](clazz)
+          if typeTag.isEnum then new Scala3EnumValueSerializer[T & Product](evolution, ctx.typeInfo.short)
+          else if typeTag.isModule then new ScalaCaseObjectSerializer[T & Product](evolution)
           else
             new CaseClassSerializer[T & Product](
-              clazz = clazz,
-              scalaFieldSerializers = ctx.params.map { p =>
+              evolution = evolution,
+              isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
+              fieldNames = fieldNames,
+              paramSerializers = ctx.params.map { p =>
                 val ser = p.typeclass.createSerializer(config)
                 if (p.annotations.exists(_.isInstanceOf[nullable])) {
                   NullableSerializer.wrapIfNullIsNotSupported(ser, true)
                 } else ser
-              }.toArray,
-              isCaseClassImmutable = isCaseClassImmutable(clazz, ctx.params.map(_.label))
+              }.toArray
             )
+
         val ti = new CaseClassTypeInfo[T & Product](
           clazz = clazz,
           fieldTypes = ctx.params.map(_.typeclass),
-          fieldNames = ctx.params.map(_.label),
+          fieldNames = fieldNames,
           ser = serializer
         ).asInstanceOf[TypeInformation[T]]
         cache.putIfAbsent(cacheKey, ti).getOrElse(ti).asInstanceOf[TypeInformation[T]]
 
   override def split[T](ctx: SealedTrait[Typeclass, T])(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T]
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
   ): Typeclass[T] =
     val cacheKey = DerivationCacheKey(classTag.runtimeClass, typeTag.toString, ctx.subtypes.map(_.typeclass).toSeq)
     cache.get(cacheKey) match
@@ -73,19 +75,31 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         cached.asInstanceOf[TypeInformation[T]]
 
       case None =>
+        val clazz = classTag.runtimeClass.asInstanceOf[Class[T]]
+        // An enum value is named by its enum, and has no class of its own to serialize
+        val subtypeClasses: Array[Class[?]] =
+          if typeTag.isEnum then Array.empty else ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[?]]
+        val memberNames: Array[String] =
+          if typeTag.isEnum then ctx.subtypes.map(_.typeInfo.short).toArray else subtypeClasses.map(_.getName)
+
+        val evolution = new NoEvolution(clazz, evolvable.version)
+
         val serializer =
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
-              enumValueNames = ctx.subtypes.map(_.typeInfo.short).toArray,
+              evolution = Some(evolution.asInstanceOf[Evolution[T & Product]]),
+              enumValueNames = memberNames,
               enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             ).asInstanceOf[TypeSerializer[T]]
           else
             new CoproductSerializer[T](
-              subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray,
+              evolution = Some(evolution),
+              subtypeClasses = subtypeClasses,
+              subtypeFqns = memberNames,
               subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
             )
-        val clazz = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val ti    = new CoproductTypeInformation[T](clazz, serializer)
+
+        val ti = new CoproductTypeInformation[T](clazz, serializer)
         cache.putIfAbsent(cacheKey, ti).getOrElse(ti).asInstanceOf[TypeInformation[T]]
 
 private[api] object TypeInformationDerivation:

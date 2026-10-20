@@ -43,6 +43,7 @@ import org.apache.flink.streaming.api.functions.source._
 import org.apache.flink.streaming.api.graph.StreamGraph
 import org.apache.flink.util.{SplittableIterator, TernaryBoolean}
 import org.apache.flinkx.api.ScalaStreamOps._
+import org.apache.flinkx.api.evolution.Evolutions
 import org.apache.flinkx.api.typeinfo.FailFastTypeInfoFactory
 import org.slf4j.{Logger, LoggerFactory}
 
@@ -627,6 +628,12 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     asScalaStream(javaEnv.fromSource(source, watermarkStrategy, sourceName, typeInfo))
   }
 
+  /** Check if evolutions are correctly declared at startup, to avoid failures at the first restore. */
+  private def checked[A](submit: => A): A = {
+    Evolutions.check()
+    submit
+  }
+
   /** Triggers the program execution. The environment will execute all parts of the program that have resulted in a
     * "sink" operation. Sink operations are for example printing results or forwarding them to a message queue.
     *
@@ -635,7 +642,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     * @return
     *   The result of the job execution, containing elapsed time and accumulators.
     */
-  def execute(): JobExecutionResult = javaEnv.execute()
+  def execute(): JobExecutionResult = checked(javaEnv.execute())
 
   /** Triggers the program execution. The environment will execute all parts of the program that have resulted in a
     * "sink" operation. Sink operations are for example printing results or forwarding them to a message queue.
@@ -645,7 +652,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     * @return
     *   The result of the job execution, containing elapsed time and accumulators.
     */
-  def execute(jobName: String): JobExecutionResult = javaEnv.execute(jobName)
+  def execute(jobName: String): JobExecutionResult = checked(javaEnv.execute(jobName))
 
   /** Register a [[JobListener]] in this environment. The [[JobListener]] will be notified on specific job status
     * changed.
@@ -674,7 +681,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     *   A [[JobClient]] that can be used to communicate with the submitted job, completed on submission succeeded.
     */
   @PublicEvolving
-  def executeAsync(): JobClient = javaEnv.executeAsync()
+  def executeAsync(): JobClient = checked(javaEnv.executeAsync())
 
   /** Triggers the program execution asynchronously. The environment will execute all parts of the program that have
     * resulted in a "sink" operation. Sink operations are for example printing results or forwarding them to a message
@@ -690,7 +697,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     *   A [[JobClient]] that can be used to communicate with the submitted job, completed on submission succeeded.
     */
   @PublicEvolving
-  def executeAsync(jobName: String): JobClient = javaEnv.executeAsync(jobName)
+  def executeAsync(jobName: String): JobClient = checked(javaEnv.executeAsync(jobName))
 
   /** Creates the plan with which the system will execute the program, and returns it as a String using a JSON
     * representation of the execution data flow graph. Note that this needs to be called, before the plan is executed.

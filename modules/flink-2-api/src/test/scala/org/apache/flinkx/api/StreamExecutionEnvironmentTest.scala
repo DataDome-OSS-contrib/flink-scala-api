@@ -6,6 +6,7 @@ import org.apache.flink.api.connector.source.Boundedness
 import org.apache.flink.api.connector.source.mocks.MockSource
 import org.apache.flink.api.java.typeutils.GenericTypeInfo
 import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flinkx.api.evolution.{ConflictingScan, FormerClassConflictException}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -30,6 +31,14 @@ class StreamExecutionEnvironmentTest extends AnyFlatSpec with Matchers with Inte
     val stream = env.fromSequence(1, 100)
 
     stream.dataType shouldBe typeInfo
+  }
+
+  // A job declaring its evolutions wrongly would fail at its first restore: it must not start
+  it should "fail to execute a job whose evolutions are declared wrongly" in {
+    ConflictingScan.withFixture("sharedFormerName") {
+      intercept[FormerClassConflictException](env.execute())
+      intercept[FormerClassConflictException](env.executeAsync())
+    }
   }
 
   "TypeInformation.of(Class)" should "fail-fast trying to resolve Scala type" in {
