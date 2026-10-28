@@ -64,7 +64,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
     lineageOf(declaration.versions(1), Array("id", "count")) shouldBe Right(Seq(Some(0), Some(1), None))
     val version1 = declaration.versions(1).asInstanceOf[AdtEvolution[Probe]]
     version1.migrate(Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
-    declaration.versions(2).isAsIs(Array("id", "count", "label")) shouldBe true
+    declaration.versions(2).isAsIs(Some(Array("id", "count", "label"))) shouldBe true
   }
 
   // The field evolutions: a rename, a transform with its mapper, a delete, and an add with its default value

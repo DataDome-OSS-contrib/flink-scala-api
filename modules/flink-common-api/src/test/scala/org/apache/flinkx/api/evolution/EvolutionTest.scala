@@ -161,6 +161,16 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     deserializeFormerForm[Ticket](formerSerializer, Ticket("t")) shouldBe Ticket("t")
   }
 
+  // A case class without field records no field name either, but its snapshot has no field serializer to read by position
+  it should "add a field to a case class that had none" in {
+    val (snapshot, restored) = deserializeFormerFields(classOf[Flag], 0)
+
+    restored shouldBe Flag(on = true)
+    createSerializer[Flag].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
+  }
+
   // The migration evaluates the default value for each instance, as the constructor does, not one time for all
   it should "evaluate the default value of an added field for each restored instance" in {
     val (_, first)  = deserializeFormerFields(classOf[Stamped], 0, ("id", StringSerializer.INSTANCE, "a"))
@@ -286,6 +296,14 @@ object EvolutionTest {
   object Ticket extends Evolving[Ticket] { val evolutions = Evolutions[Ticket] }
 
   def markTicket(version: Int, ticket: Ticket): Ticket = ticket.copy(id = s"${ticket.id}@$version")
+
+  /* Flag at version 0
+  case class Flag()
+   */
+
+  @version(1)
+  case class Flag(@added(since = 1) on: Boolean = true)
+  object Flag extends Evolving[Flag] { val evolutions = Evolutions[Flag] }
 
   @version(1)
   case class Stamped(id: String, @added(since = 1) stamp: Int = Stamped.next())

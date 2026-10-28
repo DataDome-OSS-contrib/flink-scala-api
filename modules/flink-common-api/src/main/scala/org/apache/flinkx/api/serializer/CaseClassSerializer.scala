@@ -74,9 +74,7 @@ class CaseClassSerializer[T <: Product](
   @transient private lazy val constructor = lookupConstructor(tupleClass)
 
   /** Whether the former data reads as is, computed once at the first record */
-  @transient private lazy val isAsIs =
-    !evolution.isDeleted && (fieldNames.isEmpty // No field name before release 2.4.0: the fields are read by position
-      || evolution.isAsIs(fieldNames))
+  @transient private lazy val isAsIs = evolution.isAsIs(Option.when(fieldNames.length == arity)(fieldNames))
 
   /** The migration plan, computed once at the first record that needs it */
   @transient private lazy val migrationPlan: Array[MigratedField] =
@@ -270,8 +268,9 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
 
   /** `former.evolution` is the ADT evolution of the schema version that the former data was written at. */
   override protected def isEvolutionRequired(former: ScalaCaseClassSerializerSnapshot[T]): Boolean =
-    former.fieldNames.nonEmpty && // No field name before release 2.4.0: standard resolution
-      !former.evolution.isAsIs(former.fieldNames)
+    !former.evolution.isAsIs(
+      Option.when(former.fieldNames.length == former.getNestedSerializerSnapshots.length)(former.fieldNames)
+    )
 
   /** Check that the declared evolutions describe the full migration from the former schema:
     *   - plans the field evolutions on the former field names, which must give the current field names

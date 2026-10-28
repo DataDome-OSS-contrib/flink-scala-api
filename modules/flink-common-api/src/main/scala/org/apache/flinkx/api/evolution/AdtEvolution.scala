@@ -42,17 +42,14 @@ sealed class AdtEvolution[T] private[evolution] (
   /** Whether no evolution and no post-evolution mapper apply to the former data. */
   def isEmpty: Boolean = fieldEvolutions.isEmpty && enumValueEvolutions.isEmpty && postEvolution.isEmpty
 
-  /** Whether the former data of a case class needs migration: something applies to it, or the former fields have
-    * different order.
+  /** Whether the former data of a case class reads as is, without migration: nothing applies to it and its fields have
+    * the current order, or it records no field name and its fields are read by position.
     *
     * @param formerFieldNames
-    *   Former field names of the case class, in declaration order
+    *   Former field names of the case class, in declaration order. None before release 2.4.0
     */
-  def isAsIs(formerFieldNames: Array[String]): Boolean =
-    isEmpty && formerFieldNames.sameElements(currentFieldNames)
-
-  /** Whether the former class is deleted: the restored serializer reads its data, then [[migrate]] discards it. */
-  def isDeleted: Boolean = AdtEvolution.isDeletedClass(currentClass)
+  def isAsIs(formerFieldNames: Option[Array[String]]): Boolean =
+    formerFieldNames.forall(names => isEmpty && names.sameElements(currentFieldNames))
 
   /** Plan the migration of the former fields of a case class. This method reads no data.
     *
@@ -127,6 +124,9 @@ object AdtEvolution {
   private[api] final class DeletedEvolution[T](formerClassName: String, formerVersion: Int, throwOnInstance: Boolean)
       extends AdtEvolution[T](formerClassName, formerVersion, DeletedClass.asInstanceOf[Class[T]]) {
 
+    /** The former data never reads as is: [[migrate]] discards it. */
+    override def isAsIs(formerFieldNames: Option[Array[String]]): Boolean = false
+
     /** Migrate a deleted instance to `null`, or throw a [[DeletedInstanceException]]. */
     override def migrate(instance: => T): T = AdtEvolution.deletedInstance(formerClassName, throwOnInstance)
 
@@ -136,10 +136,11 @@ object AdtEvolution {
   private[api] final class NoEvolution[T](currentClass: Class[T], version: Int, fieldNames: Array[String] = Array.empty)
       extends AdtEvolution(currentClass.getName, version, currentClass, fieldNames) {
 
-    override def isAsIs(formerFieldNames: Array[String]): Boolean =
-      // Only reordered fields migrate: no former field names, an added or a deleted field keep the standard resolution
-      formerFieldNames.sameElements(currentFieldNames) ||
-        !formerFieldNames.sorted.sameElements(currentFieldNames.sorted)
+    override def isAsIs(formerFieldNames: Option[Array[String]]): Boolean =
+      // Only reordered fields migrate: an added or a deleted field keeps the standard resolution
+      formerFieldNames.forall(names =>
+        names.sameElements(currentFieldNames) || !names.sorted.sameElements(currentFieldNames.sorted)
+      )
 
   }
 

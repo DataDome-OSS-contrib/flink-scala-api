@@ -50,8 +50,8 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   it should "resolve a class deleted under a name without the $ ending the class name of a case object" in {
     val cl = getClass.getClassLoader
 
-    Evolutions.get[Litter](recorded("Bird"), 0, cl).isDeleted shouldBe true
-    Evolutions.get[Litter](named("Bird"), 0, cl).isDeleted shouldBe true
+    AdtEvolution.isDeletedClass(Evolutions.get[Litter](recorded("Bird"), 0, cl).currentClass) shouldBe true
+    AdtEvolution.isDeletedClass(Evolutions.get[Litter](named("Bird"), 0, cl).currentClass) shouldBe true
   }
 
   // Each deletion keeps its versions and its throwOnInstance: the case class deleted in version 1 reads as null

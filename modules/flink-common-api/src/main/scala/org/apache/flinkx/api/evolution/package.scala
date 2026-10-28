@@ -254,9 +254,7 @@ package object evolution {
   private[api] def evolutionNotAllowed(annotation: String, target: String): String =
     s"@$annotation annotation is not allowed on $target"
 
-  /** Message of a versioned ADT whose companion does not extend `Evolving`. The derivation of its type information
-   * gives it at compile time.
-   */
+  /** Message of a versioned ADT whose companion does not extend `Evolving`, which the macros give at compile time. */
   private[api] def companionNotEvolving(adt: String): String = {
     val name = adt.split("[.$]").last
     s"$adt declares @version. Its companion must extend Evolving:" +
