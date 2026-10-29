@@ -15,13 +15,11 @@ import scala.util.{Failure, Success, Try}
   * The builders run only at registration. When the companion creates this object, it is not fully initialized, and the
   * mappers of the annotations can be its members.
   *
-  * @param currentClass
-  *   Current class of the ADT
   * @param builders
   *   The builders of the ADT and of its case objects. A case object has no companion: its sealed trait declares it.
   */
 @Internal
-final class Evolutions[T](val currentClass: Class[T], builders: () => Seq[EvolutionBuilder[_]]) {
+final class Evolutions[T](builders: () => Seq[EvolutionBuilder[_]]) {
 
   /** The declarations to register: the ones of the ADT and of its case objects. */
   private[evolution] def declarations: Seq[Declaration] = builders().flatMap(_.build())
@@ -49,7 +47,7 @@ final class Evolutions[T](val currentClass: Class[T], builders: () => Seq[Evolut
   *   - During the restore, each ADT serializer snapshot does a lookup ([[get]]) of the former class name and the former
   *     version that it records. The restored serializer then applies this ADT evolution to the former data.
   *
-  * A declaration of a class name holds an ADT evolution for each version up to its last version, see
+  * A declaration of a class name gives the ADT evolution of each version up to its last version, see
   * [[EvolutionBuilder.build]].
   *
   * Packaging: each class loader has its own registry, so a job never reads the declarations of another job. Usually,
@@ -63,22 +61,22 @@ final class Evolutions[T](val currentClass: Class[T], builders: () => Seq[Evolut
 object Evolutions extends EvolutionsFactory {
 
   /** What one ADT declares for one class name.
-    * @param versions
-    *   The ADT evolution of each version, from 0 to the last version
+    * @param lastVersion
+    *   The highest schema version of the data written under the class name
+    * @param evolutionAt
+    *   The ADT evolution of the data written at a version from 0 to `lastVersion`
     * @param declaredBy
     *   The ADT that declares the class name
     */
   private[evolution] final case class Declaration(
       className: String,
-      versions: IndexedSeq[AdtEvolution[_]],
+      lastVersion: Int,
+      evolutionAt: Int => AdtEvolution[_],
       declaredBy: Class[_]
   ) {
 
-    /** The highest schema version of the data written under the class name. */
-    def lastVersion: Int = versions.length - 1
-
     /** The current class that the class name refers to, or the deletion marker. */
-    def currentClass: Class[_] = versions.head.currentClass
+    lazy val currentClass: Class[_] = evolutionAt(0).currentClass
 
   }
 
@@ -176,7 +174,7 @@ object Evolutions extends EvolutionsFactory {
     registryOf(cl).declarations
       .get(formerClassName)
       .flatMap(_.find(_.lastVersion >= formerVersion))
-      .map(_.versions(formerVersion))
+      .map(_.evolutionAt(formerVersion))
       .getOrElse {
         val currentClass = ClassUtil.loadClass(formerClassName, initialize = false, cl) match {
           case Success(clazz)   => clazz

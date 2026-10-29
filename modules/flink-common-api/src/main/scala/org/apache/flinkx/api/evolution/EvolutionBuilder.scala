@@ -120,7 +120,7 @@ final class EvolutionBuilder[A](
 
   /** The declaration of evolutions for one `className`. */
   private def declaration(className: String, lastVersion: Int)(evolutionAt: Int => AdtEvolution[A]): Declaration =
-    Declaration(className, (0 to lastVersion).map(evolutionAt), currentClass)
+    Declaration(className, lastVersion, evolutionAt, currentClass)
 
   /** The ADT evolution of the data written under `formerClassName` at `formerVersion`. */
   private def evolution(formerClassName: String, formerVersion: Int): AdtEvolution[A] =

@@ -23,7 +23,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
       )
 
     restored shouldBe Pair("John", "Doe")
-    createSerializer[Pair].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+    infoToSer[Pair].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
       "compatibleAfterMigration"
     )
   }
@@ -38,7 +38,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
       )
 
     restored shouldBe Counter("a", 42)
-    createSerializer[Counter].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+    infoToSer[Counter].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
       "compatibleAfterMigration"
     )
   }
@@ -53,20 +53,20 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
       )
 
     restored shouldBe Pair("John", "Doe")
-    createSerializer[Pair].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+    infoToSer[Pair].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
       "compatibleAsIs"
     )
   }
 
   // The migration finds the current subtype of each former subtype by its name, not by its position
   it should "restore the reordered subtypes of an unversioned sealed trait, a subtype being added" in {
-    implicit val current: TypeSerializer[Shape] = createSerializer[Shape]
+    implicit val current: TypeSerializer[Shape] = infoToSer[Shape]
     // At version 0, Shape had only Square and Circle, in this order
     val formerSerializer = new CoproductSerializer[Shape](
       evolution = Some(evolutionOf(classOf[Shape])),
       subtypeClasses = Array(classOf[Square], classOf[Circle]),
       subtypeNames = Array(classOf[Square].getName, classOf[Circle].getName),
-      subtypeSerializers = Array(createSerializer[Square], createSerializer[Circle])
+      subtypeSerializers = Array(infoToSer[Square], infoToSer[Circle])
     )
 
     deserializeFormerForm[Shape](formerSerializer, Circle(1)) shouldBe Circle(1)

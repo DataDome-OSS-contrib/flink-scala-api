@@ -1,6 +1,5 @@
 package org.apache.flinkx.api
 
-import org.apache.flink.api.common.serialization.SerializerConfigImpl
 import org.apache.flink.api.common.typeinfo.{BasicTypeInfo, TypeInformation}
 import org.apache.flink.api.common.typeutils.base.{MapSerializer, StringSerializer}
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
@@ -63,9 +62,6 @@ trait TestUtils extends Matchers with Inspectors {
     dataSize shouldBe input.readInt()
     assertion(result, expected)
   }
-
-  def createSerializer[T: TypeInformation]: TypeSerializer[T] =
-    implicitly[TypeInformation[T]].createSerializer(new SerializerConfigImpl())
 
   /** The former snapshot of the snapshot file of the given name, as Flink reads it from a savepoint. */
   def snapshotFromFile[T](fileName: String): TypeSerializerSnapshot[T] = {

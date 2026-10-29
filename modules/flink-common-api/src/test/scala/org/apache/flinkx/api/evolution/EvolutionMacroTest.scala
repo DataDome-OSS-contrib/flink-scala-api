@@ -60,11 +60,20 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
   it should "compute the evolution of the data written at each version of a class name" in {
     val declaration = Probe.evolutions.declarations.find(_.className == classOf[Probe].getName).get
 
-    declaration.versions.map(_.formerVersion) shouldBe Seq(0, 1, 2)
-    lineageOf(declaration.versions(1), Array("id", "count")) shouldBe Right(Seq(Some(0), Some(1), None))
-    val version1 = declaration.versions(1).asInstanceOf[AdtEvolution[Probe]]
+    declaration.lastVersion shouldBe 2
+    (0 to 2).map(declaration.evolutionAt(_).formerVersion) shouldBe Seq(0, 1, 2)
+    lineageOf(declaration.evolutionAt(1), Array("id", "count")) shouldBe Right(Seq(Some(0), Some(1), None))
+    val version1 = declaration.evolutionAt(1).asInstanceOf[AdtEvolution[Probe]]
     version1.migrate(Probe("id", "3", "default")) shouldBe Probe("id", "3", "default1")
-    declaration.versions(2).isAsIs(Some(Array("id", "count", "label"))) shouldBe true
+    declaration.evolutionAt(2).isAsIs(Some(Array("id", "count", "label"))) shouldBe true
+  }
+
+  // The registration builds no ADT evolution per version: a high version costs nothing
+  it should "declare the highest version without building an evolution for each version" in {
+    val declaration = Highest.evolutions.declarations.find(_.className == classOf[Highest].getName).get
+
+    declaration.lastVersion shouldBe Int.MaxValue
+    declaration.evolutionAt(Int.MaxValue).formerVersion shouldBe Int.MaxValue
   }
 
   // The field evolutions: a rename, a transform with its mapper, a delete, and an add with its default value
@@ -134,5 +143,9 @@ object EvolutionMacroTest {
     private[EvolutionMacroTest] def intToString(i: Int): String             = i.toString
     private[EvolutionMacroTest] def bump(version: Int, probe: Probe): Probe = probe.copy(label = probe.label + version)
   }
+
+  @version(2147483647)
+  case class Highest(a: String)
+  object Highest extends Evolving[Highest] { val evolutions = Evolutions[Highest] }
 
 }

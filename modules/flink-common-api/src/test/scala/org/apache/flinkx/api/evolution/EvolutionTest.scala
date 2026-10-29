@@ -100,7 +100,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // Version 1 deletes Horse, and a class of version 2 reuses its name
   it should "deserialize a subtype that reuses the name of a subtype deleted at a lower version" in {
-    roundtrip[Animal](createSerializer[Animal], Horse(4))
+    roundtrip[Animal](infoToSer[Animal], Horse(4))
   }
 
   // By default, a deleted instance throws: the migration discards data only with throwOnInstance = false
@@ -111,7 +111,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
       subtypeClasses = Array[Class[_]](classOf[Book], classOf[FormerTape]),
       subtypeNames = Array(classOf[Book].getName, tapeName),
       subtypeSerializers = Array[TypeSerializer[_]](
-        createSerializer[Book],
+        infoToSer[Book],
         new CaseClassSerializer[FormerTape](
           new AdtEvolution(tapeName, 0, classOf[FormerTape]),
           isCaseClassImmutable = true,
@@ -131,11 +131,11 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The post-evolution mapper applies only to former data: data written at the current version reads as is
   it should "not apply @postEvolution to a case class written at the current version" in {
-    roundtrip(createSerializer[Click], Click("id", Nil, 7, "5"))
+    roundtrip(infoToSer[Click], Click("id", Nil, 7, "5"))
   }
 
   it should "not apply @postEvolution to a sealed trait written at the current version" in {
-    roundtrip(createSerializer[Action], Cart(2))
+    roundtrip(infoToSer[Action], Cart(2))
   }
 
   // A higher version with only @postEvolution does not change the schema, but the state must still migrate
@@ -143,7 +143,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val (snapshot, restored) = deserializeFormerFields(classOf[Ticket], 0, ("id", StringSerializer.INSTANCE, "t"))
 
     restored shouldBe Ticket("t@0")
-    createSerializer[Ticket].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+    infoToSer[Ticket].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
       "compatibleAfterMigration"
     )
   }
@@ -154,7 +154,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
       evolution = evolutionOf(classOf[Ticket]),
       isCaseClassImmutable = true,
       fieldNames = None,
-      paramSerializers = Array(createSerializer[String])
+      paramSerializers = Array(infoToSer[String])
     )
 
     compatibilityWith[Ticket](formerSerializer) shouldBe Symbol("compatibleAsIs")
@@ -166,7 +166,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val (snapshot, restored) = deserializeFormerFields(classOf[Flag], 0)
 
     restored shouldBe Flag(on = true)
-    createSerializer[Flag].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+    infoToSer[Flag].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
       "compatibleAfterMigration"
     )
   }

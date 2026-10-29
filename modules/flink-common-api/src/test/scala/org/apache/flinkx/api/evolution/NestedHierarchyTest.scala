@@ -14,7 +14,7 @@ class NestedHierarchyTest extends AnyFlatSpec with Matchers with TestUtils {
   import org.apache.flinkx.api.evolution.NestedHierarchyTest._
 
   it should "resolve an unchanged nested hierarchy as compatible as is" in {
-    compatibilityWith[Top](createSerializer[Top]) shouldBe Symbol("compatibleAsIs")
+    compatibilityWith[Top](infoToSer[Top]) shouldBe Symbol("compatibleAsIs")
   }
 
   // The derivation flattens the intermediate sealed traits, so the top sealed trait declares their case objects

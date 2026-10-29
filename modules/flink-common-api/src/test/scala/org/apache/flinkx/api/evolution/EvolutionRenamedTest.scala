@@ -23,7 +23,7 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // Version 1 renames Horse to Pony and Lion to Cat, then version 2 renames Cat to Horse
   it should "deserialize a subtype that reuses the former name of another subtype" in {
-    roundtrip[Pet](createSerializer[Pet], Horse("Spirit"))
+    roundtrip[Pet](infoToSer[Pet], Horse("Spirit"))
   }
 
 }

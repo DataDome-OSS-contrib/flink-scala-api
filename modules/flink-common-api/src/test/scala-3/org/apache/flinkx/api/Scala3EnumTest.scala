@@ -20,7 +20,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // An enum value is not an ADT: its snapshot records the class name and the schema version of its enum
   it should "serialize an enum value with the version of its enum" in {
-    val enumSerializer = createSerializer[FailureCategory].asInstanceOf[Scala3EnumSerializer[FailureCategory & Product]]
+    val enumSerializer = infoToSer[FailureCategory].asInstanceOf[Scala3EnumSerializer[FailureCategory & Product]]
 
     enumSerializer.evolution.map(_.formerVersion) shouldBe Some(1)
     forAll(enumSerializer.enumValueSerializers.toSeq) {
@@ -82,7 +82,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "resolve the schema compatibility of an enum with a value deleted without annotation as incompatible" in {
     // The current schema deletes the last enum value without @deletedClasses
-    val derived = createSerializer[ValueRemovedWithoutAnnotation]
+    val derived = infoToSer[ValueRemovedWithoutAnnotation]
       .asInstanceOf[Scala3EnumSerializer[ValueRemovedWithoutAnnotation & Product]]
     val formerSerializer = new Scala3EnumSerializer(
       evolution = derived.evolution,
@@ -102,7 +102,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // After a rollback, the evolutions of the higher versions are missing: the migration is not possible
   it should "resolve the schema compatibility of an enum after a rollback as incompatible" in {
-    val derived          = createSerializer[RolledBackEnum].asInstanceOf[Scala3EnumSerializer[RolledBackEnum & Product]]
+    val derived          = infoToSer[RolledBackEnum].asInstanceOf[Scala3EnumSerializer[RolledBackEnum & Product]]
     val formerSerializer = new Scala3EnumSerializer(
       // Written at a version higher than the current version
       evolution = derived.evolution.map(current => new NoEvolution(current.currentClass, current.formerVersion + 1)),
@@ -115,18 +115,18 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The migration never converts an enum to an unrelated enum, even if their value names are the same
   it should "resolve the schema compatibility of an unrelated enum as incompatible" in {
-    compatibilityWith[SecondUnrelatedEnum](createSerializer[FirstUnrelatedEnum]) shouldBe Symbol(
+    compatibilityWith[SecondUnrelatedEnum](infoToSer[FirstUnrelatedEnum]) shouldBe Symbol(
       "incompatible"
     )
   }
 
   it should "resolve the schema compatibility of an enum declaring no evolution as compatible as is" in {
-    compatibilityWith[Failure](createSerializer[Failure]) shouldBe Symbol("compatibleAsIs")
+    compatibilityWith[Failure](infoToSer[Failure]) shouldBe Symbol("compatibleAsIs")
   }
 
   // The migration finds the current value of each former value by its name, not by its position
   it should "restore the reordered values of an unversioned enum, a value being added" in {
-    given TypeSerializer[Failure]     = createSerializer[Failure]
+    given TypeSerializer[Failure]     = infoToSer[Failure]
     val derived                       = summon[TypeSerializer[Failure]].asInstanceOf[Scala3EnumSerializer[Failure]]
     def valueSerializer(name: String) = derived.enumValueSerializers(derived.enumValueNames.indexOf(name))
     // At version 0, Failure had only UNKNOWN and MISSING_KEY, in this order

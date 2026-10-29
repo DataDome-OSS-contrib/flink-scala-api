@@ -216,11 +216,7 @@ object EvolutionsRegistryTest {
   case class FirstClaimingFormerName(a: String)
   object FirstClaimingFormerName extends Evolving[FirstClaimingFormerName] {
     def evolutions: Evolutions[FirstClaimingFormerName] =
-      ConflictingScan.evolutionsOf(
-        classOf[FirstClaimingFormerName],
-        "sharedFormerName",
-        Evolutions[FirstClaimingFormerName]
-      )
+      ConflictingScan.evolutionsOf("sharedFormerName", Evolutions[FirstClaimingFormerName])
   }
 
   @version(1)
@@ -228,11 +224,7 @@ object EvolutionsRegistryTest {
   case class SecondClaimingFormerName(a: String)
   object SecondClaimingFormerName extends Evolving[SecondClaimingFormerName] {
     def evolutions: Evolutions[SecondClaimingFormerName] =
-      ConflictingScan.evolutionsOf(
-        classOf[SecondClaimingFormerName],
-        "sharedFormerName",
-        Evolutions[SecondClaimingFormerName]
-      )
+      ConflictingScan.evolutionsOf("sharedFormerName", Evolutions[SecondClaimingFormerName])
   }
 
   @version(1)
@@ -240,7 +232,7 @@ object EvolutionsRegistryTest {
   case class ClaimingByRename(a: String)
   object ClaimingByRename extends Evolving[ClaimingByRename] {
     def evolutions: Evolutions[ClaimingByRename] =
-      ConflictingScan.evolutionsOf(classOf[ClaimingByRename], "renamedAndDeleted", Evolutions[ClaimingByRename])
+      ConflictingScan.evolutionsOf("renamedAndDeleted", Evolutions[ClaimingByRename])
   }
 
   @version(1)
@@ -248,7 +240,7 @@ object EvolutionsRegistryTest {
   case class ClaimingByDeletion(a: String)
   object ClaimingByDeletion extends Evolving[ClaimingByDeletion] {
     def evolutions: Evolutions[ClaimingByDeletion] =
-      ConflictingScan.evolutionsOf(classOf[ClaimingByDeletion], "renamedAndDeleted", Evolutions[ClaimingByDeletion])
+      ConflictingScan.evolutionsOf("renamedAndDeleted", Evolutions[ClaimingByDeletion])
   }
 
   // Reuses the former name of GivingFormerName at version 2, but this name refers to GivingFormerName up to version 2
@@ -256,7 +248,7 @@ object EvolutionsRegistryTest {
   case class TakenFormerName(a: String)
   object TakenFormerName extends Evolving[TakenFormerName] {
     def evolutions: Evolutions[TakenFormerName] =
-      ConflictingScan.evolutionsOf(classOf[TakenFormerName], "declaredReuser", Evolutions[TakenFormerName])
+      ConflictingScan.evolutionsOf("declaredReuser", Evolutions[TakenFormerName])
   }
 
   @version(3)
@@ -264,7 +256,7 @@ object EvolutionsRegistryTest {
   case class GivingFormerName(a: String)
   object GivingFormerName extends Evolving[GivingFormerName] {
     def evolutions: Evolutions[GivingFormerName] =
-      ConflictingScan.evolutionsOf(classOf[GivingFormerName], "declaredReuser", Evolutions[GivingFormerName])
+      ConflictingScan.evolutionsOf("declaredReuser", Evolutions[GivingFormerName])
   }
 
   // Reuses the former name of GivingUndeclaredName, without an evolving companion to declare its version
@@ -275,7 +267,7 @@ object EvolutionsRegistryTest {
   case class GivingUndeclaredName(a: String)
   object GivingUndeclaredName extends Evolving[GivingUndeclaredName] {
     def evolutions: Evolutions[GivingUndeclaredName] =
-      ConflictingScan.evolutionsOf(classOf[GivingUndeclaredName], "undeclaredReuser", Evolutions[GivingUndeclaredName])
+      ConflictingScan.evolutionsOf("undeclaredReuser", Evolutions[GivingUndeclaredName])
   }
 
   // Reuses a class name that DeletingCaseObjectName deletes without `$`
@@ -286,11 +278,7 @@ object EvolutionsRegistryTest {
   case class DeletingCaseObjectName(a: String)
   object DeletingCaseObjectName extends Evolving[DeletingCaseObjectName] {
     def evolutions: Evolutions[DeletingCaseObjectName] =
-      ConflictingScan.evolutionsOf(
-        classOf[DeletingCaseObjectName],
-        "caseObjectReuser",
-        Evolutions[DeletingCaseObjectName]
-      )
+      ConflictingScan.evolutionsOf("caseObjectReuser", Evolutions[DeletingCaseObjectName])
   }
 
 }

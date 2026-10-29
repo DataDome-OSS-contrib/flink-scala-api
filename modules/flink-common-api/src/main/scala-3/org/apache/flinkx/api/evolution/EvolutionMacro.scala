@@ -105,8 +105,7 @@ private[evolution] object EvolutionMacro:
       child.termRef.asType match
         case '[c] => builderImpl[c]
     )
-    val clazz = classOfExpr(TypeRepr.of[T])
-    '{ new Evolutions[T]($clazz.asInstanceOf[Class[T]], () => Seq(${ Varargs(builders) }*)) }
+    '{ new Evolutions[T](() => Seq(${ Varargs(builders) }*)) }
 
   /** The code that builds the [[EvolutionBuilder]] of `T` from its annotations, after their validation. */
   private def builderImpl[T: Type](using Quotes): Expr[EvolutionBuilder[T]] =

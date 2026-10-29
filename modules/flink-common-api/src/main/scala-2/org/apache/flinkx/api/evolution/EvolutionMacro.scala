@@ -22,7 +22,6 @@ private[api] object EvolutionMacro {
     val builders       = tpe :: moduleChildren.map(_.asType.toType)
     c.Expr[Evolutions[T]](q"""
       new _root_.org.apache.flinkx.api.evolution.Evolutions[$tpe](
-        _root_.scala.reflect.classTag[$tpe].runtimeClass.asInstanceOf[_root_.java.lang.Class[$tpe]],
         () => _root_.scala.Seq[_root_.org.apache.flinkx.api.evolution.EvolutionBuilder[_]](..${builders.map(
         builderOf(c)
       )})

@@ -38,7 +38,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   it should "serialize an enum value that reuses the former name of a renamed value as itself" in {
-    val serializer = createSerializer[Letter]
+    val serializer = infoToSer[Letter]
     val out        = new DataOutputSerializer(64)
     serializer.serialize(Letter.A, out)
 
@@ -48,7 +48,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The two values exchange their names: the names stay the same, but the migration is necessary
   it should "migrate the values of an enum swapping their names" in {
-    given TypeSerializer[Swapped] = createSerializer[Swapped]
+    given TypeSerializer[Swapped] = infoToSer[Swapped]
     val v0                        = evolutionOf(classOf[Swapped])
     val formerSerializer          = new Scala3EnumSerializer[Swapped](
       evolution = Some(v0),

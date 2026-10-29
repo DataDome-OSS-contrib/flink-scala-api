@@ -48,18 +48,18 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = new AdtEvolution(formerName, 0, classOf[RenamedCaseClass]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a", "removed")),
-      paramSerializers = Array(createSerializer[String], createSerializer[String])
+      paramSerializers = Array(infoToSer[String], infoToSer[String])
     )
 
     compatibilityWith[RenamedCaseClass](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
   it should "resolve the schema compatibility of a versioned case class written at its current version as is" in {
-    compatibilityWith[ClickAction](createSerializer[ClickAction]) shouldBe Symbol("compatibleAsIs")
+    compatibilityWith[ClickAction](infoToSer[ClickAction]) shouldBe Symbol("compatibleAsIs")
   }
 
   it should "resolve the schema compatibility of a versioned sealed trait written at its current version as is" in {
-    compatibilityWith[Action](createSerializer[Action]) shouldBe Symbol("compatibleAsIs")
+    compatibilityWith[Action](infoToSer[Action]) shouldBe Symbol("compatibleAsIs")
   }
 
   // A snapshot written before release 2.4.0 has no field names: the standard resolution compares the fields by position
@@ -68,7 +68,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[ClickAction]),
       isCaseClassImmutable = true,
       fieldNames = None,
-      paramSerializers = Array(createSerializer[String], createSerializer[String])
+      paramSerializers = Array(infoToSer[String], infoToSer[String])
     )
 
     compatibilityWith[ClickAction](formerSerializer) shouldBe Symbol("compatibleAsIs")
@@ -80,18 +80,18 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[UnrelatedFormerCaseClass]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a", "removed")),
-      paramSerializers = Array(createSerializer[String], createSerializer[String])
+      paramSerializers = Array(infoToSer[String], infoToSer[String])
     )
 
     compatibilityWith[UnrelatedCurrentCaseClass](formerSerializer) shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of an unrelated sealed trait as incompatible" in {
-    compatibilityWith[OtherSharedSubtypeTrait](createSerializer[SharedSubtypeTrait]) shouldBe Symbol("incompatible")
+    compatibilityWith[OtherSharedSubtypeTrait](infoToSer[SharedSubtypeTrait]) shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of a foreign snapshot as incompatible" in {
-    compatibilityWith[Action](createSerializer[Click]) shouldBe Symbol("incompatible")
+    compatibilityWith[Action](infoToSer[Click]) shouldBe Symbol("incompatible")
   }
 
   it should "resolve the schema compatibility of Click v0 with a wrong added field as incompatible" in {
@@ -127,7 +127,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a")),
-      paramSerializers = Array(createSerializer[String])
+      paramSerializers = Array(infoToSer[String])
     )
     val formerSerializer = new CaseClassSerializer[OuterEvolvedWithNested](
       evolution = evolutionOf(classOf[OuterEvolvedWithNested]),
@@ -145,7 +145,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a")),
-      paramSerializers = Array(createSerializer[String])
+      paramSerializers = Array(infoToSer[String])
     )
 
     compatibilityWith[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol("incompatible")
@@ -153,7 +153,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
 
   it should "resolve the schema compatibility of a sealed trait with a subtype deleted without annotation as incompatible" in {
     // The current schema deletes the last subtype without @deletedClasses
-    val derived = createSerializer[SubtypeRemovedWithoutAnnotation]
+    val derived = infoToSer[SubtypeRemovedWithoutAnnotation]
       .asInstanceOf[CoproductSerializer[SubtypeRemovedWithoutAnnotation]]
     val currentSerializer = new CoproductSerializer[SubtypeRemovedWithoutAnnotation](
       evolution = derived.evolution,
@@ -167,7 +167,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
 
   // After a rollback, the evolutions of the higher versions are missing: the migration is not possible
   it should "resolve the schema compatibility of a sealed trait after a rollback as incompatible" in {
-    val derived          = createSerializer[RolledBackTrait].asInstanceOf[CoproductSerializer[RolledBackTrait]]
+    val derived          = infoToSer[RolledBackTrait].asInstanceOf[CoproductSerializer[RolledBackTrait]]
     val formerSerializer = new CoproductSerializer[RolledBackTrait](
       // Written at a version higher than the current version
       evolution = derived.evolution.map(current => new NoEvolution(current.currentClass, current.formerVersion + 1)),
