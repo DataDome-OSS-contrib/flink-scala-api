@@ -48,7 +48,7 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val registered = serializerOf(stringSer).snapshotConfiguration()
     // A snapshot of a different class is erased to the same raw type at runtime, the way Flink sees it.
     val restored = savepointed[Other](
-      new CaseClassSerializer[Other](evolutionOf(classOf[Other]), false, Array("a"), Array(stringSer))
+      new CaseClassSerializer[Other](evolutionOf(classOf[Other]), false, Some(Array("a")), Array(stringSer))
     )
       .asInstanceOf[TypeSerializerSnapshot[Evolved]]
 
@@ -82,8 +82,18 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
       "compatibleAsIs"
     )
     val restoredSerializer = restored.restoreSerializer().asInstanceOf[CaseClassSerializer[Evolved]]
-    restoredSerializer.fieldNames shouldBe empty
+    restoredSerializer.fieldNames shouldBe None
     restoredSerializer.deserialize(in) shouldBe Evolved("x", 1)
+  }
+
+  // A state not registered again keeps the restored serializer, which the next savepoint snapshots
+  it should "be written again in the same format by the serializer it restores" in {
+    val restored =
+      new CaseClassSerializer[Evolved](evolutionOf(classOf[Evolved]), false, None, Array(stringSer, intSer))
+    val out = new DataOutputSerializer(1024)
+    TypeSerializerSnapshot.writeVersionedSnapshot(out, restored.snapshotConfiguration())
+
+    out.getCopyOfBuffer shouldBe writtenBefore240(serializerOf(stringSer, intSer))
   }
 
   it should "round-trip through writeSnapshot/readSnapshot" in {
@@ -145,7 +155,7 @@ object ScalaCaseClassSerializerSnapshotTest {
     new CaseClassSerializer[Evolved](
       evolutionOf(classOf[Evolved]),
       false,
-      Array("a", "b").take(fieldSerializers.length),
+      Some(Array("a", "b").take(fieldSerializers.length)),
       fieldSerializers.toArray
     )
 

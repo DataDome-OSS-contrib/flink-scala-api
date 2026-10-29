@@ -115,7 +115,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
         new CaseClassSerializer[FormerTape](
           new AdtEvolution(tapeName, 0, classOf[FormerTape]),
           isCaseClassImmutable = true,
-          fieldNames = Array("title"),
+          fieldNames = Some(Array("title")),
           paramSerializers = Array(StringSerializer.INSTANCE)
         )
       )
@@ -153,7 +153,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val formerSerializer = new CaseClassSerializer[Ticket](
       evolution = evolutionOf(classOf[Ticket]),
       isCaseClassImmutable = true,
-      fieldNames = Array.empty,
+      fieldNames = None,
       paramSerializers = Array(createSerializer[String])
     )
 

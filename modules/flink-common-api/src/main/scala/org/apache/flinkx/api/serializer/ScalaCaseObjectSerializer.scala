@@ -7,6 +7,15 @@ import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isSameClass, readEvolu
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
 import org.apache.flinkx.api.util.ClassUtil
 
+/** Serializer of a case object. It writes nothing, and deserialization gives the case object.
+  *
+  * A restored serializer gives the case object of the current class. For a deleted case object, it gives `null` or
+  * throws a [[org.apache.flinkx.api.evolution.DeletedInstanceException]].
+  *
+  * @param evolution
+  *   The ADT evolution. A current serializer has [[AdtEvolution.NoEvolution]]. A restored serializer has the
+  *   [[AdtEvolution]] of the former class name at the former version, which migrates the former data.
+  */
 class ScalaCaseObjectSerializer[T](val evolution: AdtEvolution[T]) extends ImmutableSerializer[T] {
 
   @transient private lazy val caseObject: T =

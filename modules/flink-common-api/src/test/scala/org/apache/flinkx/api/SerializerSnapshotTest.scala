@@ -145,7 +145,7 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val oldSerializer = new CaseClassSerializer[WithDefault](
       evolution = evolutionOf(classOf[WithDefault]),
       isCaseClassImmutable = false,
-      fieldNames = Array("sc1"),
+      fieldNames = Some(Array("sc1")),
       paramSerializers = Array(implicitly[TypeSerializer[SimpleClass1]])
     )
     val oldSnapshot = oldSerializer.snapshotConfiguration()

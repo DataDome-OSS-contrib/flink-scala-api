@@ -14,6 +14,23 @@ import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 import org.apache.flinkx.api.serializer.CoproductSerializer.CoproductSerializerSnapshot
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 
+/** Serializer of a sealed trait. It writes the index of the subtype, then the instance with the subtype serializer.
+  * Handle nullable instance.
+  *
+  * A restored serializer reads the instance with the serializer of its former subtype. Then the ADT evolution of the
+  * sealed trait migrates it.
+  *
+  * @param evolution
+  *   The ADT evolution of the sealed trait. A current serializer has [[AdtEvolution.NoEvolution]]. A restored
+  *   serializer has the [[AdtEvolution]] of the former class name at the former version, which migrates the former
+  *   data. None for a serializer restored from a snapshot written before release 2.4.0, which records no class name.
+  * @param subtypeClasses
+  *   The current classes of the subtypes. A restored serializer has the deletion marker for a deleted subtype.
+  * @param subtypeNames
+  *   The class names of the subtypes, which the snapshot records. Former class names for a restored serializer.
+  * @param subtypeSerializers
+  *   The serializers of the subtypes. The three arrays have the same order: the order of the subtype index.
+  */
 class CoproductSerializer[T](
     val evolution: Option[AdtEvolution[T]],
     val subtypeClasses: Array[Class[_]],

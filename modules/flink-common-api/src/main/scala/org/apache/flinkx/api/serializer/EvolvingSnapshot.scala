@@ -85,10 +85,14 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
 
 private[serializer] object EvolvingSnapshot {
 
-  /** Writes the class name and the schema version of the data that the given ADT evolution migrates. */
-  def writeEvolution(evolution: AdtEvolution[_], out: DataOutputView): Unit = {
+  /** Writes the class name and the schema version of the data that the given ADT evolution migrates.
+    *
+    * @param hasVersion
+    *   `false` to write the format before release 2.4.0, which records no schema version
+    */
+  def writeEvolution(evolution: AdtEvolution[_], out: DataOutputView, hasVersion: Boolean = true): Unit = {
     out.writeUTF(evolution.formerClassName)
-    out.writeInt(evolution.formerVersion)
+    if (hasVersion) out.writeInt(evolution.formerVersion)
   }
 
   /** Reads the class name and the schema version that [[writeEvolution]] wrote, and gets from the registry the ADT

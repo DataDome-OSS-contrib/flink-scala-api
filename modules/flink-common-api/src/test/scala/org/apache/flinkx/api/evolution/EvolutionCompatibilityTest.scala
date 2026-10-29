@@ -47,7 +47,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     val formerSerializer = new CaseClassSerializer[RenamedCaseClass](
       evolution = new AdtEvolution(formerName, 0, classOf[RenamedCaseClass]),
       isCaseClassImmutable = true,
-      fieldNames = Array("a", "removed"),
+      fieldNames = Some(Array("a", "removed")),
       paramSerializers = Array(createSerializer[String], createSerializer[String])
     )
 
@@ -67,7 +67,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     val formerSerializer = new CaseClassSerializer[ClickAction](
       evolution = evolutionOf(classOf[ClickAction]),
       isCaseClassImmutable = true,
-      fieldNames = Array.empty,
+      fieldNames = None,
       paramSerializers = Array(createSerializer[String], createSerializer[String])
     )
 
@@ -79,7 +79,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     val formerSerializer = new CaseClassSerializer[UnrelatedFormerCaseClass](
       evolution = evolutionOf(classOf[UnrelatedFormerCaseClass]),
       isCaseClassImmutable = true,
-      fieldNames = Array("a", "removed"),
+      fieldNames = Some(Array("a", "removed")),
       paramSerializers = Array(createSerializer[String], createSerializer[String])
     )
 
@@ -126,13 +126,13 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     val formerNestedSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
       evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
       isCaseClassImmutable = true,
-      fieldNames = Array("a"),
+      fieldNames = Some(Array("a")),
       paramSerializers = Array(createSerializer[String])
     )
     val formerSerializer = new CaseClassSerializer[OuterEvolvedWithNested](
       evolution = evolutionOf(classOf[OuterEvolvedWithNested]),
       isCaseClassImmutable = true,
-      fieldNames = Array("formerNested"),
+      fieldNames = Some(Array("formerNested")),
       paramSerializers = Array(formerNestedSerializer)
     )
 
@@ -144,7 +144,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     val formerSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
       evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
       isCaseClassImmutable = true,
-      fieldNames = Array("a"),
+      fieldNames = Some(Array("a")),
       paramSerializers = Array(createSerializer[String])
     )
 

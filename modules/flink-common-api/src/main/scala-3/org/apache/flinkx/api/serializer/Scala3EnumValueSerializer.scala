@@ -6,7 +6,16 @@ import org.apache.flinkx.api.evolution.AdtEvolution
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isSameClass, readEvolution, writeEvolution}
 import org.apache.flinkx.api.util.ClassUtil
 
-/** Serializer for Scala 3 enum value. */
+/** Serializer of a Scala 3 enum value without parameters. It writes nothing, and deserialization gives the enum value.
+  *
+  * A restored serializer gives the current enum value of `enumValueName`, under its current name if it is renamed. For
+  * a deleted enum value, it gives `null` or throws a [[org.apache.flinkx.api.evolution.DeletedInstanceException]].
+  *
+  * @param evolution
+  *   The ADT evolution of the enum: an enum value has no ADT evolution of its own.
+  * @param enumValueName
+  *   The name of the enum value, which the snapshot records. A former name for a restored serializer.
+  */
 class Scala3EnumValueSerializer[T](
     val evolution: AdtEvolution[T],
     val enumValueName: String

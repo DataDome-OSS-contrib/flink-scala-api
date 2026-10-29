@@ -13,7 +13,21 @@ import org.apache.flinkx.api.evolution.{AdtEvolution, renamedOrDeletedHint}
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 
-/** Serializer for Scala 3 enum. Handle nullable value. */
+/** Serializer of a Scala 3 enum. It writes the index of the enum value, then the value with the serializer of this enum
+  * value. Handle nullable value.
+  *
+  * A restored serializer reads the value with the serializer of its former enum value. Then the ADT evolution of the
+  * enum migrates it.
+  *
+  * @param evolution
+  *   The ADT evolution of the enum. A current serializer has [[AdtEvolution.NoEvolution]]. A restored serializer has
+  *   the [[AdtEvolution]] of the former class name at the former version, which migrates the former data. None for a
+  *   serializer restored from a snapshot written before release 2.4.0, which records no class name.
+  * @param enumValueNames
+  *   The names of the enum values, which the snapshot records. Former names for a restored serializer.
+  * @param enumValueSerializers
+  *   The serializers of the enum values, in the same order: the order of the index.
+  */
 class Scala3EnumSerializer[T <: Product](
     val evolution: Option[AdtEvolution[T]],
     val enumValueNames: Array[String],

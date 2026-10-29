@@ -67,7 +67,7 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Probe](
       evolution = new AdtEvolution[Probe](goneName, 2, classOf[Probe]),
       isCaseClassImmutable = true,
-      fieldNames = Array("id"),
+      fieldNames = Some(Array("id")),
       paramSerializers = Array(StringSerializer.INSTANCE)
     )
 

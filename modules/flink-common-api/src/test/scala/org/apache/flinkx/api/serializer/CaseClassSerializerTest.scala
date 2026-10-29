@@ -15,7 +15,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
       new CaseClassSerializer[Immutable](
         evolutionOf(classOf[Immutable]),
         true,
-        Array("a", "b"),
+        Some(Array("a", "b")),
         Array(StringSerializer.INSTANCE)
       )
     }
@@ -26,7 +26,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Immutable](
       evolutionOf(classOf[Immutable]),
       true,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     serializer.isImmutableType should be(true)
@@ -36,7 +36,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Mutable](
       evolutionOf(classOf[Mutable]),
       false,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     serializer.isImmutableType should be(false)
@@ -46,13 +46,13 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val mutableSerializer = new CaseClassSerializer[Mutable](
       evolutionOf(classOf[Mutable]),
       false,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     val serializer = new CaseClassSerializer[OuterImmutable](
       evolutionOf(classOf[OuterImmutable]),
       true,
-      Array.empty,
+      None,
       Array(mutableSerializer)
     )
     serializer.isImmutableType should be(false)
@@ -62,7 +62,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Immutable](
       evolutionOf(classOf[Immutable]),
       true,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     serializer.isImmutableSerializer should be(true)
@@ -72,7 +72,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Immutable](
       evolutionOf(classOf[Immutable]),
       true,
-      Array.empty,
+      None,
       Array(new RowSerializer(Array.empty))
     )
     serializer.isImmutableSerializer should be(false)
@@ -83,7 +83,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
       new CaseClassSerializer[Immutable](
         evolutionOf(classOf[Immutable]),
         true,
-        Array.empty,
+        None,
         Array(StringSerializer.INSTANCE)
       )
     val expectedData = Immutable("a")
@@ -98,7 +98,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
       new CaseClassSerializer[Immutable](
         evolutionOf(classOf[Immutable]),
         true,
-        Array.empty,
+        None,
         Array(StringSerializer.INSTANCE)
       )
 
@@ -111,7 +111,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val mutableSerializer = new CaseClassSerializer[Mutable](
       evolutionOf(classOf[Mutable]),
       false,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     val expectedData = Mutable("a")
@@ -126,14 +126,14 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val mutableSerializer = new CaseClassSerializer[Mutable](
       evolutionOf(classOf[Mutable]),
       false,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     val outerImmutableSerializer =
       new CaseClassSerializer[OuterImmutable](
         evolutionOf(classOf[OuterImmutable]),
         true,
-        Array.empty,
+        None,
         Array(mutableSerializer)
       )
     val expectedData = OuterImmutable(Mutable("a"))
@@ -150,14 +150,14 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
       new CaseClassSerializer[Immutable](
         evolutionOf(classOf[Immutable]),
         true,
-        Array.empty,
+        None,
         Array(StringSerializer.INSTANCE)
       )
     val outerMutableSerializer =
       new CaseClassSerializer[OuterMutable](
         evolutionOf(classOf[OuterMutable]),
         false,
-        Array.empty,
+        None,
         Array(immutableSerializer)
       )
     val expectedData = OuterMutable(Immutable("a"))
@@ -173,13 +173,13 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Immutable](
       evolutionOf(classOf[Immutable]),
       true,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     val outerSerializer = new CaseClassSerializer[OuterMutable](
       evolutionOf(classOf[OuterMutable]),
       true,
-      Array.empty,
+      None,
       Array(serializer)
     )
     val expectedData = OuterMutable(Immutable("a"))
@@ -199,7 +199,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Mutable](
       evolutionOf(classOf[Mutable]),
       false,
-      Array.empty,
+      None,
       Array(StringSerializer.INSTANCE)
     )
     serializer.duplicate() should be theSameInstanceAs serializer
@@ -209,7 +209,7 @@ class CaseClassSerializerTest extends AnyFlatSpec with Matchers {
     val serializer = new CaseClassSerializer[Mutable](
       evolutionOf(classOf[Mutable]),
       false,
-      Array.empty,
+      None,
       Array(new RowSerializer(Array.empty))
     )
     val duplicatedSerializer = serializer.duplicate()

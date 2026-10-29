@@ -132,7 +132,7 @@ trait TestUtils extends Matchers with Inspectors {
     val formerSerializer = new CaseClassSerializer[T](
       evolution = TestUtils.evolutionOf(clazz, version),
       isCaseClassImmutable = true,
-      fieldNames = formerFields.map(_._1).toArray,
+      fieldNames = Some(formerFields.map(_._1).toArray),
       paramSerializers = formerFields.map(_._2).toArray
     )
     val out = new DataOutputSerializer(1024)

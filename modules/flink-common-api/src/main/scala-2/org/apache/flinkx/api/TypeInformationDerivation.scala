@@ -39,7 +39,7 @@ private[api] trait TypeInformationDerivation {
           new CaseClassSerializer[T](
             evolution = evolution,
             isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
-            fieldNames = fieldNames,
+            fieldNames = Some(fieldNames),
             paramSerializers = ctx.parameters.map { p =>
               val ser = p.typeclass.createSerializer(config)
               if (p.annotations.exists(_.isInstanceOf[nullable])) {
