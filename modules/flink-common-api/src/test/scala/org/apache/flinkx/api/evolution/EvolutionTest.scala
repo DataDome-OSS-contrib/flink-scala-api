@@ -104,6 +104,10 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     roundtrip[Animal](infoToSer[Animal], Horse(4))
   }
 
+  it should "deserialize a Seq of a subtype that reuses the name of a subtype deleted at a lower version" in {
+    roundtrip[Seq[Horse]](infoToSer[Seq[Horse]], Seq(Horse(4)))
+  }
+
   // By default, a deleted instance throws: the migration discards data only with throwOnInstance = false
   it should "throw when deserializing an instance of a deleted subtype" in {
     val tapeName         = classOf[Shelf].getName.replace("Shelf", "Tape")

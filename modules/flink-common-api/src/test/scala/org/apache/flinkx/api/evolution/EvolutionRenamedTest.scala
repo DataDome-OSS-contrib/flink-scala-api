@@ -1,7 +1,10 @@
 package org.apache.flinkx.api.evolution
 
+import org.apache.flink.api.common.typeutils.TypeSerializer
+import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.serializer.{CaseClassSerializer, SeqSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -24,6 +27,22 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
   // Version 1 renames Horse to Pony and Lion to Cat, then version 2 renames Cat to Horse
   it should "deserialize a subtype that reuses the former name of another subtype" in {
     roundtrip[Pet](infoToSer[Pet], Horse("Spirit"))
+  }
+
+  it should "deserialize a Seq of a subtype that reuses the former name of another subtype" in {
+    roundtrip[Seq[Horse]](infoToSer[Seq[Horse]], Seq(Horse("Spirit")))
+  }
+
+  it should "deserialize a Seq of a subtype written under its former name, now reused" in {
+    val formerHorse = new CaseClassSerializer[Pony](
+      evolution = Evolutions.get[Pony](classOf[Horse].getName, 0, getClass.getClassLoader),
+      isCaseClassImmutable = true,
+      fieldNames = Some(Array("name")),
+      paramSerializers = Array[TypeSerializer[_]](StringSerializer.INSTANCE)
+    )
+    val formerSerializer = new SeqSerializer[Pony](formerHorse, classOf[Horse].asInstanceOf[Class[Pony]])
+
+    deserializeFormerForm[Seq[Pony]](formerSerializer, Seq(Pony("Spirit"))) shouldBe Seq(Pony("Spirit"))
   }
 
 }

@@ -34,8 +34,11 @@ class CollectionSerializerSnapshot[F[_], T, S <: TypeSerializer[F[T]]](
 
   override def readSnapshot(readVersion: Int, in: DataInputView, userCodeClassLoader: ClassLoader): Unit = {
     clazz = InstantiationUtil.resolveClassByName[S](in, userCodeClassLoader)
-    vclazz = Evolutions.get(in.readUTF(), 0, userCodeClassLoader).currentClass
+    val elementClassName = in.readUTF()
     nestedSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, userCodeClassLoader)
+    vclazz = Option.when(nestedSnapshot.isInstanceOf[EvolvingSnapshot[T, _]])(nestedSnapshot)
+      .flatMap(_.asInstanceOf[EvolvingSnapshot[T, _]].adtEvolution.map(_.currentClass))
+      .getOrElse(Evolutions.get(elementClassName, 0, userCodeClassLoader).currentClass)
   }
 
   override def writeSnapshot(out: DataOutputView): Unit = {
