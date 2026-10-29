@@ -40,6 +40,9 @@ class Scala3EnumSerializer[T <: Product](
     s"${evolution.fold("The enum")(_.currentClass.toString)} has ${enumValueNames.length} value names for ${enumValueSerializers.length} value serializers"
   )
 
+  // The evolution that migrates each deserialized instance, or null: a current serializer migrates nothing
+  private val migration: AdtEvolution[T] = evolution.filterNot(_.isEmpty).orNull
+
   override val isImmutableType: Boolean = enumValueSerializers.forall(_.isImmutableType)
   val isImmutableSerializer: Boolean    = enumValueSerializers.forall(s => s.duplicate().eq(s))
 
@@ -93,7 +96,7 @@ class Scala3EnumSerializer[T <: Product](
     } else {
       // The serializer of a deleted former value throws, or gives null
       val instance = enumValueSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.fold(instance)(_.migrate(instance))
+      if (migration == null) instance else migration.migrate(instance)
     }
   }
 

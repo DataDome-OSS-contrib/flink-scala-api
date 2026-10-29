@@ -185,11 +185,11 @@ class CaseClassSerializer[T <: Product](
         i += 1
       }
       if (isAsIs) createInstance(formerValues)
-      else evolution.migrate(createInstance(migrate(formerValues)))
+      else evolution.migrate(createInstance(migrateFields(formerValues)))
     }
   }
 
-  private def migrate(formerValues: Array[AnyRef]): Array[AnyRef] = {
+  private def migrateFields(formerValues: Array[AnyRef]): Array[AnyRef] = {
     val values = new Array[AnyRef](migrationPlan.length)
     var i      = 0
     while (i < values.length) {

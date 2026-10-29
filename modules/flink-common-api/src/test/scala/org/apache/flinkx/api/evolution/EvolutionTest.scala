@@ -2,11 +2,12 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
-import org.apache.flink.core.memory.DataInputViewStreamWrapper
+import org.apache.flink.core.memory.{DataInputDeserializer, DataInputViewStreamWrapper, DataOutputSerializer}
 import org.apache.flink.util.InstantiationUtil
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.evolution.AdtEvolution.DeletedEvolution
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
@@ -127,6 +128,19 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     exception.getMessage should startWith(
       s"The former data contains an instance of '$tapeName', a deleted class or enum value."
     )
+  }
+
+  it should "deserialize an instance of a deleted sealed trait to null" in {
+    val serializer = new CoproductSerializer[AnyRef](
+      evolution = Some(new DeletedEvolution[AnyRef](classOf[Shelf].getName, 0, throwOnInstance = false)),
+      subtypeClasses = Array[Class[_]](classOf[Book]),
+      subtypeNames = Array(classOf[Book].getName),
+      subtypeSerializers = Array[TypeSerializer[_]](infoToSer[Book])
+    )
+    val out = new DataOutputSerializer(64)
+    serializer.serialize(Book("Dune"), out)
+
+    serializer.deserialize(new DataInputDeserializer(out.getCopyOfBuffer)) shouldBe null
   }
 
   // The post-evolution mapper applies only to former data: data written at the current version reads as is

@@ -45,6 +45,9 @@ class CoproductSerializer[T](
       s" ${subtypeNames.length} subtype names for ${subtypeSerializers.length} subtype serializers"
   )
 
+  // The evolution that migrates each deserialized instance, or null: a current serializer migrates nothing
+  private val migration: AdtEvolution[T] = evolution.filterNot(_.isEmpty).orNull
+
   override val isImmutableType: Boolean = subtypeSerializers.forall(_.isImmutableType)
   val isImmutableSerializer: Boolean    = subtypeSerializers.forall(s => s.duplicate().eq(s))
 
@@ -98,7 +101,7 @@ class CoproductSerializer[T](
       null.asInstanceOf[T]
     } else {
       val instance = subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      evolution.fold(instance)(_.migrate(instance))
+      if (migration == null) instance else migration.migrate(instance)
     }
   }
 

@@ -124,6 +124,9 @@ object AdtEvolution {
   private[api] final class DeletedEvolution[T](formerClassName: String, formerVersion: Int, throwOnInstance: Boolean)
       extends AdtEvolution[T](formerClassName, formerVersion, DeletedClass.asInstanceOf[Class[T]]) {
 
+    /** The deletion applies to the former data. */
+    override def isEmpty: Boolean = false
+
     /** The former data never reads as is: [[migrate]] discards it. */
     override def isAsIs(formerFieldNames: Option[Array[String]]): Boolean = false
 

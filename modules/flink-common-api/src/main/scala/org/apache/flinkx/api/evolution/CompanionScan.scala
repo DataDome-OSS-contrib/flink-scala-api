@@ -23,7 +23,7 @@ private[evolution] object CompanionScan {
 
   private val EvolvingName = classOf[Evolving[_]].getName.replace('.', '/')
 
-  /** Packages that contain no evolving companion: the scan does not read their types */
+  /** Packages that contain no evolving companion: the scan reads none of their class files */
   private val LibraryPrefixes = Seq("java/", "javax/", "jdk/", "scala/")
 
   /** Class names of the evolving companions in the jars and class directories of the given class loader. */
@@ -54,7 +54,7 @@ private[evolution] object CompanionScan {
       paths
         .iterator()
         .asScala
-        .filter(path => isCompanionFile(path.toString) && Files.isRegularFile(path))
+        .filter(path => isCompanionFile(entryName(root, path)) && Files.isRegularFile(path))
         .flatMap(path => companionNamed(Files.readAllBytes(path), supertypes))
         .toList
     }
@@ -69,8 +69,13 @@ private[evolution] object CompanionScan {
         .toList
     }
 
+  /** The name of a class file in a class directory, as in a jar. */
+  private def entryName(root: Path, path: Path): String =
+    root.relativize(path).toString.replace(File.separatorChar, '/')
+
   /** The class of a companion object has the name of its type, with a final `$`. */
-  private def isCompanionFile(name: String): Boolean = name.endsWith("$.class")
+  private def isCompanionFile(name: String): Boolean =
+    name.endsWith("$.class") && !LibraryPrefixes.exists(name.startsWith)
 
   /** The class name of the given class file, if it extends [[Evolving]]. */
   private def companionNamed(classFile: Array[Byte], supertypes: Supertypes): Option[String] =
