@@ -28,12 +28,16 @@ private[evolution] object EvolutionMacro:
       val evolving  = Symbol.requiredClass(classOf[Evolving[?]].getName).typeRef.appliedTo(symbol.typeRef)
       if !companion.exists(_ <:< evolving) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
     // An enum value with parameters has no version of its own: its snapshot records the version of its enum
-    val enumOfValue =
-      if symbol.flags.is(Flags.Enum) && symbol.flags.is(Flags.Case) then
-        TypeRepr.of[T].baseClasses.find(base => base != symbol && base.flags.is(Flags.Enum))
-      else None
-    val version = Expr(versionOf(enumOfValue.getOrElse(symbol)))
+    val version = Expr(versionOf(enumOf(TypeRepr.of[T]).getOrElse(symbol)))
     '{ new Evolvable[T]($version) }
+
+  /** The enum of the given enum value with parameters, or none for another type. */
+  private def enumOf(using q: Quotes)(tpe: q.reflect.TypeRepr): Option[q.reflect.Symbol] =
+    import q.reflect.*
+    val symbol = tpe.typeSymbol
+    if symbol.flags.is(Flags.Enum) && symbol.flags.is(Flags.Case) then
+      tpe.baseClasses.find(base => base != symbol && base.flags.is(Flags.Enum))
+    else None
 
   /** Whether the given symbol declares a schema version of its own. */
   private def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
@@ -100,21 +104,38 @@ private[evolution] object EvolutionMacro:
     def caseObjectsBelow(owner: Symbol): List[Symbol] =
       if owner.flags.is(Flags.Enum) then Nil
       else owner.children.flatMap(child => if child.isTerm then List(child) else caseObjectsBelow(child))
-    val moduleChildren = caseObjectsBelow(symbol).distinct
-    val builders       = builderImpl[T] :: moduleChildren.map(child =>
-      child.termRef.asType match
-        case '[c] => builderImpl[c]
-    )
-    '{ new Evolutions[T](() => Seq(${ Varargs(builders) }*)) }
+    // An enum value with parameters has a class of its own, which the snapshot of its fields records
+    val enumValuesWithParameters = if symbol.flags.is(Flags.Enum) then symbol.children.filterNot(_.isTerm) else Nil
+    // A generic enum value has wildcard type arguments: its class does not depend on them
+    def typeOf(value: Symbol): TypeRepr =
+      value.primaryConstructor.paramSymss.flatten.filter(_.isTypeParam) match
+        case Nil        => value.typeRef
+        case typeParams => value.typeRef.appliedTo(typeParams.map(_ => TypeBounds.empty))
+    def builders(adt: Expr[EvolutionBuilder[T]]): List[Expr[EvolutionBuilder[?]]] =
+      caseObjectsBelow(symbol).distinct.map(_.termRef.asType).map { case '[c] => builderImpl[c](None) } ++
+        enumValuesWithParameters.map(typeOf(_).asType).map { case '[c] => builderImpl[c](Some(adt)) }
+    '{
+      new Evolutions[T](() => {
+        val adt = ${ builderImpl[T](None) }
+        adt +: ${ Varargs(builders('adt)) }
+      })
+    }
 
-  /** The code that builds the [[EvolutionBuilder]] of `T` from its annotations, after their validation. */
-  private def builderImpl[T: Type](using Quotes): Expr[EvolutionBuilder[T]] =
+  /** The code that builds the [[EvolutionBuilder]] of `T` from its annotations, after their validation.
+    * @param enumBuilder
+    *   The builder of the enum of `T`, if `T` is an enum value with parameters
+    */
+  private def builderImpl[T: Type](enumBuilder: Option[Expr[EvolutionBuilder[?]]])(using
+      Quotes
+  ): Expr[EvolutionBuilder[T]] =
     import quotes.reflect.*
 
-    val symbol   = TypeRepr.of[T].typeSymbol
-    val isEnum   = symbol.flags.is(Flags.Enum)
-    val children = symbol.children
-    val version  = versionOf(symbol)
+    val symbol = TypeRepr.of[T].typeSymbol
+    // An enum value with parameters has the version of its enum
+    val enumOfValue = enumOf(TypeRepr.of[T])
+    val isEnum      = symbol.flags.is(Flags.Enum) && enumOfValue.isEmpty
+    val children    = symbol.children
+    val version     = versionOf(enumOfValue.getOrElse(symbol))
     // An enum declares the evolutions of its values. A subtype of a sealed trait declares its own evolutions
     val enumValues = if isEnum then children else Nil
 
@@ -169,8 +190,8 @@ private[evolution] object EvolutionMacro:
         }
       }
 
-      // A versioned subtype of a sealed trait has its own builder, which validates its own annotations
-      children.filter(child => isEnum || !isVersioned(child)).foreach { child =>
+      // A versioned subtype or an enum value with parameters has its own builder, which validates its own annotations
+      children.filter(child => if isEnum then child.isTerm else !isVersioned(child)).foreach { child =>
         evolutionAnnotationsOf(child).foreach { term =>
           if !AnnotationRules.allowedOnUnversionedSubtype(nameOf(term), version, isEnum) then
             reject(term, child.fullName)
@@ -189,18 +210,25 @@ private[evolution] object EvolutionMacro:
           '{ $builder.declareField($name, $position, ${ annotation(term) }) }
         )
       }
+      // The builder of an enum value with parameters declares its other annotations
       val ofEnumValues = enumValues.flatMap { value =>
-        evolutionAnnotationsOf(value).map(term =>
-          '{ $builder.declareEnumValue(${ Expr(value.name) }, ${ annotation(term) }) }
-        )
+        evolutionAnnotationsOf(value)
+          .filter(is[renamed])
+          .map(term => '{ $builder.declareEnumValue(${ Expr(value.name) }, ${ annotation(term) }) })
       }
       ofClass ++ ofFields ++ ofEnumValues
 
     validate()
-    val clazz = classOfExpr(TypeRepr.of[T])
+    val clazz    = classOfExpr(TypeRepr.of[T])
+    val enclosed = enumBuilder.fold('{ None })(enumBuilder => '{ Some($enumBuilder) })
     '{
-      val builder =
-        new EvolutionBuilder[T]($clazz.asInstanceOf[Class[T]], ${ Expr(version) }, $fieldNames, ${ Expr(isEnum) })
+      val builder = new EvolutionBuilder[T](
+        $clazz.asInstanceOf[Class[T]],
+        ${ Expr(version) },
+        $fieldNames,
+        ${ Expr(isEnum) },
+        $enclosed
+      )
       ${ Expr.block(declarations('builder), '{ () }) }
       builder
     }

@@ -25,6 +25,8 @@ import scala.collection.mutable
   *   Current field names of a case class, in declaration order. Empty for a sealed trait or an enum
   * @param isEnum
   *   Whether the ADT is a Scala 3 enum, whose deleted classes are enum values
+  * @param enumBuilder
+  *   The builder of the enum of an enum value with parameters, whose class name contains a name of its enum
   * @tparam A
   *   The ADT
   */
@@ -33,7 +35,8 @@ final class EvolutionBuilder[A](
     val currentClass: Class[A],
     val currentVersion: Int,
     currentFieldNames: Array[String] = Array.empty,
-    isEnum: Boolean = false
+    isEnum: Boolean = false,
+    enumBuilder: Option[EvolutionBuilder[_]] = None
 ) {
 
   /** Former class names of the current class, with the `since` of their rename */
@@ -102,20 +105,40 @@ final class EvolutionBuilder[A](
   /** Build the [[Declaration]]s to register: one for each class name of the data of the ADT, with the ADT evolution of
     * each version up to its last version.
     *
-    * The last version of the current class name is the current version. The last version of a former class name is the
-    * `since` of its rename or deletion, minus 1.
+    * The last version of the current class name is the current version. The last version of a former class name is
+    * `since - 1` of its rename or deletion.
     */
   private[evolution] def build(): Seq[Declaration] = {
-    val current = declaration(currentClass.getName, currentVersion)(evolution(currentClass.getName, _))
-    // The data written at a version lower than the `since` of a rename has the former class name
-    val renamed = renames.toSeq.map { case (className, since) =>
-      declaration(className, since - 1)(evolution(className, _))
+    val names   = classNames
+    val current = names.map { case (className, lastVersion) =>
+      declaration(className, lastVersion)(evolution(className, _))
     }
+    // A deleted enum value with parameters has a class, named after each name of its enum
+    val deletedEnumValues = enumValueEvolutions.toSeq.collect { case Deleted(since, name, throwOnInstance) =>
+      names.map { case (enumName, lastVersion) =>
+        Deletion(s"$enumName$$$name", math.min(since, lastVersion + 1), throwOnInstance)
+      }
+    }.flatten
     // The data written at a version lower than the `since` of a deletion still contains the deleted class
-    val deleted = deletions.toSeq.map { case Deletion(className, since, throwOnInstance) =>
+    val deleted = (deletions.toSeq ++ deletedEnumValues).map { case Deletion(className, since, throwOnInstance) =>
       declaration(className, since - 1)(new DeletedEvolution[A](className, _, throwOnInstance))
     }
-    current +: (renamed ++ deleted)
+    current ++ deleted
+  }
+
+  /** The class names of the data of the ADT, with their last version. The data written at a version lower than `since`
+    * of a rename has the former class name. The class name of an enum value contains a name of its enum.
+    */
+  private def classNames: Seq[(String, Int)] = {
+    val names = (currentClass.getName -> currentVersion) +: renames.toSeq.map { case (name, since) =>
+      name -> (since - 1)
+    }
+    enumBuilder.fold(names) { ofEnum =>
+      for {
+        (enumName, enumLastVersion) <- ofEnum.classNames
+        (name, lastVersion)         <- names
+      } yield (enumName + name.stripPrefix(ofEnum.currentClass.getName)) -> math.min(enumLastVersion, lastVersion)
+    }
   }
 
   /** The declaration of evolutions for one `className`. */

@@ -1,11 +1,12 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.TypeSerializer
+import org.apache.flink.api.common.typeutils.base.IntSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
+import org.apache.flinkx.api.serializer.{CaseClassSerializer, Scala3EnumSerializer, Scala3EnumValueSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -15,10 +16,14 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
   import org.apache.flinkx.api.Scala3EnumTest.FailureCategory
   import EvolutionMacroEnumTest.*
 
-  it should "declare the enum and the former name it was renamed from" in {
+  // A deleted value can have parameters, and then a class of its own in each name of its enum
+  it should "declare the enum, the former name it was renamed from and the class names of its deleted value" in {
+    val formerName = classOf[FailureCategory].getName.replace("FailureCategory", "FailureType")
     FailureCategory.evolutions.declarations.map(_.className).toSet shouldBe Set(
       classOf[FailureCategory].getName,
-      classOf[FailureCategory].getName.replace("FailureCategory", "FailureType")
+      formerName,
+      s"${classOf[FailureCategory].getName}$$OTHER_TYPE",
+      s"$formerName$$OTHER_TYPE"
     )
   }
 
@@ -65,6 +70,63 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
     assertTypeError("Evolutions[WrongEnumValueRenamedSinceAboveVersion]")
   }
 
+  // An enum value with parameters has a class of its own, whose snapshot records its class name and its fields
+  it should "migrate an enum value with parameters renamed with an added field" in {
+    given TypeSerializer[Vehicle] = infoToSer[Vehicle]
+    val formerSerializer          = formerVehicleSerializer(classOf[Vehicle].getName)
+
+    deserializeFormerForm[Vehicle](formerSerializer, FormerValue.Car(2)) shouldBe Vehicle.Auto(2, 4)
+    compatibilityWith[Vehicle](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
+  }
+
+  it should "migrate a deleted enum value with parameters to null" in {
+    deserializeFormerForm[Vehicle](formerVehicleSerializer(classOf[Vehicle].getName), FormerValue.Truck(9)) shouldBe
+      null
+  }
+
+  // The class name of an enum value with parameters contains the name of its enum. A rename alone reads as is
+  it should "migrate an enum value with parameters of a renamed enum" in {
+    given TypeSerializer[Fleet] = infoToSer[Fleet]
+    val navyName                = classOf[Fleet].getName.replace("Fleet", "Navy")
+    val formerSerializer        = new Scala3EnumSerializer[Product](
+      evolution = Some(Evolutions.get(navyName, 0, getClass.getClassLoader)),
+      enumValueNames = Array("Ship"),
+      enumValueSerializers = Array[TypeSerializer[?]](formerValueSerializer(s"$navyName$$Ship", "crew"))
+    )
+
+    deserializeFormerForm[Fleet](formerSerializer, FormerValue.Ship(3)) shouldBe Fleet.Ship(3)
+    compatibilityWith[Fleet](formerSerializer) shouldBe Symbol("compatibleAsIs")
+  }
+
+  it should "plan the migration of a generic enum value with parameters" in {
+    evolutionOf(classOf[Box.Full[?]]).plan(Array("a")).map(_.length) shouldBe Right(2)
+  }
+
+  it should "not compile a declaration adding a field without default value to an enum value" in {
+    assertTypeError("Evolutions[WrongEnumValueAddedWithoutDefault]")
+  }
+
+  /** The serializer of Vehicle at version 0: FormerValue takes the place of its values with parameters. */
+  private def formerVehicleSerializer(vehicleName: String): Scala3EnumSerializer[Product] =
+    new Scala3EnumSerializer[Product](
+      evolution = Some(evolutionOf(classOf[Vehicle]).asInstanceOf[AdtEvolution[Product]]),
+      enumValueNames = Array("Car", "Truck", "Bike"),
+      enumValueSerializers = Array[TypeSerializer[?]](
+        formerValueSerializer(s"$vehicleName$$Car", "seats"),
+        formerValueSerializer(s"$vehicleName$$Truck", "load"),
+        new Scala3EnumValueSerializer(evolutionOf(classOf[Vehicle]), "Bike")
+      )
+    )
+
+  /** The serializer of a former enum value with one Int parameter, whose snapshot records `formerClassName`. */
+  private def formerValueSerializer(formerClassName: String, field: String): TypeSerializer[?] =
+    new CaseClassSerializer[FormerValue](
+      evolution = new AdtEvolution(formerClassName, 0, classOf[FormerValue]),
+      isCaseClassImmutable = true,
+      fieldNames = Some(Array(field)),
+      paramSerializers = Array(IntSerializer.INSTANCE)
+    )
+
 }
 
 object EvolutionMacroEnumTest {
@@ -95,5 +157,47 @@ object EvolutionMacroEnumTest {
   enum WrongEnumValueRenamedSinceAboveVersion {
     @renamed(since = 2, "A") case B
   }
+
+  /* Vehicle at version 0
+  enum Vehicle { case Car(seats: Int); case Truck(load: Int); case Bike }
+   */
+
+  @version(1)
+  @deletedClasses(since = 1, throwOnInstance = false, "Truck")
+  enum Vehicle {
+    @renamed(since = 1, "Car") case Auto(seats: Int, @added(since = 1) doors: Int = 4)
+    case Bike
+  }
+  object Vehicle extends Evolving[Vehicle] { val evolutions = Evolutions[Vehicle] }
+
+  // Takes the place of the former values with parameters, with other names to avoid a name reuse
+  enum FormerValue {
+    case Car(seats: Int)
+    case Truck(load: Int)
+    case Ship(crew: Int)
+  }
+
+  /* Fleet at version 0
+  enum Navy { case Ship(crew: Int) }
+   */
+
+  @version(1)
+  @renamed(since = 1, "Navy")
+  enum Fleet { case Ship(crew: Int) }
+  object Fleet extends Evolving[Fleet] { val evolutions = Evolutions[Fleet] }
+
+  /* Box at version 0
+  enum Box[+A] { case Full(a: A); case Empty }
+   */
+
+  @version(1)
+  enum Box[+A] {
+    case Full(a: A, @added(since = 1) n: Int = 0)
+    case Empty
+  }
+  object Box extends Evolving[Box[?]] { val evolutions = Evolutions[Box[?]] }
+
+  @version(1)
+  enum WrongEnumValueAddedWithoutDefault { case A(@added(since = 1) a: Int) }
 
 }

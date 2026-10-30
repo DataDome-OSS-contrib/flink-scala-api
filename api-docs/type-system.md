@@ -304,8 +304,10 @@ object Order extends Evolving[Order] {
 }
 ```
 
-* An ADT without `@version` has the version 0. Thus you can add `@version(1)` to an ADT that has savepoints.
+* An ADT without `@version` has the version 0. Thus, you can add `@version(1)` to an ADT that has savepoints.
 * A case object has no companion: its sealed trait declares its evolutions.
+* A Scala 3 enum value with parameters has the version of its enum, whose companion declares its evolutions. It accepts
+  the annotations of a case class.
 * If the companion of a versioned ADT does not extend `Evolving`, the derivation of its type information does not
   compile.
 * A mapper must be visible from the declaration of the ADT.
