@@ -9,7 +9,7 @@ import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.AdtEvolution.DeletedEvolution
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
+import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ListSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -280,6 +280,65 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     fromV1 shouldBe TransformedThenRenamed("cd")
   }
 
+  // The migration skips the deleted field: it builds no instance of the deleted classes, which would throw
+  it should "restore a case class whose deleted field holds instances of deleted classes" in {
+    val (snapshot, restored) = deserializeFormerFields(
+      classOf[Tapped],
+      0,
+      ("id", StringSerializer.INSTANCE, "a"),
+      (
+        "history",
+        new ListSerializer[Product](formerTapEvent, classOf[Product]),
+        List(FormerTapEvent("d", FormerTarget("t")))
+      )
+    )
+
+    restored shouldBe Tapped("a")
+    infoToSer[Tapped].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
+  }
+
+  // The deleted subtype reads as null without its fields: its field of a deleted class would throw
+  it should "deserialize an instance of a deleted subtype that holds an instance of a deleted class to null" in {
+    val cassetteName     = classOf[Rack].getName.replace("Rack", "Cassette")
+    val formerSerializer = new CoproductSerializer[AnyRef](
+      evolution = Some(evolutionOf(classOf[Rack]).asInstanceOf[AdtEvolution[AnyRef]]),
+      subtypeClasses = Array[Class[_]](classOf[Disc], classOf[FormerCassette]),
+      subtypeNames = Array(classOf[Disc].getName, cassetteName),
+      subtypeSerializers = Array[TypeSerializer[_]](
+        infoToSer[Disc],
+        new CaseClassSerializer[Product](
+          new AdtEvolution(cassetteName, 0, classOf[Product]),
+          isCaseClassImmutable = true,
+          fieldNames = Some(Array("target")),
+          paramSerializers = Array(formerTarget)
+        )
+      )
+    )
+
+    deserializeFormerForm[Rack](formerSerializer, Disc("Dune")) shouldBe Disc("Dune")
+    deserializeFormerForm[Rack](formerSerializer, FormerCassette(FormerTarget("t"))) shouldBe null
+  }
+
+  /** The serializer of the deleted class Target at version 0. FormerTarget takes its place. */
+  private def formerTarget: TypeSerializer[_] =
+    new CaseClassSerializer[Product](
+      new AdtEvolution(classOf[Tapped].getName.replace("Tapped", "Target"), 0, classOf[Product]),
+      isCaseClassImmutable = true,
+      fieldNames = Some(Array("name")),
+      paramSerializers = Array(StringSerializer.INSTANCE)
+    )
+
+  /** The serializer of the deleted class TapEvent at version 0. FormerTapEvent takes its place. */
+  private def formerTapEvent: TypeSerializer[Product] =
+    new CaseClassSerializer[Product](
+      new AdtEvolution(classOf[Tapped].getName.replace("Tapped", "TapEvent"), 0, classOf[Product]),
+      isCaseClassImmutable = true,
+      fieldNames = Some(Array("date", "target")),
+      paramSerializers = Array(StringSerializer.INSTANCE, formerTarget)
+    )
+
   // The plan of the lowest version applies all the deletions: a field renamed, then deleted, is not found
   it should "ignore a deleted field not found when deserializing Click v0" in {
     readClickV0As(classOf[WrongDeletedField]) shouldBe WrongDeletedField("a")
@@ -510,6 +569,35 @@ object EvolutionTest {
 
   // Takes the place of the deleted Tape in the former data, with another name to avoid a name reuse
   case class FormerTape(title: String)
+
+  /* Tapped at version 0
+  case class Tapped(id: String, history: List[TapEvent])
+  case class TapEvent(date: String, target: Target)
+  case class Target(name: String)
+   */
+
+  @version(1)
+  @deletedFields(since = 1, "history")
+  @deletedClasses(since = 1, "TapEvent", "Target")
+  case class Tapped(id: String)
+  object Tapped extends Evolving[Tapped] { val evolutions = Evolutions[Tapped] }
+
+  /* Rack at version 0
+  sealed trait Rack
+  case class Disc(title: String) extends Rack
+  case class Cassette(target: Target) extends Rack
+   */
+
+  @version(1)
+  @deletedClasses(since = 1, throwOnInstance = false, "Cassette")
+  sealed trait Rack
+  object Rack                    extends Evolving[Rack] { val evolutions = Evolutions[Rack] }
+  case class Disc(title: String) extends Rack
+
+  // Take the place of the deleted classes in the former data
+  case class FormerTapEvent(date: String, target: FormerTarget)
+  case class FormerTarget(name: String)
+  case class FormerCassette(target: FormerTarget)
 
   /* RenamedTwice at versions 0 and 1, then at version 2
   case class RenamedTwice(a: String)

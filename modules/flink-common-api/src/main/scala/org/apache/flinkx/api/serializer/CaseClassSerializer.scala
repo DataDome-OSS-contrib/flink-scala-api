@@ -28,15 +28,18 @@ import org.apache.flink.api.common.typeutils.{
   TypeSerializerSnapshot
 }
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
-import org.apache.flink.core.memory.{DataInputView, DataOutputView}
+import org.apache.flink.core.memory.{DataInputView, DataOutputView, DataOutputViewStreamWrapper}
 import org.apache.flink.types.NullFieldException
 import org.apache.flinkx.api.evolution.FieldEvolution.{Former, MigratedField}
+import org.apache.flinkx.api.evolution.AdtEvolution.isDeletedClass
 import org.apache.flinkx.api.evolution.{AdtEvolution, MigrationException}
-import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
+import org.apache.flinkx.api.serializer.CaseClassSerializer.{Discarded, EmptyByteArray}
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.{CurrentVersion, PositionalVersion}
 import org.apache.flinkx.api.{NullMarker, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
+
+import java.io.OutputStream
 
 /** Serializer of a case class. It delegates fields serialization to sub-serializers. Handle nullable case class.
   *
@@ -94,6 +97,13 @@ class CaseClassSerializer[T <: Product](
       case Right(migratedFields) => migratedFields
       case Left(failures)        => throw MigrationException(evolution.currentClass, evolution.formerVersion, failures)
     }
+
+  /** Which former field deserialize, computed once: it skips a deleted one, or each field of a deleted class. */
+  @transient private lazy val isKeptField: Array[Boolean] = {
+    val kept = Array.fill(fieldSerializers.length)(isAsIs)
+    if (!isAsIs && !isDeletedClass(evolution.currentClass)) migrationPlan.foreach(_.formerIndex.foreach(kept(_) = true))
+    kept
+  }
 
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
@@ -181,7 +191,8 @@ class CaseClassSerializer[T <: Product](
       val formerValues = new Array[AnyRef](sourceArity)
       var i            = 0
       while (i < sourceArity) {
-        formerValues(i) = fieldSerializers(i).deserialize(source)
+        if (isKeptField(i)) formerValues(i) = fieldSerializers(i).deserialize(source)
+        else fieldSerializers(i).copy(source, Discarded)
         i += 1
       }
       if (isAsIs) createInstance(formerValues)
@@ -221,6 +232,12 @@ class CaseClassSerializer[T <: Product](
 
 object CaseClassSerializer {
   private val EmptyByteArray: Array[Byte] = new Array(0)
+
+  /** The output of a skipped field: it discards the bytes, so its state holds no data. */
+  private val Discarded: DataOutputView = new DataOutputViewStreamWrapper(new OutputStream {
+    override def write(b: Int): Unit                             = ()
+    override def write(b: Array[Byte], off: Int, len: Int): Unit = ()
+  })
 }
 
 /** [[TypeSerializerSnapshot]] for [[CaseClassSerializer]]. */

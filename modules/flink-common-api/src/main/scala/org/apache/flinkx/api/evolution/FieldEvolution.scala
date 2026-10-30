@@ -63,21 +63,27 @@ object FieldEvolution {
     /** Migrate the values of the former fields to the current value of this field. */
     def migrate(formerValues: Array[AnyRef]): AnyRef
 
+    /** The index of the former field that gives the value of this field, if one gives it. */
+    def formerIndex: Option[Int]
+
   }
 
   /** A former field, unchanged, reordered or renamed: its current value is its former value. */
   final case class Former(index: Int) extends MigratedField {
     override def migrate(formerValues: Array[AnyRef]): AnyRef = formerValues(index)
+    override def formerIndex: Option[Int]                     = Some(index)
   }
 
   /** A field that a field mapper converts, from the result of the evolutions that apply before it. */
   final case class Transformed(field: MigratedField, mapper: AnyRef => AnyRef) extends MigratedField {
     override def migrate(formerValues: Array[AnyRef]): AnyRef = mapper(field.migrate(formerValues))
+    override def formerIndex: Option[Int]                     = field.formerIndex
   }
 
   /** An added field: its value is its default value, evaluated again for each record. */
   final case class Added(default: () => AnyRef) extends MigratedField {
     override def migrate(formerValues: Array[AnyRef]): AnyRef = default()
+    override def formerIndex: Option[Int]                     = None
   }
 
   /** Rank of a field evolution among the field evolutions with the same `since`. A lower rank applies first. */

@@ -204,7 +204,7 @@ package object evolution {
     *   of its enum
     * @param throwOnInstance
     *   `true` (default) to throw a [[DeletedInstanceException]] on an instance of a deleted class, `false` to read it
-    *   as `null`
+    *   as `null`. The migration skips an instance in a deleted field, which never throws
     * @param formerClassNames
     *   The former class names of the deleted classes
     */
