@@ -142,7 +142,7 @@ object AdtEvolution {
     override def isAsIs(formerFieldNames: Option[Array[String]]): Boolean =
       // Only reordered fields migrate: an added or a deleted field keeps the standard resolution
       formerFieldNames.forall(names =>
-        names.sameElements(currentFieldNames) || !names.sorted.sameElements(currentFieldNames.sorted)
+        names.length != currentFieldNames.length || names.sameElements(currentFieldNames)
       )
 
   }

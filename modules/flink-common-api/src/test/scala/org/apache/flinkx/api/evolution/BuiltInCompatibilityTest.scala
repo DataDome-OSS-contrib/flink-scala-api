@@ -6,7 +6,7 @@ import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.BuiltInCompatibilityTest._
-import org.apache.flinkx.api.serializer.CoproductSerializer
+import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -58,6 +58,18 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
     )
   }
 
+  // Read by position, the former fields 'a' and 'b' would be swapped
+  it should "not restore the renamed and swapped fields of an unversioned case class as is" in {
+    val formerSerializer = new CaseClassSerializer[Triple](
+      evolution = evolutionOf(classOf[Triple]),
+      isCaseClassImmutable = true,
+      fieldNames = Some(Array("a", "b", "c")),
+      paramSerializers = Array(infoToSer[String], infoToSer[String], infoToSer[String])
+    )
+
+    compatibilityWith[Triple](formerSerializer)(infoToSer[Triple]) shouldBe Symbol("incompatible")
+  }
+
   // The migration finds the current subtype of each former subtype by its name, not by its position
   it should "restore the reordered subtypes of an unversioned sealed trait, a subtype being added" in {
     implicit val current: TypeSerializer[Shape] = infoToSer[Shape]
@@ -80,6 +92,8 @@ object BuiltInCompatibilityTest {
   case class Pair(first: String, last: String)
 
   case class Counter(id: String, count: Int)
+
+  case class Triple(b: String, a: String, d: String)
 
   sealed trait Shape
   case class Circle(radius: Int) extends Shape

@@ -36,7 +36,8 @@ class CollectionSerializerSnapshot[F[_], T, S <: TypeSerializer[F[T]]](
     clazz = InstantiationUtil.resolveClassByName[S](in, userCodeClassLoader)
     val elementClassName = in.readUTF()
     nestedSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, userCodeClassLoader)
-    vclazz = Option.when(nestedSnapshot.isInstanceOf[EvolvingSnapshot[T, _]])(nestedSnapshot)
+    vclazz = Option
+      .when(nestedSnapshot.isInstanceOf[EvolvingSnapshot[T, _]])(nestedSnapshot)
       .flatMap(_.asInstanceOf[EvolvingSnapshot[T, _]].adtEvolution.map(_.currentClass))
       .getOrElse(Evolutions.get(elementClassName, 0, userCodeClassLoader).currentClass)
   }
