@@ -42,7 +42,7 @@ object ScalaCaseObjectSerializer {
 
     def this() = this(None)
 
-    private var evolution: AdtEvolution[T] = _
+    private[serializer] var evolution: AdtEvolution[T] = _
 
     serializer.foreach(s => evolution = s.evolution)
 

@@ -12,7 +12,7 @@ import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions, renamedOrDeletedHint}
 import org.apache.flinkx.api.{NullMarkerByte, VariableLengthDataType}
 import org.apache.flinkx.api.serializer.CoproductSerializer.CoproductSerializerSnapshot
-import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.{currentClassOf, isIncompatible, readEvolution, writeEvolution}
 
 /** Serializer of a sealed trait. It writes the index of the subtype, then the instance with the subtype serializer.
   * Handle nullable instance.
@@ -169,7 +169,6 @@ object CoproductSerializer {
         override def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
           evolution = Option.when(readOuterSnapshotVersion > PreEvolutionFormatVersion)(readEvolution[T](in, cl))
           subtypeNames = StringArraySerializer.INSTANCE.deserialize(in)
-          subtypeClasses = subtypeNames.map(Evolutions.get(_, adtVersion, cl).currentClass)
         }
 
       }
@@ -178,14 +177,13 @@ object CoproductSerializer {
 
     override def writeSnapshot(out: DataOutputView): Unit = adapter.writeSnapshot(out)
 
-    override def readSnapshot(readVersion: Int, in: DataInputView, userCodeClassLoader: ClassLoader): Unit =
+    override def readSnapshot(readVersion: Int, in: DataInputView, userCodeClassLoader: ClassLoader): Unit = {
       if (readVersion == 2) {
         val len = in.readInt()
 
         evolution = None // Written before release 2.4.0, without the class name of the sealed trait
 
         subtypeNames = (0 until len).map(_ => in.readUTF()).toArray
-        subtypeClasses = subtypeNames.map(Evolutions.get(_, 0, userCodeClassLoader).currentClass)
 
         val subtypeSerializers = (0 until len)
           .map(_ => TypeSerializerSnapshot.readVersionedSnapshot(in, userCodeClassLoader).restoreSerializer())
@@ -195,6 +193,11 @@ object CoproductSerializer {
       } else {
         adapter.readSnapshot(readVersion, in, userCodeClassLoader)
       }
+      // Use the subtype version to find the current class of each former subtype
+      subtypeClasses = subtypeNames.zip(adapter.getNestedSerializerSnapshots).map { case (subName, subSnapshot) =>
+        currentClassOf(subSnapshot).getOrElse(Evolutions.get(subName, adtVersion, userCodeClassLoader).currentClass)
+      }
+    }
 
     override private[serializer] def adtEvolution: Option[AdtEvolution[T]] = evolution
 

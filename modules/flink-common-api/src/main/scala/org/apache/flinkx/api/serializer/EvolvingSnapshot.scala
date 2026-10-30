@@ -3,6 +3,7 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.api.common.typeutils.{TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions}
+import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
 import org.slf4j.{Logger, LoggerFactory}
 
 /** Snapshot of an ADT serializer, which resolves the schema compatibility with the declared evolutions.
@@ -105,6 +106,13 @@ private[serializer] object EvolvingSnapshot {
   def readEvolution[T](in: DataInputView, cl: ClassLoader, hasVersion: Boolean = true): AdtEvolution[T] = {
     val className = in.readUTF()
     Evolutions.get(className, if (hasVersion) in.readInt() else 0, cl)
+  }
+
+  /** The current class of the data that the given snapshot describes, if it records its class name. */
+  def currentClassOf[T](snapshot: TypeSerializerSnapshot[T]): Option[Class[T]] = snapshot match {
+    case evolving: EvolvingSnapshot[T, _]                 => evolving.adtEvolution.map(_.currentClass)
+    case caseObject: ScalaCaseObjectSerializerSnapshot[T] => Some(caseObject.evolution.currentClass)
+    case _                                                => None
   }
 
   /** Whether two ADT evolutions migrate their data to the same current class, possibly from two class names. */

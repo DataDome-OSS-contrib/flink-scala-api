@@ -81,7 +81,7 @@ object EvolutionRenamedTest {
       @renamed(since = 1, "name") nickname: String
   ) extends Pet
   object Pony extends Evolving[Pony] { val evolutions = Evolutions[Pony] }
-  @version(1)
+  @version(2)
   @renamed(since = 1, "Lion")
   @renamed(since = 2, "Cat")
   case class Horse(

@@ -200,7 +200,8 @@ package object evolution {
     *
     * Annotation of an ADT.
     * @param since
-    *   The first version without these classes
+    *   The first version of the deleted classes without them: 1 if they had no `@version`. For an enum value, a version
+    *   of its enum
     * @param throwOnInstance
     *   `true` (default) to throw a [[DeletedInstanceException]] on an instance of a deleted class, `false` to read it
     *   as `null`
@@ -224,11 +225,24 @@ package object evolution {
         s"Cannot migrate $currentClass from version $formerVersion: ${failures.mkString("\n")}"
       )
 
-  /** No class has the former class name `formerClassName`, and no evolution declares it renamed or deleted. */
-  final case class MissingEvolutionException(formerClassName: String, formerVersion: Int, cause: Throwable)
-      extends FlinkRuntimeException(
-        s"Cannot restore '$formerClassName' written at version $formerVersion: no class has this name, and no" +
-          " evolution declares it. Declare @renamed on its current class, or @deletedClasses on its ADT",
+  /** No class has the former class name `formerClassName`, and no evolution declares it renamed or deleted at
+    * `formerVersion`.
+    * @param lastVersion
+    *   The last version of the data that the evolutions declare under this class name, if they declare it
+    */
+  final case class MissingEvolutionException(
+      formerClassName: String,
+      formerVersion: Int,
+      lastVersion: Option[Int],
+      cause: Throwable
+  ) extends FlinkRuntimeException(
+        s"Cannot restore '$formerClassName' written at version $formerVersion: " + lastVersion.fold(
+          "no class has this name, and no evolution declares it. Declare @renamed on its current class, or" +
+            " @deletedClasses on its ADT"
+        )(last =>
+          s"the evolutions declare this class name up to version $last. Declare its @renamed or @deletedClasses" +
+            s" since a version above $formerVersion"
+        ),
         cause
       )
 

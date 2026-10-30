@@ -397,8 +397,9 @@ In this example:
 * The library resolves the other names from the enclosing class, or from the package, of the annotated class.
 * The class of a case object ends with `$`. `@renamed` adds it when you omit it. In `@deletedClasses`, a name without
   `$` refers to the class and to the case object of this name.
-* A renamed subtype declares its own `@version`. Its `since` applies to its own versions and to the versions of its
-  sealed trait.
+* A subtype has its own versions, which do not depend on the versions of its sealed trait. A renamed subtype declares its
+  own `@version`, and the `since` of its rename counts in its own versions.
+* The `since` of a deleted class counts in the versions of this class, 1 if it had no `@version`.
 
 Version 0:
 ```scala

@@ -147,9 +147,6 @@ private[api] object EvolutionMacro {
     def evolutionAnnotationsOf(owner: Symbol): List[Annotation] =
       owner.annotations.filter(_.tree.tpe.baseClasses.contains(typeOf[EvolutionAnnotation].typeSymbol))
 
-    // A rename or deletion of a subtype can count in the versions of its sealed traits, which record its name
-    val classVersion = (version :: tpe.baseClasses.filter(isVersioned).map(ancestor => versionOf(c)(ancestor))).max
-
     /** Reject a `since` that is not an integer literal, or not from 1 to `lastVersion`. */
     def checkSince(annotation: Annotation, target: String, lastVersion: Int = version): Unit = {
       val since = intArgument(c)(annotation, "since")
@@ -172,9 +169,9 @@ private[api] object EvolutionMacro {
         if (!AnnotationRules.allowedOnAdt(nameOf(annotation), version, isCoproduct)) {
           reject(annotation, AnnotationRules.target(symbol.fullName, None, version))
         }
-        if (is(annotation, Renamed) || is(annotation, DeletedClasses)) {
-          checkSince(annotation, symbol.fullName, classVersion)
-        } else if (!is(annotation, PostEvolution)) checkSince(annotation, symbol.fullName)
+        // The `since` of a deleted class counts in the versions of this class, not in the versions of the ADT
+        if (is(annotation, DeletedClasses)) checkSince(annotation, symbol.fullName, Int.MaxValue)
+        else if (!is(annotation, PostEvolution)) checkSince(annotation, symbol.fullName)
       }
 
       if (symbol.annotations.count(annotation => is(annotation, PostEvolution)) > 1) {

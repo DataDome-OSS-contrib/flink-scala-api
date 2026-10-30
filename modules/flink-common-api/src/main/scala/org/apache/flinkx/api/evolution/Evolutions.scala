@@ -170,19 +170,26 @@ object Evolutions extends EvolutionsFactory {
     * @throws Throwable
     *   the failure of the registration
     */
-  def get[T](formerClassName: String, formerVersion: Int, cl: ClassLoader): AdtEvolution[T] =
-    registryOf(cl).declarations
-      .get(formerClassName)
-      .flatMap(_.find(_.lastVersion >= formerVersion))
+  def get[T](formerClassName: String, formerVersion: Int, cl: ClassLoader): AdtEvolution[T] = {
+    val declarations = registryOf(cl).declarations.getOrElse(formerClassName, Nil)
+    declarations
+      .find(_.lastVersion >= formerVersion)
       .map(_.evolutionAt(formerVersion))
       .getOrElse {
         val currentClass = ClassUtil.loadClass(formerClassName, initialize = false, cl) match {
           case Success(clazz)   => clazz
-          case Failure(failure) => throw MissingEvolutionException(formerClassName, formerVersion, failure)
+          case Failure(failure) =>
+            throw MissingEvolutionException(
+              formerClassName,
+              formerVersion,
+              declarations.lastOption.map(_.lastVersion),
+              failure
+            )
         }
         new NoEvolution(currentClass, formerVersion, ConstructorCompat.lookupFieldNames(currentClass))
       }
       .asInstanceOf[AdtEvolution[T]]
+  }
 
   /** Submission check: register the declarations of the evolving companions of the job, from the thread of its main.
     *
