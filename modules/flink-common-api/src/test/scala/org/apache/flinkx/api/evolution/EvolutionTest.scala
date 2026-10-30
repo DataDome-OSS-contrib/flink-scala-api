@@ -242,6 +242,44 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
   }
 
+  // Version 2 renames 'a' to 'b', then version 3 renames 'b' to 'c'
+  it should "restore a field renamed twice" in {
+    forAll(Seq(1 -> "a", 2 -> "b")) { case (version, formerName) =>
+      val (snapshot, restored) =
+        deserializeFormerFields(classOf[RenamedTwice], version, (formerName, StringSerializer.INSTANCE, "x"))
+
+      restored shouldBe RenamedTwice("x")
+      infoToSer[RenamedTwice].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+        "compatibleAfterMigration"
+      )
+    }
+  }
+
+  // Version 1 adds 'id', then version 2 renames it to 'ident'
+  it should "restore a field added, then renamed" in {
+    val (_, fromV0) = deserializeFormerFields(classOf[AddedThenRenamed], 0, ("name", StringSerializer.INSTANCE, "n"))
+    val (_, fromV1) = deserializeFormerFields(
+      classOf[AddedThenRenamed],
+      1,
+      ("name", StringSerializer.INSTANCE, "n"),
+      ("id", StringSerializer.INSTANCE, "i")
+    )
+
+    fromV0 shouldBe AddedThenRenamed("n", "none")
+    fromV1 shouldBe AddedThenRenamed("n", "i")
+  }
+
+  // Version 1 transforms 'sessionId', then version 2 renames it to 'id'
+  it should "restore a field transformed, then renamed" in {
+    val (_, fromV0) =
+      deserializeFormerFields(classOf[TransformedThenRenamed], 0, ("sessionId", StringSerializer.INSTANCE, "ab"))
+    val (_, fromV1) =
+      deserializeFormerFields(classOf[TransformedThenRenamed], 1, ("sessionId", StringSerializer.INSTANCE, "cd"))
+
+    fromV0 shouldBe TransformedThenRenamed("AB")
+    fromV1 shouldBe TransformedThenRenamed("cd")
+  }
+
   // The plan of the lowest version applies all the deletions: a field renamed, then deleted, is not found
   it should "ignore a deleted field not found when deserializing Click v0" in {
     readClickV0As(classOf[WrongDeletedField]) shouldBe WrongDeletedField("a")
@@ -472,6 +510,37 @@ object EvolutionTest {
 
   // Takes the place of the deleted Tape in the former data, with another name to avoid a name reuse
   case class FormerTape(title: String)
+
+  /* RenamedTwice at versions 0 and 1, then at version 2
+  case class RenamedTwice(a: String)
+  @version(2) case class RenamedTwice(@renamed(since = 2, "a") b: String)
+   */
+
+  @version(3)
+  case class RenamedTwice(@renamed(since = 2, "a") @renamed(since = 3, "b") c: String)
+  object RenamedTwice extends Evolving[RenamedTwice] { val evolutions = Evolutions[RenamedTwice] }
+
+  /* AddedThenRenamed at version 0, then at version 1
+  case class AddedThenRenamed(name: String)
+  @version(1) case class AddedThenRenamed(name: String, @added(since = 1) id: String = "none")
+   */
+
+  @version(2)
+  case class AddedThenRenamed(name: String, @added(since = 1) @renamed(since = 2, "id") ident: String = "none")
+  object AddedThenRenamed extends Evolving[AddedThenRenamed] { val evolutions = Evolutions[AddedThenRenamed] }
+
+  val upperCase: String => String = _.toUpperCase
+
+  /* TransformedThenRenamed at version 0, then at version 1
+  case class TransformedThenRenamed(sessionId: String)
+  @version(1) case class TransformedThenRenamed(@transformed(since = 1, upperCase) sessionId: String)
+   */
+
+  @version(2)
+  case class TransformedThenRenamed(@transformed(since = 1, upperCase) @renamed(since = 2, "sessionId") id: String)
+  object TransformedThenRenamed extends Evolving[TransformedThenRenamed] {
+    val evolutions = Evolutions[TransformedThenRenamed]
+  }
 
   /* RenamedOverDeleted and RenamedOverDeclaredDeleted at version 0
   case class RenamedOverDeleted(a: Int, b: Int)

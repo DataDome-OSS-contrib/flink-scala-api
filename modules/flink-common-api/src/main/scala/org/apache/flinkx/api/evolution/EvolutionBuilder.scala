@@ -45,6 +45,7 @@ final class EvolutionBuilder[A](
   /** Deleted class names, with one deletion for each `since`: a reused name can be deleted again */
   private val deletions = mutable.ArrayBuffer.empty[Deletion]
 
+  /** Field evolutions under the current field names: [[fieldEvolutionsAtSince]] gives the names at their `since` */
   private val fieldEvolutions = mutable.ArrayBuffer.empty[FieldEvolution]
 
   /** A reused enum value name has several evolutions: the first one with a `since` above the former version applies */
@@ -68,6 +69,24 @@ final class EvolutionBuilder[A](
     case renamed(since, formerName) => fieldEvolutions += Rename(since, formerName, name)
     case transformed(since, mapper) => fieldEvolutions += Transform(since, name, mapper.asInstanceOf[AnyRef => AnyRef])
     case _                          => notAllowed(annotation, s"${currentClass.getName}.$name")
+  }
+
+  /** The field evolutions, each one under the name of its field at its `since`: a later rename gives another name. */
+  private def fieldEvolutionsAtSince: Seq[FieldEvolution] = {
+    val renamesOf = fieldEvolutions.collect { case rename: Rename => rename }.groupBy(_.currentName)
+    // The name of the field `currentName` in `version`: the former name of its next rename, or its current name
+    def nameAt(currentName: String, version: Int): String =
+      renamesOf
+        .getOrElse(currentName, Nil)
+        .filter(_.since > version)
+        .minByOption(_.since)
+        .fold(currentName)(_.formerName)
+    fieldEvolutions.toSeq.map {
+      case Rename(since, formerName, currentName) => Rename(since, formerName, nameAt(currentName, since))
+      case Transform(since, name, mapper)         => Transform(since, nameAt(name, since), mapper)
+      case add: Add                               => add.copy(name = nameAt(add.name, add.since))
+      case delete                                 => delete
+    }
   }
 
   /** Add an evolution annotation of the enum value `name`. */
@@ -111,7 +130,7 @@ final class EvolutionBuilder[A](
   private[evolution] def build(): Seq[Declaration] = {
     val names   = classNames
     val current = names.map { case (className, lastVersion) =>
-      declaration(className, lastVersion)(evolution(className, _))
+      declaration(className, lastVersion)(evolution(className, _, fieldEvolutionsAtSince.sorted))
     }
     // A deleted enum value with parameters has a class, named after each name of its enum
     val deletedEnumValues = enumValueEvolutions.toSeq.collect { case Deleted(since, name, throwOnInstance) =>
@@ -145,15 +164,15 @@ final class EvolutionBuilder[A](
   private def declaration(className: String, lastVersion: Int)(evolutionAt: Int => AdtEvolution[A]): Declaration =
     Declaration(className, lastVersion, evolutionAt, currentClass)
 
-  /** The ADT evolution of the data written under `formerClassName` at `formerVersion`. */
-  private def evolution(formerClassName: String, formerVersion: Int): AdtEvolution[A] =
+  /** The ADT evolution of the data written under `formerClassName` at `formerVersion`, with the sorted `fields`. */
+  private def evolution(formerClassName: String, formerVersion: Int, fields: Seq[FieldEvolution]): AdtEvolution[A] =
     new AdtEvolution[A](
       formerClassName = formerClassName,
       formerVersion = formerVersion,
       currentClass = currentClass,
       currentFieldNames = currentFieldNames,
       // An evolution applies only to the data written at a version lower than its `since`
-      fieldEvolutions = fieldEvolutions.filter(_.since > formerVersion).sorted.toArray,
+      fieldEvolutions = fields.filter(_.since > formerVersion).toArray,
       enumValueEvolutions = enumValueEvolutions
         .filter(_.since > formerVersion)
         .groupBy(_.formerName)
