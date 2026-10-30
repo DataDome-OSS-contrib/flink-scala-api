@@ -2,7 +2,7 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions}
+import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions, MigrationException, renamedOrDeletedHint}
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isSameClass, readEvolution, writeEvolution}
 import org.apache.flinkx.api.util.ClassUtil
 
@@ -25,9 +25,19 @@ class Scala3EnumValueSerializer[T](
   @transient private lazy val companionClass: Class[?] =
     Class.forName(ClassUtil.companionName(evolution.currentClass.getName), false, evolution.currentClass.getClassLoader)
 
-  /** The enum value named `valueName`, read from the static fields of the companion module class. */
+  /** The enum value named `valueName`, read from the static fields of the companion module class.
+    * @throws org.apache.flinkx.api.evolution.MigrationException
+    *   if the current enum has no value of this name
+    */
   private def valueOf(valueName: String): T =
-    companionClass.getFields.find(_.getName == valueName).map(_.get(null)).orNull.asInstanceOf[T]
+    companionClass.getFields.find(_.getName == valueName).fold(throw notInEnum(valueName))(_.get(null).asInstanceOf[T])
+
+  private def notInEnum(valueName: String): MigrationException =
+    MigrationException(
+      evolution.currentClass,
+      evolution.formerVersion,
+      Seq(s"Former enum value '$valueName' is not in ${evolution.currentClass}. ${renamedOrDeletedHint(valueName)}")
+    )
 
   @transient private lazy val enumValue: T = evolution.migrateEnumValue(enumValueName)(valueOf)
 

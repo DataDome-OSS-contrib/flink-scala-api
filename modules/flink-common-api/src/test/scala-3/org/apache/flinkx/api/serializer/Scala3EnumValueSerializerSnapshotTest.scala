@@ -2,6 +2,7 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.evolution.MigrationException
 import org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshotTest.Failure
 import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
 import org.scalatest.flatspec.AnyFlatSpec
@@ -34,6 +35,12 @@ class Scala3EnumValueSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val registeredSnapshot = enumValueSerializer("PARSE_ERROR").snapshotConfiguration()
     registeredSnapshot.resolveSchemaCompatibility(restoredSnapshot) shouldBe Symbol("compatibleAsIs")
     restoredSnapshot.restoreSerializer().createInstance() shouldBe Failure.PARSE_ERROR
+  }
+
+  // A former enum value that the enum no longer has, without @renamed or @deletedClasses
+  it should "fail to deserialize a former enum value that the current enum does not have" in {
+    val failure = intercept[MigrationException](enumValueSerializer("TIMEOUT").deserialize(new DataInputDeserializer()))
+    failure.getMessage should include("'TIMEOUT'")
   }
 
   private def enumValueSerializer(enumValueName: String) =
