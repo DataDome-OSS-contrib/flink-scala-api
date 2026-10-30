@@ -111,13 +111,14 @@ object FieldEvolution {
 
     override def apply(fields: mutable.Map[String, MigratedField]): Option[String] =
       fields.remove(formerName) match {
-        case Some(field) => fields.put(currentName, field); None
-        case _           => notFound("rename", formerName, fields.keys)
+        case None                                    => notFound("rename", formerName, fields.keys)
+        case Some(_) if fields.contains(currentName) => alreadyThere("rename", currentName, fields.keys)
+        case Some(field)                             => fields.put(currentName, field); None
       }
 
   }
 
-  /** Convert the value of the field `name` with the field mapper `mapper`. Declared by `@transformed`. */
+  /** Convert the value of the field `name` with the `mapper`. Declared by `@transformed`. */
   private[evolution] final case class Transform(override val since: Int, name: String, mapper: AnyRef => AnyRef)
       extends FieldEvolution(since, Phase.Transform) {
 
@@ -144,11 +145,9 @@ object FieldEvolution {
     @transient private lazy val defaultValue: () => AnyRef = ClassUtil.defaultFieldValue(currentClass, fieldIndex)
 
     override def apply(fields: mutable.Map[String, MigratedField]): Option[String] =
-      if (fields.contains(name)) {
-        Some(s"Cannot add field '$name': it is already one of ${fields.keys.mkString("[\"", "\",\"", "\"]")}")
-      } else {
-        fields.put(name, Added(() => defaultValue()))
-        None
+      fields.put(name, Added(() => defaultValue())) match {
+        case Some(_) => alreadyThere("add", name, fields.keys)
+        case _       => None
       }
 
   }
@@ -156,5 +155,9 @@ object FieldEvolution {
   /** Why `operation` cannot find the field `name` among the given fields. */
   private def notFound(operation: String, name: String, fields: Iterable[String]): Option[String] =
     Some(s"Cannot $operation field '$name': it is not one of ${fields.mkString("[\"", "\",\"", "\"]")}")
+
+  /** Why `operation` cannot give the field `name`: a field among the given fields already has it. */
+  private def alreadyThere(operation: String, name: String, fields: Iterable[String]): Option[String] =
+    Some(s"Cannot $operation field '$name': it is already one of ${fields.mkString("[\"", "\",\"", "\"]")}")
 
 }

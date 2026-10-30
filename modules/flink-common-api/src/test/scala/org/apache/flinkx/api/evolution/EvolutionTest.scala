@@ -1,6 +1,6 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.api.common.typeutils.base.StringSerializer
+import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataInputViewStreamWrapper, DataOutputSerializer}
 import org.apache.flink.util.InstantiationUtil
@@ -213,6 +213,33 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val exception = intercept[MigrationException](readClickV0As(classOf[WrongTransformedField]))
     exception.getMessage shouldBe s"Cannot migrate ${classOf[WrongTransformedField]} from version 0: Cannot transform" +
       " field 'wrongFieldName': it is not one of [\"a\"]"
+  }
+
+  // Without @deletedFields, the rename would discard the former value of 'a'
+  it should "not restore a field renamed to the name of an undeclared deleted field" in {
+    val exception = intercept[MigrationException](
+      deserializeFormerFields(
+        classOf[RenamedOverDeleted],
+        0,
+        ("a", IntSerializer.INSTANCE, 1),
+        ("b", IntSerializer.INSTANCE, 2)
+      )
+    )
+    exception.getMessage should include("Cannot rename field 'a': it is already one of")
+  }
+
+  it should "restore a field renamed to the name of a deleted field" in {
+    val (snapshot, restored) = deserializeFormerFields(
+      classOf[RenamedOverDeclaredDeleted],
+      0,
+      ("a", IntSerializer.INSTANCE, 1),
+      ("b", IntSerializer.INSTANCE, 2)
+    )
+
+    restored shouldBe RenamedOverDeclaredDeleted(2)
+    infoToSer[RenamedOverDeclaredDeleted].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
   }
 
   // The plan of the lowest version applies all the deletions: a field renamed, then deleted, is not found
@@ -445,5 +472,20 @@ object EvolutionTest {
 
   // Takes the place of the deleted Tape in the former data, with another name to avoid a name reuse
   case class FormerTape(title: String)
+
+  /* RenamedOverDeleted and RenamedOverDeclaredDeleted at version 0
+  case class RenamedOverDeleted(a: Int, b: Int)
+   */
+
+  @version(1)
+  case class RenamedOverDeleted(@renamed(since = 1, "b") a: Int)
+  object RenamedOverDeleted extends Evolving[RenamedOverDeleted] { val evolutions = Evolutions[RenamedOverDeleted] }
+
+  @version(1)
+  @deletedFields(since = 1, "a")
+  case class RenamedOverDeclaredDeleted(@renamed(since = 1, "b") a: Int)
+  object RenamedOverDeclaredDeleted extends Evolving[RenamedOverDeclaredDeleted] {
+    val evolutions = Evolutions[RenamedOverDeclaredDeleted]
+  }
 
 }
