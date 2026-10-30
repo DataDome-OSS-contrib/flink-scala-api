@@ -111,6 +111,11 @@ object ClassUtil {
   /** Whether the given class is the class of a Scala object, which holds its instance in a static `MODULE$` field. */
   def isObjectClass(clazz: Class[_]): Boolean = moduleField(clazz).isDefined
 
+  /** Whether the given class is the mirror class of a top-level Scala object: it holds the static forwarders of the
+    * object, under its name without `$`, and has no constructor.
+    */
+  def isMirrorClass(clazz: Class[_]): Boolean = !clazz.isInterface && clazz.getDeclaredConstructors.isEmpty
+
   /** The instance of the given Scala object class, which this call initializes. None for another class. */
   def moduleOf(clazz: Class[_]): Option[AnyRef] = moduleField(clazz).map(_.get(null))
 

@@ -153,12 +153,16 @@ object Evolutions extends EvolutionsFactory {
       s"deleted by ${declaration.declaredBy.getName} up to version ${declaration.lastVersion}"
     else s"renamed to ${declaration.currentClass.getName} up to version ${declaration.lastVersion}"
 
-  /** The class with the given name, if a savepoint can contain its data: a class or a case object, no other object. */
+  /** The class with the given name, if a savepoint can contain its data: a class or a case object, no other object and
+    * no mirror class of an object.
+    */
   private def classNamed(className: String, cl: ClassLoader): Option[Class[_]] =
     ClassUtil
       .loadClass(className, initialize = false, cl)
       .toOption
-      .filterNot(clazz => ClassUtil.isObjectClass(clazz) && !classOf[Product].isAssignableFrom(clazz))
+      .filterNot(clazz =>
+        ClassUtil.isMirrorClass(clazz) || ClassUtil.isObjectClass(clazz) && !classOf[Product].isAssignableFrom(clazz)
+      )
 
   /** Lookup: the ADT evolution of the data written under the given former class name, at the given former version. It
     * is [[AdtEvolution.NoEvolution]] if no declaration of this class name includes this version.

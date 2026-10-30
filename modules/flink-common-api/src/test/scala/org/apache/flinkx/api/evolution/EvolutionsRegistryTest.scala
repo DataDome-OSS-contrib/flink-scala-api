@@ -128,6 +128,13 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     }
   }
 
+  // A top-level case object also has a mirror class under its name without `$`, which holds no data
+  it should "resolve a deleted name that a top-level case object reuses at a higher version" in {
+    val fishName = TopLevelFish.getClass.getName
+    AdtEvolution.isDeletedClass(Evolutions.get[TopLevelReef](fishName, 0, cl).currentClass) shouldBe true
+    Evolutions.get[TopLevelReef](fishName, 1, cl).currentClass shouldBe TopLevelFish.getClass
+  }
+
   // The tasks of a TaskManager restore their state in parallel: a lookup during the registration must wait for it
   it should "make concurrent lookups wait for the declarations" in {
     Evolutions.reset()
@@ -282,3 +289,13 @@ object EvolutionsRegistryTest {
   }
 
 }
+
+// Top-level, unlike the other fixtures: a top-level object has a mirror class
+@version(1)
+@deletedClasses(since = 1, "TopLevelFish")
+sealed trait TopLevelReef
+object TopLevelReef extends Evolving[TopLevelReef] { val evolutions = Evolutions[TopLevelReef] }
+
+// Reuses the name of a deleted case object at a higher version
+@version(1)
+case object TopLevelFish extends TopLevelReef
