@@ -60,18 +60,19 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
 
   private def resolveSameKindCompatibility(former: S): TypeSerializerSchemaCompatibility[T] =
     if (isOtherClass(former)) TypeSerializerSchemaCompatibility.incompatible()
+    else if (former.adtVersion > adtVersion)
+      incompatible(former, s"Rollback to version $adtVersion. Restore a savepoint of version $adtVersion or lower")
     else if (isEvolutionRequired(former)) resolveEvolvingCompatibility(former)
     else resolveStandardCompatibility(former)
 
-  private def resolveEvolvingCompatibility(former: S): TypeSerializerSchemaCompatibility[T] = {
-    val reason =
-      if (former.adtVersion > adtVersion)
-        Some(s"Rollback to version $adtVersion detected. Restore a savepoint of version $adtVersion or lower")
-      else checkMigration(former)
-    reason.fold(TypeSerializerSchemaCompatibility.compatibleAfterMigration[T]()) { reason =>
-      log.warn(s"Cannot migrate $adtName from version ${former.adtVersion}: $reason")
-      TypeSerializerSchemaCompatibility.incompatible()
-    }
+  private def resolveEvolvingCompatibility(former: S): TypeSerializerSchemaCompatibility[T] =
+    checkMigration(former).fold(TypeSerializerSchemaCompatibility.compatibleAfterMigration[T]())(
+      incompatible(former, _)
+    )
+
+  private def incompatible(former: S, reason: String): TypeSerializerSchemaCompatibility[T] = {
+    log.error(s"Cannot migrate $adtName from version ${former.adtVersion}: $reason")
+    TypeSerializerSchemaCompatibility.incompatible()
   }
 
   /** Whether the former snapshot describes another ADT, which is unknown if a snapshot records no class name. */

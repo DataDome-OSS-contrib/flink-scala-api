@@ -171,12 +171,25 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     val formerSerializer = new CoproductSerializer[RolledBackTrait](
       // Written at a version higher than the current version
       evolution = derived.evolution.map(current => new NoEvolution(current.currentClass, current.formerVersion + 1)),
-      subtypeClasses = derived.subtypeClasses.dropRight(1),
-      subtypeNames = derived.subtypeNames.dropRight(1),
-      subtypeSerializers = derived.subtypeSerializers.dropRight(1)
+      subtypeClasses = derived.subtypeClasses,
+      subtypeNames = derived.subtypeNames,
+      subtypeSerializers = derived.subtypeSerializers
     )
 
     compatibilityWith[RolledBackTrait](formerSerializer) shouldBe Symbol("incompatible")
+  }
+
+  // Click v4 declares an evolution that Click v3 does not know, without a change of its fields
+  it should "resolve the schema compatibility of a case class after a rollback as incompatible" in {
+    val derived          = infoToSer[Click].asInstanceOf[CaseClassSerializer[Click]]
+    val formerSerializer = new CaseClassSerializer[Click](
+      evolution = evolutionOf(classOf[Click], 4),
+      isCaseClassImmutable = derived.isCaseClassImmutable,
+      fieldNames = derived.fieldNames,
+      paramSerializers = derived.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
+    )
+
+    compatibilityWith[Click](formerSerializer) shouldBe Symbol("incompatible")
   }
 
 }

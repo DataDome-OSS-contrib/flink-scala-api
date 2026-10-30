@@ -106,8 +106,8 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     val formerSerializer = new Scala3EnumSerializer(
       // Written at a version higher than the current version
       evolution = derived.evolution.map(current => new NoEvolution(current.currentClass, current.formerVersion + 1)),
-      enumValueNames = derived.enumValueNames.dropRight(1),
-      enumValueSerializers = derived.enumValueSerializers.dropRight(1)
+      enumValueNames = derived.enumValueNames,
+      enumValueSerializers = derived.enumValueSerializers
     )
 
     compatibilityWith[RolledBackEnum](formerSerializer) shouldBe Symbol("incompatible")
