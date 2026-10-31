@@ -38,7 +38,7 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
       evolution = Evolutions.get[Pony](classOf[Horse].getName, 0, getClass.getClassLoader),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("name")),
-      paramSerializers = Array[TypeSerializer[_]](StringSerializer.INSTANCE)
+      scalaFieldSerializers = Array[TypeSerializer[_]](StringSerializer.INSTANCE)
     )
     val formerSerializer = new SeqSerializer[Pony](formerHorse, classOf[Horse].asInstanceOf[Class[Pony]])
 

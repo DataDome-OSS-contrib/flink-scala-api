@@ -19,7 +19,7 @@ import scala.collection.mutable
   *   The rank of the evolution among the field evolutions with the same `since`
   */
 @Internal
-abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[FieldEvolution] with Serializable {
+abstract class FieldEvolution(val since: Int, val phase: Phase) extends Serializable {
 
   /** Apply this evolution to the given migrated fields, by field name. At the start of the plan, they are the
     * [[Former]] fields, the deleted fields included.
@@ -28,12 +28,6 @@ abstract class FieldEvolution(val since: Int, val phase: Phase) extends Ordered[
     *   Why the evolution fails, if it fails
     */
   def apply(fields: mutable.Map[String, MigratedField]): Option[String]
-
-  override def compare(that: FieldEvolution): Int = {
-    val sinceComparison = since.compare(that.since)
-    if (sinceComparison != 0) sinceComparison
-    else phase.rank.compare(that.phase.rank)
-  }
 
 }
 

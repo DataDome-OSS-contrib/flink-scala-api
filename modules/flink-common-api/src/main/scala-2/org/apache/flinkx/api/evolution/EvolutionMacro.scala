@@ -152,7 +152,6 @@ private[api] object EvolutionMacro {
     // Compare by symbol, not by type: the generic annotations have no type tag
     def annotationSymbol(name: String): Symbol = c.mirror.staticClass(s"org.apache.flinkx.api.evolution.$name")
     val Renamed                                = annotationSymbol("renamed")
-    val DeletedClasses                         = annotationSymbol("deletedClasses")
     val PostEvolution                          = annotationSymbol("postEvolution")
     val Added                                  = annotationSymbol("added")
 
@@ -173,8 +172,7 @@ private[api] object EvolutionMacro {
     def checkSince(annotation: Annotation, target: String, lastVersion: Int = version): Unit = {
       val since = intArgument(c)(annotation, "since")
         .getOrElse(c.abort(c.enclosingPosition, notLiteral(nameOf(annotation), "since", target)))
-      // An evolution with a `since` out of this range never applies to the correct data
-      if (since < 1 || since > lastVersion) {
+      if (!AnnotationRules.isSinceAllowed(since, lastVersion)) {
         c.abort(c.enclosingPosition, sinceNotAllowed(symbol.fullName, since, lastVersion))
       }
     }
@@ -191,9 +189,9 @@ private[api] object EvolutionMacro {
         if (!AnnotationRules.allowedOnAdt(nameOf(annotation), version, isCoproduct)) {
           reject(annotation, AnnotationRules.target(symbol.fullName, None, version))
         }
-        // The `since` of a deleted class counts in the versions of this class, not in the versions of the ADT
-        if (is(annotation, DeletedClasses)) checkSince(annotation, symbol.fullName, Int.MaxValue)
-        else if (!is(annotation, PostEvolution)) checkSince(annotation, symbol.fullName)
+        AnnotationRules
+          .lastSinceOnAdt(nameOf(annotation), version, isEnum = false)
+          .foreach(checkSince(annotation, symbol.fullName, _))
       }
 
       if (symbol.annotations.count(annotation => is(annotation, PostEvolution)) > 1) {

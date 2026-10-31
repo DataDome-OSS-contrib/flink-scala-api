@@ -51,16 +51,22 @@ trait TestUtils extends Matchers with Inspectors {
       expected: T,
       assertion: (T, T) => Assertion = (_: T) shouldBe (_: T)
   ): Unit = {
-    val input            = new DataInputViewStreamWrapper(snapshotInput(fileName))
-    val totalsize        = input.available()
-    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader)
-    val snapSize         = totalsize - input.available()
-    snapSize shouldBe input.readInt()
-    val restoredSerializer = restoredSnapshot.restoreSerializer()
-    val result             = restoredSerializer.deserialize(input)
-    val dataSize           = totalsize - snapSize - input.available()
-    dataSize shouldBe input.readInt()
+    val (snapshot, data) = snapshotAndDataFromFile[T](fileName)
+    val dataStart        = data.available()
+    val result           = snapshot.restoreSerializer().deserialize(data)
+    // The size that serializeToFile writes counts the size of the snapshot too
+    val dataSize = Integer.BYTES + dataStart - data.available()
+    dataSize shouldBe data.readInt()
     assertion(result, expected)
+  }
+
+  /** The former snapshot of the snapshot file of the given name, and the input of its former data. */
+  def snapshotAndDataFromFile[T](fileName: String): (TypeSerializerSnapshot[T], DataInputViewStreamWrapper) = {
+    val input     = new DataInputViewStreamWrapper(snapshotInput(fileName))
+    val totalSize = input.available()
+    val snapshot  = TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader)
+    totalSize - input.available() shouldBe input.readInt()
+    (snapshot, input)
   }
 
   /** The former snapshot of the snapshot file of the given name, as Flink reads it from a savepoint. */
@@ -107,11 +113,8 @@ trait TestUtils extends Matchers with Inspectors {
     */
   def deserializeFormerForm[T](formerSerializer: TypeSerializer[_], former: Any): T = {
     val out = new DataOutputSerializer(1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
     formerSerializer.asInstanceOf[TypeSerializer[Any]].serialize(former, out)
-    val in               = new DataInputDeserializer(out.getCopyOfBuffer)
-    val restoredSnapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, getClass.getClassLoader)
-    restoredSnapshot.restoreSerializer().deserialize(in)
+    savepointed[T](formerSerializer).restoreSerializer().deserialize(new DataInputDeserializer(out.getCopyOfBuffer))
   }
 
   /** Migrates a case class written at `version` with the given former fields, in their former order. The former
@@ -129,18 +132,16 @@ trait TestUtils extends Matchers with Inspectors {
       evolution = TestUtils.evolutionOf(clazz, version),
       isCaseClassImmutable = true,
       fieldNames = Some(formerFields.map(_._1).toArray),
-      paramSerializers = formerFields.map(_._2).toArray
+      scalaFieldSerializers = formerFields.map(_._2).toArray
     )
-    val out = new DataOutputSerializer(1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(out, formerSerializer.snapshotConfiguration())
     // The former data: the arity, then the fields in their former order
+    val out = new DataOutputSerializer(1024)
     out.writeInt(formerFields.length)
     formerFields.foreach { case (_, serializer, value) =>
       serializer.asInstanceOf[TypeSerializer[Any]].serialize(value, out)
     }
-    val in       = new DataInputDeserializer(out.getCopyOfBuffer)
-    val snapshot = TypeSerializerSnapshot.readVersionedSnapshot[T](in, getClass.getClassLoader)
-    (snapshot, snapshot.restoreSerializer().deserialize(in))
+    val snapshot = savepointed[T](formerSerializer)
+    (snapshot, snapshot.restoreSerializer().deserialize(new DataInputDeserializer(out.getCopyOfBuffer)))
   }
 
   /** Serializes and deserializes the given object using the provided serializer, then asserts that the result matches

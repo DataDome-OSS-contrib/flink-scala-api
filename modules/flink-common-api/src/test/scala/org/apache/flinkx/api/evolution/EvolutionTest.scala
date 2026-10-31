@@ -1,8 +1,8 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
-import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
-import org.apache.flink.core.memory.{DataInputDeserializer, DataInputViewStreamWrapper, DataOutputSerializer}
+import org.apache.flink.api.common.typeutils.TypeSerializer
+import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flink.util.InstantiationUtil
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.TestUtils.evolutionOf
@@ -24,19 +24,14 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     * restored serializer, as Flink can do.
     */
   private def deserializeShippedFromFile[T](fileName: String): T = {
-    val input    = new DataInputViewStreamWrapper(snapshotInput(fileName))
-    val restored = TypeSerializerSnapshot.readVersionedSnapshot[T](input, getClass.getClassLoader).restoreSerializer()
-    input.readInt() // Size of the snapshot
-    InstantiationUtil.clone(restored, getClass.getClassLoader).deserialize(input)
+    val (snapshot, data) = snapshotAndDataFromFile[T](fileName)
+    InstantiationUtil.clone(snapshot.restoreSerializer(), getClass.getClassLoader).deserialize(data)
   }
 
   /** Reads the record of Click-v0.snapshot with the ADT evolution of `T` for the data written at version 0. */
   private def readClickV0As[T <: Product](clazz: Class[T]): T = {
-    val input   = new DataInputViewStreamWrapper(snapshotInput("Click-v0"))
-    val clickV0 =
-      TypeSerializerSnapshot.readVersionedSnapshot[Click](input, getClass.getClassLoader).restoreSerializer()
-    input.readInt() // Size of the snapshot
-    clickV0As(clickV0, clazz).deserialize(input)
+    val (snapshot, data) = snapshotAndDataFromFile[Click]("Click-v0")
+    clickV0As(snapshot.restoreSerializer(), clazz).deserialize(data)
   }
 
   /* Uncomment this test and Click at version 0 to write Click-v0.snapshot again
@@ -121,7 +116,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
           new AdtEvolution(tapeName, 0, classOf[FormerTape]),
           isCaseClassImmutable = true,
           fieldNames = Some(Array("title")),
-          paramSerializers = Array(StringSerializer.INSTANCE)
+          scalaFieldSerializers = Array(StringSerializer.INSTANCE)
         )
       )
     )
@@ -172,7 +167,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
       evolution = evolutionOf(classOf[Ticket]),
       isCaseClassImmutable = true,
       fieldNames = None,
-      paramSerializers = Array(infoToSer[String])
+      scalaFieldSerializers = Array(infoToSer[String])
     )
 
     compatibilityWith[Ticket](formerSerializer) shouldBe Symbol("compatibleAsIs")
@@ -312,7 +307,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
           new AdtEvolution(cassetteName, 0, classOf[Product]),
           isCaseClassImmutable = true,
           fieldNames = Some(Array("target")),
-          paramSerializers = Array(formerTarget)
+          scalaFieldSerializers = Array(formerTarget)
         )
       )
     )
@@ -327,7 +322,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
       new AdtEvolution(classOf[Tapped].getName.replace("Tapped", "Target"), 0, classOf[Product]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("name")),
-      paramSerializers = Array(StringSerializer.INSTANCE)
+      scalaFieldSerializers = Array(StringSerializer.INSTANCE)
     )
 
   /** The serializer of the deleted class TapEvent at version 0. FormerTapEvent takes its place. */
@@ -336,7 +331,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
       new AdtEvolution(classOf[Tapped].getName.replace("Tapped", "TapEvent"), 0, classOf[Product]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("date", "target")),
-      paramSerializers = Array(StringSerializer.INSTANCE, formerTarget)
+      scalaFieldSerializers = Array(StringSerializer.INSTANCE, formerTarget)
     )
 
   // The plan of the lowest version applies all the deletions: a field renamed, then deleted, is not found
@@ -355,7 +350,7 @@ object EvolutionTest {
       evolution = evolutionOf(clazz),
       isCaseClassImmutable = serializer.isCaseClassImmutable,
       fieldNames = serializer.fieldNames,
-      paramSerializers = serializer.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
+      scalaFieldSerializers = serializer.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
     )
   }
 

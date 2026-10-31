@@ -40,7 +40,7 @@ private[api] trait TypeInformationDerivation {
             evolution = evolution,
             isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
             fieldNames = Some(fieldNames),
-            paramSerializers = ctx.parameters.map { p =>
+            scalaFieldSerializers = ctx.parameters.map { p =>
               val ser = p.typeclass.createSerializer(config)
               if (p.annotations.exists(_.isInstanceOf[nullable])) {
                 NullableSerializer.wrapIfNullIsNotSupported(ser, true)

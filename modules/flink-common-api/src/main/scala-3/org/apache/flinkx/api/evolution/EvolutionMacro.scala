@@ -179,8 +179,7 @@ private[evolution] object EvolutionMacro:
     /** Reject a `since` that is not an integer literal, or not from 1 to `lastVersion`. */
     def checkSince(term: Term, target: String, lastVersion: Int = version): Unit =
       val since = intArgument(term, "since").getOrElse(report.errorAndAbort(notLiteral(nameOf(term), "since", target)))
-      // An evolution with a `since` out of this range never applies to the correct data
-      if since < 1 || since > lastVersion then
+      if !AnnotationRules.isSinceAllowed(since, lastVersion) then
         report.errorAndAbort(sinceNotAllowed(symbol.fullName, since, lastVersion))
 
     /** Reject the misplaced evolution annotations, before the macro generates code. */
@@ -194,9 +193,7 @@ private[evolution] object EvolutionMacro:
       evolutionAnnotationsOf(symbol).foreach { term =>
         if !AnnotationRules.allowedOnAdt(nameOf(term), version, isCoproduct) then
           reject(term, AnnotationRules.target(symbol.fullName, None, version))
-        // The `since` of a deleted class counts in the versions of this class, not in the versions of the ADT
-        if is[deletedClasses](term) && !isEnum then checkSince(term, symbol.fullName, Int.MaxValue)
-        else if !is[postEvolution[?]](term) then checkSince(term, symbol.fullName)
+        AnnotationRules.lastSinceOnAdt(nameOf(term), version, isEnum).foreach(checkSince(term, symbol.fullName, _))
       }
 
       if symbol.annotations.count(is[postEvolution[?]]) > 1 then

@@ -131,7 +131,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
       evolution = new AdtEvolution(formerClassName, 0, classOf[FormerValue]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array(field)),
-      paramSerializers = Array(IntSerializer.INSTANCE)
+      scalaFieldSerializers = Array(IntSerializer.INSTANCE)
     )
 
 }

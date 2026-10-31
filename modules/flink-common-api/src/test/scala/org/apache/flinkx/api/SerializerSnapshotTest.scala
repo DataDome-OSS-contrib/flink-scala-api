@@ -19,7 +19,7 @@ import java.nio.file.{Files, Paths}
 import java.util.UUID
 import java.io.FileInputStream
 
-class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
+class SerializerSnapshotTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "roundtrip product serializer snapshot" in {
     val ser = infoToSer[SimpleClass1]
@@ -142,37 +142,13 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
       evolution = evolutionOf(classOf[WithDefault]),
       isCaseClassImmutable = false,
       fieldNames = Some(Array("sc1")),
-      paramSerializers = Array(implicitly[TypeSerializer[SimpleClass1]])
+      scalaFieldSerializers = Array(implicitly[TypeSerializer[SimpleClass1]])
     )
-    val oldSnapshot = oldSerializer.snapshotConfiguration()
+    deserializeFormerForm[WithDefault](oldSerializer, expectedData) shouldBe expectedData
 
-    // Serialize the old snapshot
-    val output = new DataOutputSerializer(1024 * 1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(output, oldSnapshot) // Flink always calls this
-
-    // Serialize the "old" data with "old" serializer
-    oldSerializer.serialize(expectedData, output)
-
-    // The job restarts with the current source code
-    val newSerializer = implicitly[TypeSerializer[WithDefault]]
-
-    // Read the former snapshot and its restored serializer
-    val input                   = new DataInputDeserializer(output.getSharedBuffer)
-    val deserializedOldSnapshot = TypeSerializerSnapshot
-      .readVersionedSnapshot[WithDefault](input, getClass.getClassLoader) // Flink always calls this
-    val deserializedOldSerializer = deserializedOldSnapshot.restoreSerializer()
-
-    // Read the former data with the restored serializer
-    val deserializedData = deserializedOldSerializer.deserialize(input)
-    deserializedData should be(expectedData)
-
-    // serialize modified data with new serializer
+    // The job restarts with the current source code, which serializes the added field
     expectedData.sc2 = SimpleClass2("c", 3)
-    newSerializer.serialize(expectedData, output)
-
-    // deserialize modified data with new serializer
-    val modifiedResult = newSerializer.deserialize(input)
-    modifiedResult shouldBe expectedData
+    roundtrip(implicitly[TypeSerializer[WithDefault]], expectedData)
   }
 
   def roundtripSerializer[T](ser: TypeSerializer[T], cl: ClassLoader = getClass.getClassLoader): TypeSerializer[T] = {

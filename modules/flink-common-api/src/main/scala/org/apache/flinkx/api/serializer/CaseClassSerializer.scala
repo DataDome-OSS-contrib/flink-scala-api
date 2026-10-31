@@ -53,7 +53,7 @@ import java.io.OutputStream
   * @param fieldNames
   *   Field names of the case class, in declaration order. None for data written before release 2.4.0, whose snapshot
   *   records no field name: its fields are read by position
-  * @param paramSerializers
+  * @param scalaFieldSerializers
   *   The serializers of the fields, in the same order
   */
 @Internal
@@ -62,15 +62,15 @@ class CaseClassSerializer[T <: Product](
     val evolution: AdtEvolution[T],
     val isCaseClassImmutable: Boolean,
     val fieldNames: Option[Array[String]],
-    paramSerializers: Array[TypeSerializer[_]]
-) extends TupleSerializerBase[T](evolution.currentClass, paramSerializers)
+    scalaFieldSerializers: Array[TypeSerializer[_]]
+) extends TupleSerializerBase[T](evolution.currentClass, scalaFieldSerializers)
     with Cloneable
     with ConstructorCompat {
 
   require(
-    fieldNames.forall(_.length == paramSerializers.length), // One field name for each field serializer
-    s"${evolution.currentClass} has ${fieldNames.fold(0)(_.length)} field names for ${paramSerializers.length} field" +
-      s" serializers"
+    fieldNames.forall(_.length == scalaFieldSerializers.length), // One field name for each field serializer
+    s"${evolution.currentClass} has ${fieldNames.fold(0)(_.length)} field names for ${scalaFieldSerializers.length}" +
+      s" field serializers"
   )
 
   @transient private lazy val log: Logger = LoggerFactory.getLogger(this.getClass)

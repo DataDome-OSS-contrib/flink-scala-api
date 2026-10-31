@@ -64,7 +64,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
       evolution = evolutionOf(classOf[Triple]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a", "b", "c")),
-      paramSerializers = Array(infoToSer[String], infoToSer[String], infoToSer[String])
+      scalaFieldSerializers = Array(infoToSer[String], infoToSer[String], infoToSer[String])
     )
 
     compatibilityWith[Triple](formerSerializer)(infoToSer[Triple]) shouldBe Symbol("incompatible")

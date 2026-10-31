@@ -23,7 +23,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(clazz),
       isCaseClassImmutable = clickV0.isCaseClassImmutable,
       fieldNames = clickV0.fieldNames,
-      paramSerializers = clickV0.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
+      scalaFieldSerializers = clickV0.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
     )
   }
 
@@ -48,7 +48,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = new AdtEvolution(formerName, 0, classOf[RenamedCaseClass]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a", "deleted")),
-      paramSerializers = Array(infoToSer[String], infoToSer[String])
+      scalaFieldSerializers = Array(infoToSer[String], infoToSer[String])
     )
 
     compatibilityWith[RenamedCaseClass](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
@@ -68,7 +68,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[ClickAction]),
       isCaseClassImmutable = true,
       fieldNames = None,
-      paramSerializers = Array(infoToSer[String], infoToSer[String])
+      scalaFieldSerializers = Array(infoToSer[String], infoToSer[String])
     )
 
     compatibilityWith[ClickAction](formerSerializer) shouldBe Symbol("compatibleAsIs")
@@ -80,7 +80,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[UnrelatedFormerCaseClass]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a", "deleted")),
-      paramSerializers = Array(infoToSer[String], infoToSer[String])
+      scalaFieldSerializers = Array(infoToSer[String], infoToSer[String])
     )
 
     compatibilityWith[UnrelatedCurrentCaseClass](formerSerializer) shouldBe Symbol("incompatible")
@@ -127,13 +127,13 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a")),
-      paramSerializers = Array(infoToSer[String])
+      scalaFieldSerializers = Array(infoToSer[String])
     )
     val formerSerializer = new CaseClassSerializer[OuterEvolvedWithNested](
       evolution = evolutionOf(classOf[OuterEvolvedWithNested]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("formerNested")),
-      paramSerializers = Array(formerNestedSerializer)
+      scalaFieldSerializers = Array(formerNestedSerializer)
     )
 
     compatibilityWith[OuterEvolvedWithNested](formerSerializer) shouldBe Symbol("incompatible")
@@ -145,7 +145,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("a")),
-      paramSerializers = Array(infoToSer[String])
+      scalaFieldSerializers = Array(infoToSer[String])
     )
 
     compatibilityWith[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol("incompatible")
@@ -186,7 +186,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       evolution = evolutionOf(classOf[Click], 4),
       isCaseClassImmutable = derived.isCaseClassImmutable,
       fieldNames = derived.fieldNames,
-      paramSerializers = derived.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
+      scalaFieldSerializers = derived.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
     )
 
     compatibilityWith[Click](formerSerializer) shouldBe Symbol("incompatible")

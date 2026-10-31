@@ -68,7 +68,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
       new AdtEvolution(puppyName, 0, classOf[Product]),
       isCaseClassImmutable = true,
       fieldNames = None,
-      paramSerializers = Array(StringSerializer.INSTANCE)
+      scalaFieldSerializers = Array(StringSerializer.INSTANCE)
     )
     val out = new DataOutputSerializer(1024)
     out.writeUTF(classOf[CoproductSerializerSnapshot[_]].getName)
@@ -138,7 +138,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
       new AdtEvolution(formerClassName, version, classOf[Product]),
       isCaseClassImmutable = true,
       fieldNames = Some(Array("name")),
-      paramSerializers = Array(StringSerializer.INSTANCE)
+      scalaFieldSerializers = Array(StringSerializer.INSTANCE)
     )
 
 }

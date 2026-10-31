@@ -48,7 +48,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
               evolution = evolution,
               isCaseClassImmutable = isCaseClassImmutable(clazz, fieldNames),
               fieldNames = Some(fieldNames),
-              paramSerializers = ctx.params.map { p =>
+              scalaFieldSerializers = ctx.params.map { p =>
                 val ser = p.typeclass.createSerializer(config)
                 if (p.annotations.exists(_.isInstanceOf[nullable])) {
                   NullableSerializer.wrapIfNullIsNotSupported(ser, true)
@@ -75,28 +75,25 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         cached.asInstanceOf[TypeInformation[T]]
 
       case None =>
-        val clazz = classTag.runtimeClass.asInstanceOf[Class[T]]
-        // An enum value has no class of its own: the enum serializer refers to its values by name
-        val subtypeClasses: Array[Class[?]] =
-          if typeTag.isEnum then Array.empty else ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[?]]
-        val memberNames: Array[String] =
-          if typeTag.isEnum then ctx.subtypes.map(_.typeInfo.short).toArray else subtypeClasses.map(_.getName)
-
-        val evolution = new NoEvolution(clazz, evolvable.version)
+        val clazz             = classTag.runtimeClass.asInstanceOf[Class[T]]
+        val evolution         = new NoEvolution(clazz, evolvable.version)
+        val memberSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray[TypeSerializer[?]]
 
         val serializer =
+          // An enum value has no class of its own: the enum serializer refers to its values by name
           if typeTag.isEnum then
             new Scala3EnumSerializer[T & Product](
               evolution = Some(evolution.asInstanceOf[AdtEvolution[T & Product]]),
-              enumValueNames = memberNames,
-              enumValueSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
+              enumValueNames = ctx.subtypes.map(_.typeInfo.short).toArray,
+              enumValueSerializers = memberSerializers
             ).asInstanceOf[TypeSerializer[T]]
           else
+            val subtypeClasses = ctx.subtypes.map(_.typeclass.getTypeClass).toArray[Class[?]]
             new CoproductSerializer[T](
               evolution = Some(evolution),
               subtypeClasses = subtypeClasses,
-              subtypeNames = memberNames,
-              subtypeSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray
+              subtypeNames = subtypeClasses.map(_.getName),
+              subtypeSerializers = memberSerializers
             )
 
         val ti = new CoproductTypeInformation[T](clazz, serializer)

@@ -3,6 +3,7 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.serializer.CoproductSerializerSnapshotTest.{ADT, Bar, Foo}
+import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.scalatest.flatspec.AnyFlatSpec
@@ -97,12 +98,7 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     oldSnapshot.readSnapshot(2, new DataInputDeserializer(out.getSharedBuffer), getClass.getClassLoader)
     val restoredSerializer = oldSnapshot.restoreSerializer()
 
-    val rewritten = new DataOutputSerializer(1024 * 1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(rewritten, restoredSerializer.snapshotConfiguration())
-    val reread = TypeSerializerSnapshot.readVersionedSnapshot[ADT](
-      new DataInputDeserializer(rewritten.getSharedBuffer),
-      getClass.getClassLoader
-    )
+    val reread = savepointed[ADT](restoredSerializer)
 
     reread.restoreSerializer() should be(restoredSerializer)
     val currentSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT](
