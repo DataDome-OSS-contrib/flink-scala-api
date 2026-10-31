@@ -1,12 +1,14 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.{Internal, VisibleForTesting}
+import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.AdtEvolution.{NoEvolution, isDeletedClass}
 import org.apache.flinkx.api.evolution.Evolutions.Declaration
 import org.apache.flinkx.api.serializer.ConstructorCompat
 import org.apache.flinkx.api.util.ClassUtil
 
 import scala.collection.concurrent
+import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
 /** The evolutions that an ADT declares with its annotations. [[Evolutions.apply]] builds them at compile time, in the
@@ -87,7 +89,7 @@ object Evolutions extends EvolutionsFactory {
   private final class Registry(classLoader: ClassLoader) {
 
     // Every lookup fails with the first failure: only the first initialization of a companion gives the real cause
-    // (ExceptionInInitializerError), and the subtasks that restore in parallel do not scan the jars again
+    // (ExceptionInInitializerError, LinkageError), and the subtasks that restore in parallel do not scan the jars again
     private lazy val declared: Try[Map[String, Seq[Declaration]]] = Try(registerCompanions(classLoader))
 
     def declarations: Map[String, Seq[Declaration]] = declared.get
@@ -106,10 +108,23 @@ object Evolutions extends EvolutionsFactory {
   private def registerCompanions(cl: ClassLoader): Map[String, Seq[Declaration]] =
     CompanionScan
       .companionsOf(cl)
-      .flatMap(name => evolutionsOf(ClassUtil.loadClass(name, initialize = true, cl).get))
-      .flatMap(_.declarations)
+      .flatMap(name => evolutionsOf(ClassUtil.loadClass(name, initialize = true, cl).get).map(name -> _))
+      .flatMap { case (companion, evolutions) => declarationsOf(companion, evolutions) }
       .groupBy(_.className)
       .map { case (className, declarations) => className -> sortDeclarations(className, declarations, cl) }
+
+  /** The declarations of the given evolutions, held by `companion`.
+    *
+    * @throws FlinkRuntimeException
+    *   if they fail, for example because a mapper of the annotations does not initialize. Its message names the ADT
+    */
+  private def declarationsOf(companion: String, evolutions: Evolutions[_]): Seq[Declaration] =
+    try evolutions.declarations
+    catch {
+      // Also a LinkageError, which the Try of the registry would let through
+      case failure @ (NonFatal(_) | _: LinkageError) =>
+        throw new FlinkRuntimeException(s"Cannot build the evolutions of ${companion.stripSuffix("$")}", failure)
+    }
 
   /** The evolutions that the given initialized companion holds, or none if it is not an object. */
   private def evolutionsOf(companion: Class[_]): Option[Evolutions[_]] =
@@ -128,7 +143,7 @@ object Evolutions extends EvolutionsFactory {
     sorted
       .groupBy(_.lastVersion)
       .collectFirst { case (_, sameVersion) if sameVersion.length > 1 => sameVersion }
-      .foreach { decls => throw FormerClassConflictException(className, refersTo(decls(0)), refersTo(decls(1))) }
+      .foreach { decls => throw FormerClassConflictException(className, refersTo(decls.head), refersTo(decls(1))) }
     sorted
   }
 

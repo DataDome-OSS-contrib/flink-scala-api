@@ -1,6 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.base.StringSerializer
+import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures.DerivedBeforeDeclared
 import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
@@ -100,6 +101,17 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
         s"renamed to ${classOf[ClaimingByRename].getName} up to version 0",
         s"deleted by ${classOf[ClaimingByDeletion].getName} up to version 0"
       )
+    }
+  }
+
+  // A mapper initializes during the registration: only its first initialization gives the cause of its failure
+  it should "fail every lookup with the first failure of a mapper initialization" in {
+    ConflictingScan.withFixture("failingMapper") {
+      val first  = intercept[FlinkRuntimeException](evolutionOf(classOf[Probe], 2))
+      val second = intercept[FlinkRuntimeException](evolutionOf(classOf[Probe], 2))
+      first.getMessage shouldBe s"Cannot build the evolutions of ${classOf[FailingPostEvolution].getName}"
+      first.getCause.getCause.getMessage shouldBe "FLINK_SCALA_API_UNSET is not set"
+      second shouldBe theSameInstanceAs(first)
     }
   }
 
@@ -272,6 +284,22 @@ object EvolutionsRegistryTest {
   object ClaimingByDeletion extends Evolving[ClaimingByDeletion] {
     def evolutions: Evolutions[ClaimingByDeletion] =
       ConflictingScan.evolutionsOf("renamedAndDeleted", Evolutions[ClaimingByDeletion])
+  }
+
+  @version(1)
+  @postEvolution(FailingMapper)
+  case class FailingPostEvolution(a: String)
+  object FailingPostEvolution extends Evolving[FailingPostEvolution] {
+    def evolutions: Evolutions[FailingPostEvolution] =
+      ConflictingScan.evolutionsOf("failingMapper", Evolutions[FailingPostEvolution])
+  }
+
+  // Its initialization fails, as a mapper reading a setting that the TaskManager does not have
+  object FailingMapper extends PostEvolutionMapper[FailingPostEvolution] {
+    private val setting =
+      sys.env.getOrElse("FLINK_SCALA_API_UNSET", throw new IllegalStateException("FLINK_SCALA_API_UNSET is not set"))
+    override def apply(formerVersion: Int, instance: FailingPostEvolution): FailingPostEvolution =
+      instance.copy(a = setting)
   }
 
   // Reuses the former name of GivingFormerName at version 2, but this name refers to GivingFormerName up to version 2

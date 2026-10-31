@@ -76,8 +76,7 @@ object ClassUtil {
   def loadClass(className: String, initialize: Boolean, cl: ClassLoader): Try[Class[_]] =
     try Success(Class.forName(className, initialize, cl))
     catch {
-      case error @ (_: ExceptionInInitializerError | _: LinkageError) =>
-        Failure(new FlinkRuntimeException(s"Cannot load $className", error))
+      case error: LinkageError  => Failure(new FlinkRuntimeException(s"Cannot load $className", error))
       case exception: Exception => Failure(exception)
     }
 
