@@ -106,6 +106,13 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
     assertTypeError("Evolutions[WrongEnumValueAddedWithoutDefault]")
   }
 
+  // Without an evolving companion, only the derivation of the enum can reject the annotations of its values
+  it should "reject the derivation of an enum without version that declares an evolution of a value" in {
+    assertTypeError(
+      "{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongEnumValueRenamedWithoutVersion] }"
+    )
+  }
+
   /** The serializer of Vehicle at version 0: FormerValue takes the place of its values with parameters. */
   private def formerVehicleSerializer(vehicleName: String): Scala3EnumSerializer[Product] =
     new Scala3EnumSerializer[Product](
@@ -152,6 +159,10 @@ object EvolutionMacroEnumTest {
     @renamed(since = 1, "A") case B
   }
   object Swapped extends Evolving[Swapped] { val evolutions = Evolutions[Swapped] }
+
+  enum WrongEnumValueRenamedWithoutVersion {
+    @renamed(since = 1, "A") case B
+  }
 
   @version(1)
   enum WrongEnumValueRenamedSinceAboveVersion {

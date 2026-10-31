@@ -37,9 +37,11 @@ private[api] object EvolutionMacro {
 
     val tpe     = weakTypeOf[T]
     val symbol  = tpe.typeSymbol
-    val version = versionOf(c)(symbol)
+    val version    = versionOf(c)(symbol)
+    val parameters = primaryParameters(c)(tpe)
 
-    rejectVersionedParameter(c)(symbol, primaryParameters(c)(tpe))
+    rejectVersionedParameter(c)(symbol, parameters)
+    if (version == 0) rejectEvolution(c)(symbol, parameters)
     // At version 0 an ADT has no evolution, and the sealed trait of a case object declares it
     if (version > 0 && !symbol.isModuleClass) {
       val companion = symbol.companion
@@ -78,6 +80,26 @@ private[api] object EvolutionMacro {
       .foreach(parameter =>
         c.abort(c.enclosingPosition, notAllowed("version", s"$symbol.${parameter.name.decodedName.toString}"))
       )
+
+  /** Reject an evolution annotation on an ADT without version, or on its fields: no evolving companion checks them. */
+  private def rejectEvolution(c: blackbox.Context)(symbol: c.Symbol, parameters: List[c.Symbol]): Unit =
+    (symbol :: parameters).foreach { owner =>
+      evolutionAnnotationOf(c)(owner).foreach { annotation =>
+        val field = if (owner == symbol) None else Some(owner.name.decodedName.toString)
+        c.abort(c.enclosingPosition, notAllowed(annotation, AnnotationRules.target(symbol.fullName, field, version = 0)))
+      }
+    }
+
+  /** The name of the first evolution annotation of the given symbol, if it has one. */
+  private def evolutionAnnotationOf(c: blackbox.Context)(symbol: c.Symbol): Option[String] = {
+    import c.universe._
+    try {
+      symbol.info // Forces the symbol: else its annotations are not loaded
+      symbol.annotations
+        .find(_.tree.tpe <:< typeOf[EvolutionAnnotation])
+        .map(_.tree.tpe.typeSymbol.name.decodedName.toString)
+    } catch { case NonFatal(_) => None }
+  }
 
   /** Whether the given symbol declares a schema version of its own. */
   private def isVersioned(c: blackbox.Context)(symbol: c.Symbol): Boolean =

@@ -28,8 +28,32 @@ private[evolution] object EvolutionMacro:
       val evolving  = Symbol.requiredClass(classOf[Evolving[?]].getName).typeRef.appliedTo(symbol.typeRef)
       if !companion.exists(_ <:< evolving) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
     // An enum value with parameters has no version of its own: its snapshot records the version of its enum
-    val version = Expr(versionOf(enumOf(TypeRepr.of[T]).getOrElse(symbol)))
-    '{ new Evolvable[T]($version) }
+    val version = versionOf(enumOf(TypeRepr.of[T]).getOrElse(symbol))
+    if version == 0 then rejectEvolution(symbol)
+    '{ new Evolvable[T](${ Expr(version) }) }
+
+  /** Reject an evolution annotation on an ADT without version, its fields or its enum values: no evolving companion
+    * checks them.
+    */
+  private def rejectEvolution(using q: Quotes)(symbol: q.reflect.Symbol): Unit =
+    import q.reflect.*
+    // No derivation reads an enum value without parameters: it has the type of its enum
+    val enumValues = if symbol.flags.is(Flags.Enum) && !symbol.flags.is(Flags.Case) then symbol.children else Nil
+    (symbol :: parametersOf(symbol) ++ enumValues).foreach { owner =>
+      evolutionAnnotationOf(owner).foreach { annotation =>
+        val field = Option.when(owner != symbol)(owner.name)
+        report.errorAndAbort(
+          evolutionNotAllowed(annotation, AnnotationRules.target(symbol.fullName, field, version = 0))
+        )
+      }
+    }
+
+  /** The name of the first evolution annotation of the given symbol, if it has one. */
+  private def evolutionAnnotationOf(using q: Quotes)(symbol: q.reflect.Symbol): Option[String] = {
+    import q.reflect.*
+    try symbol.annotations.find(_.tpe <:< TypeRepr.of[EvolutionAnnotation]).map(_.tpe.typeSymbol.name)
+    catch { case NonFatal(_) => None }
+  }
 
   /** The enum of the given enum value with parameters, or none for another type. */
   private def enumOf(using q: Quotes)(tpe: q.reflect.TypeRepr): Option[q.reflect.Symbol] =

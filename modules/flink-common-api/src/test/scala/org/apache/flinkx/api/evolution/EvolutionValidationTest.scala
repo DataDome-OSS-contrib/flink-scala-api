@@ -100,6 +100,14 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[NeverDeclared] }")
   }
 
+  // Without an evolving companion, only the derivation can reject the annotations of an ADT without version
+  it should "reject the derivation of an ADT without version that declares an evolution" in {
+    assertTypeError(
+      "{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongRenamedOnCaseClassWithoutVersion] }"
+    )
+    assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongAddedOnFieldWithoutVersion] }")
+  }
+
   it should "reject the derivation of an ADT with a version on a field" in {
     assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongVersionOnField] }")
   }

@@ -202,7 +202,8 @@ object Evolutions extends EvolutionsFactory {
 
   /** Whether the companion of the given class extends [[Evolving]], without initializing it. */
   private def hasEvolvingCompanion(clazz: Class[_], cl: ClassLoader): Boolean =
-    ClassUtil.loadClass(s"${clazz.getName}$$", initialize = false, cl)
+    ClassUtil
+      .loadClass(s"${clazz.getName}$$", initialize = false, cl)
       .toOption
       .exists(classOf[Evolving[_]].isAssignableFrom)
 
