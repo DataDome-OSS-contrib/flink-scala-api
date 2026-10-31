@@ -3,7 +3,9 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.serializer.CoproductSerializerSnapshotTest.{ADT, Bar, Foo}
+import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -18,7 +20,14 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     )
     val serializerSnapshot: CoproductSerializer.CoproductSerializerSnapshot[ADT] =
       new CoproductSerializer.CoproductSerializerSnapshot(
-        Some(new CoproductSerializer[ADT](subtypeClasses, subtypeSerializers))
+        Some(
+          new CoproductSerializer[ADT](
+            Some(evolutionOf(classOf[ADT])),
+            subtypeClasses,
+            subtypeClasses.map(_.getName),
+            subtypeSerializers
+          )
+        )
       )
 
     val expectedSerializer = serializerSnapshot.restoreSerializer()
@@ -47,23 +56,62 @@ class CoproductSerializerSnapshotTest extends AnyFlatSpec with Matchers {
       implicitly[TypeSerializer[Bar]]
     )
 
-    // Write a v2 snapshot payload (as CoproductSerializerSnapshot#writeSnapshot did when v2 was current)
+    // Write a snapshot of format version 2, as CoproductSerializerSnapshot#writeSnapshot did before
     val out = new DataOutputSerializer(1024 * 1024)
     out.writeInt(subtypeClasses.length)
     subtypeClasses.foreach(c => out.writeUTF(c.getName))
     subtypeSerializers.foreach(s => TypeSerializerSnapshot.writeVersionedSnapshot(out, s.snapshotConfiguration()))
 
-    // Restore the v2 snapshot as Flink would: no-arg constructor then readSnapshot with the persisted version
+    // Restore the snapshot of format version 2 as Flink does: no-arg constructor, then readSnapshot with its version
     val oldSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT]()
     oldSnapshot.readSnapshot(2, new DataInputDeserializer(out.getSharedBuffer), getClass.getClassLoader)
 
-    // Current (v3) snapshot for the same schema
+    // Current snapshot for the same schema
     val newSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT](
-      Some(new CoproductSerializer[ADT](subtypeClasses, subtypeSerializers))
+      Some(
+        new CoproductSerializer[ADT](
+          Some(evolutionOf(classOf[ADT])),
+          subtypeClasses,
+          subtypeClasses.map(_.getName),
+          subtypeSerializers
+        )
+      )
     )
 
     val compatibility = newSnapshot.resolveSchemaCompatibility(oldSnapshot)
     compatibility.isIncompatible shouldBe false
+  }
+
+  // A state that the job does not access before the next checkpoint keeps its restored serializer: this serializer has
+  // no sealed trait name, so its snapshot uses a format without this name
+  it should "snapshot again a serializer restored from a snapshot of format version 2" in {
+    val subtypeClasses: Array[Class[?]]              = Array(classOf[Foo], classOf[Bar])
+    val subtypeSerializers: Array[TypeSerializer[?]] = Array(
+      implicitly[TypeSerializer[Foo]],
+      implicitly[TypeSerializer[Bar]]
+    )
+    val out = new DataOutputSerializer(1024 * 1024)
+    out.writeInt(subtypeClasses.length)
+    subtypeClasses.foreach(c => out.writeUTF(c.getName))
+    subtypeSerializers.foreach(s => TypeSerializerSnapshot.writeVersionedSnapshot(out, s.snapshotConfiguration()))
+    val oldSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT]()
+    oldSnapshot.readSnapshot(2, new DataInputDeserializer(out.getSharedBuffer), getClass.getClassLoader)
+    val restoredSerializer = oldSnapshot.restoreSerializer()
+
+    val reread = savepointed[ADT](restoredSerializer)
+
+    reread.restoreSerializer() should be(restoredSerializer)
+    val currentSnapshot = new CoproductSerializer.CoproductSerializerSnapshot[ADT](
+      Some(
+        new CoproductSerializer[ADT](
+          Some(evolutionOf(classOf[ADT])),
+          subtypeClasses,
+          subtypeClasses.map(_.getName),
+          subtypeSerializers
+        )
+      )
+    )
+    currentSnapshot.resolveSchemaCompatibility(reread).isIncompatible shouldBe false
   }
 
 }

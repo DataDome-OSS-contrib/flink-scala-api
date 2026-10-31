@@ -19,29 +19,59 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.annotation.Internal
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerSnapshot.OuterSchemaCompatibility
-import org.apache.flink.api.common.typeutils.{CompositeTypeSerializerSnapshot, CompositeTypeSerializerUtil, TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
-import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
-import org.apache.flink.core.memory.{DataInputView, DataOutputView}
-import org.apache.flink.types.NullFieldException
-import org.apache.flink.util.InstantiationUtil
-import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerUtil.setNestedSerializersSnapshots
-import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.CurrentVersion
+import org.apache.flink.api.common.typeutils.base.array.StringArraySerializer
+import org.apache.flink.api.common.typeutils.{
+  CompositeTypeSerializerSnapshot,
+  TypeSerializer,
+  TypeSerializerSchemaCompatibility,
+  TypeSerializerSnapshot
+}
+import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
+import org.apache.flink.core.memory.{DataInputView, DataOutputView, DataOutputViewStreamWrapper}
+import org.apache.flink.types.NullFieldException
+import org.apache.flinkx.api.evolution.FieldEvolution.{Former, MigratedField}
+import org.apache.flinkx.api.evolution.AdtEvolution.isDeletedClass
+import org.apache.flinkx.api.evolution.{AdtEvolution, MigrationException}
+import org.apache.flinkx.api.serializer.CaseClassSerializer.{Discarded, EmptyByteArray}
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
+import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.{CurrentVersion, PositionalVersion}
 import org.apache.flinkx.api.{NullMarker, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
 
-/** Serializer for Case Classes. Creation and access is different from our Java Tuples so we have to treat them
-  * differently. Copied from Flink 1.14 and merged with ScalaCaseClassSerializer.
+import java.io.OutputStream
+
+/** Serializer of a case class. It delegates fields serialization to sub-serializers. Handle nullable case class.
+  *
+  * A restored serializer reads the former fields in their former order, then migrates them to the current class.
+  *
+  * @param evolution
+  *   The ADT evolution. A current serializer has [[AdtEvolution.NoEvolution]]. A restored serializer has the
+  *   [[AdtEvolution]] of the former class name at the former version, which migrates the former data.
+  * @param isCaseClassImmutable
+  *   Whether all the fields of the case class are `val`s
+  * @param fieldNames
+  *   Field names of the case class, in declaration order. None for data written before release 2.4.0, whose snapshot
+  *   records no field name: its fields are read by position
+  * @param scalaFieldSerializers
+  *   The serializers of the fields, in the same order
   */
 @Internal
 @SerialVersionUID(7341356073446263475L)
 class CaseClassSerializer[T <: Product](
-    clazz: Class[T],
-    scalaFieldSerializers: Array[TypeSerializer[_]],
-    val isCaseClassImmutable: Boolean
-) extends TupleSerializerBase[T](clazz, scalaFieldSerializers)
+    val evolution: AdtEvolution[T],
+    val isCaseClassImmutable: Boolean,
+    val fieldNames: Option[Array[String]],
+    scalaFieldSerializers: Array[TypeSerializer[_]]
+) extends TupleSerializerBase[T](evolution.currentClass, scalaFieldSerializers)
     with Cloneable
     with ConstructorCompat {
+
+  require(
+    fieldNames.forall(_.length == scalaFieldSerializers.length), // One field name for each field serializer
+    s"${evolution.currentClass} has ${fieldNames.fold(0)(_.length)} field names for ${scalaFieldSerializers.length}" +
+      s" field serializers"
+  )
 
   @transient private lazy val log: Logger = LoggerFactory.getLogger(this.getClass)
 
@@ -57,6 +87,23 @@ class CaseClassSerializer[T <: Product](
   // During restoration, those class names are deserialized and instantiated via a class loader.
   // The underlying implementation is major version-specific (Scala 2 vs. Scala 3).
   @transient private lazy val constructor = lookupConstructor(tupleClass)
+
+  /** Whether the former data reads as is, computed once at the first record */
+  @transient private lazy val isAsIs = evolution.isAsIs(fieldNames)
+
+  /** The migration plan, computed once at the first record that needs it */
+  @transient private lazy val migrationPlan: Array[MigratedField] =
+    evolution.plan(fieldNames.getOrElse(Array.empty)) match {
+      case Right(migratedFields) => migratedFields
+      case Left(failures)        => throw MigrationException(evolution.currentClass, evolution.formerVersion, failures)
+    }
+
+  /** The former fields that the serializer reads, computed once: no deleted field, no field of a deleted class. */
+  @transient private lazy val isKeptField: Array[Boolean] = {
+    val kept = Array.fill(fieldSerializers.length)(isAsIs)
+    if (!isAsIs && !isDeletedClass(evolution.currentClass)) migrationPlan.foreach(_.formerIndex.foreach(kept(_) = true))
+    kept
+  }
 
   override def duplicate(): CaseClassSerializer[T] = {
     if (isImmutableSerializer) {
@@ -140,14 +187,27 @@ class CaseClassSerializer[T <: Product](
       source.skipBytesToRead(nullPadding.length)
       null.asInstanceOf[T]
     } else {
-      val fields = new Array[AnyRef](sourceArity)
-      var i      = 0
+      // Read the former fields in their former order
+      val formerValues = new Array[AnyRef](sourceArity)
+      var i            = 0
       while (i < sourceArity) {
-        fields(i) = fieldSerializers(i).deserialize(source)
+        if (isKeptField(i)) formerValues(i) = fieldSerializers(i).deserialize(source)
+        else fieldSerializers(i).copy(source, Discarded)
         i += 1
       }
-      createInstance(fields)
+      if (isAsIs) createInstance(formerValues)
+      else evolution.migrate(createInstance(migrateFields(formerValues)))
     }
+  }
+
+  private def migrateFields(formerValues: Array[AnyRef]): Array[AnyRef] = {
+    val values = new Array[AnyRef](migrationPlan.length)
+    var i      = 0
+    while (i < values.length) {
+      values(i) = migrationPlan(i).migrate(formerValues)
+      i += 1
+    }
+    values
   }
 
   override def copy(source: DataInputView, target: DataOutputView): Unit = {
@@ -172,113 +232,107 @@ class CaseClassSerializer[T <: Product](
 
 object CaseClassSerializer {
   private val EmptyByteArray: Array[Byte] = new Array(0)
+
+  /** The output of a skipped field: it discards the bytes, so its state holds no data. */
+  private val Discarded: DataOutputView = new DataOutputViewStreamWrapper(new OutputStream {
+    override def write(b: Int): Unit                             = ()
+    override def write(b: Array[Byte], off: Int, len: Int): Unit = ()
+  })
 }
 
 /** [[TypeSerializerSnapshot]] for [[CaseClassSerializer]]. */
 final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     serializer: Option[CaseClassSerializer[T]]
-) extends CompositeTypeSerializerSnapshot[T, CaseClassSerializer[T]] {
+) extends CompositeTypeSerializerSnapshot[T, CaseClassSerializer[T]]
+    with EvolvingSnapshot[T, ScalaCaseClassSerializerSnapshot[T]] {
 
   // Empty constructor is required to instantiate this class during deserialization.
   def this() = this(None)
 
-  private var serializedClass: Option[Class[T]] = None
+  private var evolution: AdtEvolution[T]        = _
   private var isCaseClassImmutable: Boolean     = false
+  private var fieldNames: Option[Array[String]] = None
 
   serializer.foreach { s =>
     // Scala limitation: can't call parent constructor used for writing the snapshot, reproduce its behavior instead
     setNestedSerializersSnapshots(this, getNestedSerializers(s).map(_.snapshotConfiguration()): _*)
-    serializedClass = Some(s.getTupleClass)
+    evolution = s.evolution
     isCaseClassImmutable = s.isCaseClassImmutable
+    fieldNames = s.fieldNames
   }
 
-  override protected def getCurrentOuterSnapshotVersion: Int = CurrentVersion
+  // Restored from a snapshot written before release 2.4.0, the serializer knows no field name: it writes that format again
+  override protected def getCurrentOuterSnapshotVersion: Int =
+    if (fieldNames.isDefined) CurrentVersion else PositionalVersion
 
   override protected def getNestedSerializers(outerSerializer: CaseClassSerializer[T]): Array[TypeSerializer[_]] =
     outerSerializer.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
 
   override protected def createOuterSerializerWithNestedSerializers(
       nestedSerializers: Array[TypeSerializer[_]]
-  ): CaseClassSerializer[T] = serializedClass match {
-    case Some(clazz) => new CaseClassSerializer[T](clazz, nestedSerializers, isCaseClassImmutable)
-    case None        => throw new IllegalStateException("type can not be NULL")
+  ): CaseClassSerializer[T] =
+    new CaseClassSerializer[T](evolution, isCaseClassImmutable, fieldNames, nestedSerializers)
+
+  override protected def writeOuterSnapshot(out: DataOutputView): Unit = {
+    writeEvolution(evolution, out, hasVersion = fieldNames.isDefined)
+    out.writeBoolean(isCaseClassImmutable)
+    fieldNames.foreach(StringArraySerializer.INSTANCE.serialize(_, out))
   }
 
-  override protected def writeOuterSnapshot(out: DataOutputView): Unit = serializedClass match {
-    case Some(clazz) =>
-      out.writeUTF(clazz.getName)
-      out.writeBoolean(isCaseClassImmutable)
-    case None => throw new IllegalStateException("type can not be NULL")
-  }
-
-  override protected def readOuterSnapshot(
-      readOuterSnapshotVersion: Int,
-      in: DataInputView,
-      userCodeClassLoader: ClassLoader
-  ): Unit = {
-    serializedClass = Some(InstantiationUtil.resolveClassByName(in, userCodeClassLoader))
+  override protected def readOuterSnapshot(readOuterSnapshotVersion: Int, in: DataInputView, cl: ClassLoader): Unit = {
+    // Before release 2.4.0, the snapshot format version 3 records neither the schema version nor the field names
+    evolution = readEvolution(in, cl, hasVersion = readOuterSnapshotVersion > PositionalVersion)
     // If reading a version of 2 or below, don't read the boolean and set isCaseClassImmutable to false
     isCaseClassImmutable = readOuterSnapshotVersion > 2 && in.readBoolean
+    fieldNames =
+      Option.when(readOuterSnapshotVersion > PositionalVersion)(StringArraySerializer.INSTANCE.deserialize(in))
   }
+
+  override private[serializer] def adtEvolution: Option[AdtEvolution[T]] = Some(evolution)
+
+  override private[serializer] def memberNames: Array[String] = fieldNames.getOrElse(Array.empty)
+
+  override protected def resolveStandardCompatibility(
+      former: ScalaCaseClassSerializerSnapshot[T]
+  ): TypeSerializerSchemaCompatibility[T] =
+    // No migration is necessary: use the standard resolution of the parent class
+    super[CompositeTypeSerializerSnapshot].resolveSchemaCompatibility(former)
+
+  /** `former.evolution` is the ADT evolution of the schema version that the former data was written at. */
+  override protected def isEvolutionRequired(former: ScalaCaseClassSerializerSnapshot[T]): Boolean =
+    !former.evolution.isAsIs(former.fieldNames)
+
+  /** Check that the declared evolutions describe the full migration from the former schema:
+    *   - plans the field evolutions on the former field names, which must give the current field names
+    *   - resolves the compatibility of the unchanged, reordered and renamed fields
+    *   - does not resolve the compatibility of the added, transformed or deleted fields: their former and current field
+    *     serializers do not correspond
+    */
+  override protected def checkMigration(former: ScalaCaseClassSerializerSnapshot[T]): Option[String] =
+    former.evolution.plan(former.memberNames) match {
+      case Left(failures)       => Some(failures.mkString("\n"))
+      case Right(migrationPlan) =>
+        val formerFieldSnapshots  = former.getNestedSerializerSnapshots
+        val currentFieldSnapshots = getNestedSerializerSnapshots
+        migrationPlan.iterator.zipWithIndex.collectFirst {
+          case (Former(formerIndex), currentIndex)
+              if isIncompatible(currentFieldSnapshots(currentIndex), formerFieldSnapshots(formerIndex)) =>
+            s"Former field '${former.memberNames(formerIndex)}' is incompatible with '${memberNames(currentIndex)}'"
+        }
+    }
 
   override protected def resolveOuterSchemaCompatibility(
       oldSerializerSnapshot: TypeSerializerSnapshot[T]
-  ): CompositeTypeSerializerSnapshot.OuterSchemaCompatibility = {
-    if (!oldSerializerSnapshot.isInstanceOf[ScalaCaseClassSerializerSnapshot[T]]) {
-      return OuterSchemaCompatibility.INCOMPATIBLE
-    }
-    val caseClassSerializerSnapshot = oldSerializerSnapshot.asInstanceOf[ScalaCaseClassSerializerSnapshot[T]]
-    val currentTypeName             = serializedClass.map(_.getName)
-    val newTypeName                 = caseClassSerializerSnapshot.serializedClass.map(_.getName)
-    if (currentTypeName == newTypeName) {
-      OuterSchemaCompatibility.COMPATIBLE_AS_IS
-    } else {
-      OuterSchemaCompatibility.INCOMPATIBLE
-    }
-  }
-
-  /** Relaxes [[CompositeTypeSerializerSnapshot]]'s strict arity check: its own compatibility resolution rejects any
-    * change in the number of nested serializers outright, which would forbid appending a field. We reuse everything
-    * else from the base class and only re-decide the nested-serializer comparison here.
-    */
-  override def resolveSchemaCompatibility(
-      oldSerializerSnapshot: TypeSerializerSnapshot[T]
-  ): TypeSerializerSchemaCompatibility[T] = oldSerializerSnapshot match {
-    case old: ScalaCaseClassSerializerSnapshot[T] @unchecked =>
-      if (resolveOuterSchemaCompatibility(old) == OuterSchemaCompatibility.INCOMPATIBLE) {
-        TypeSerializerSchemaCompatibility.incompatible()
-      } else {
-        val oldNested = old.getNestedSerializerSnapshots
-        val newNested = getNestedSerializerSnapshots
-
-        if (newNested.length < oldNested.length) {
-          // Removing fields is not supported.
-          TypeSerializerSchemaCompatibility.incompatible()
-        } else {
-          // Compare only the shared leading fields; any extra trailing fields in the new schema are what we migrate
-          // (old data is read with fewer fields and the constructor supplies their defaults).
-          val sharedNew    = newNested.take(oldNested.length)
-          val intermediate =
-            CompositeTypeSerializerUtil.constructIntermediateCompatibilityResult[T](sharedNew, oldNested)
-
-          if (intermediate.isIncompatible) {
-            TypeSerializerSchemaCompatibility.incompatible()
-          } else if (newNested.length == oldNested.length && intermediate.isCompatibleAsIs) {
-            TypeSerializerSchemaCompatibility.compatibleAsIs()
-          } else {
-            // Either trailing fields were added, or a shared field needs migration/reconfiguration. Migration covers
-            // both: the serializer restored from the savepoint reads the old bytes, then the new serializer takes over.
-            TypeSerializerSchemaCompatibility.compatibleAfterMigration()
-          }
-        }
-      }
-
-    case _ =>
-      TypeSerializerSchemaCompatibility.incompatible()
-  }
+  ): CompositeTypeSerializerSnapshot.OuterSchemaCompatibility =
+    OuterSchemaCompatibility.COMPATIBLE_AS_IS // resolveSchemaCompatibility already resolves the outer compatibility
 
 }
 
 object ScalaCaseClassSerializerSnapshot {
-  private val CurrentVersion = 3
+
+  // Last version written before release 2.4.0, recording no field name: the fields are read by position
+  private val PositionalVersion = 3
+
+  private val CurrentVersion = 4
+
 }

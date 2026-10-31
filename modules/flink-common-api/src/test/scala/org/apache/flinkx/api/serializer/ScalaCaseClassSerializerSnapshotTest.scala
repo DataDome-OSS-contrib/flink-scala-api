@@ -1,9 +1,12 @@
 package org.apache.flinkx.api.serializer
 
+import org.apache.flink.api.common.typeutils.base.array.StringArraySerializer
 import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshotTest._
+import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -20,11 +23,11 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     registered.resolveSchemaCompatibility(restored) shouldBe Symbol("compatibleAsIs")
   }
 
-  it should "be compatibleAfterMigration when a field is appended to the end" in {
+  it should "be incompatible when a field is appended to the end without @added" in {
     val registered = serializerOf(stringSer, intSer).snapshotConfiguration() // new code: 2 fields
     val restored   = savepointed[Evolved](serializerOf(stringSer))           // savepoint: 1 field
 
-    registered.resolveSchemaCompatibility(restored) shouldBe Symbol("compatibleAfterMigration")
+    registered.resolveSchemaCompatibility(restored) shouldBe Symbol("incompatible")
   }
 
   it should "be incompatible when a field is removed" in {
@@ -44,7 +47,9 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
   it should "be incompatible when the class name differs" in {
     val registered = serializerOf(stringSer).snapshotConfiguration()
     // A snapshot of a different class is erased to the same raw type at runtime, the way Flink sees it.
-    val restored = savepointed[Other](new CaseClassSerializer[Other](classOf[Other], Array(stringSer), false))
+    val restored = savepointed[Other](
+      new CaseClassSerializer[Other](evolutionOf(classOf[Other]), false, Some(Array("a")), Array(stringSer))
+    )
       .asInstanceOf[TypeSerializerSnapshot[Evolved]]
 
     registered.resolveSchemaCompatibility(restored) shouldBe Symbol("incompatible")
@@ -58,8 +63,37 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
 
     val in = new DataInputDeserializer(out.getSharedBuffer)
     in.readInt() should be(911108)                   // CompositeTypeSerializerSnapshot.MAGIC_NUMBER
-    in.readInt() should be(3)                        // outer-snapshot version
+    in.readInt() should be(4)                        // snapshot format version
     in.readUTF() should be(classOf[Evolved].getName) // outer snapshot: class name
+    in.readInt() should be(0)                        // schema version, since snapshot format version 4
+    in.readBoolean() should be(false)                // immutability, since snapshot format version 3
+    StringArraySerializer.INSTANCE.deserialize(in) should be(Array("a")) // field names, since snapshot format version 4
+  }
+
+  "a snapshot written before release 2.4.0" should "restore a serializer reading the fields by position" in {
+    val out = new DataOutputSerializer(1024)
+    out.write(writtenBefore240(serializerOf(stringSer, intSer)))
+    serializerOf(stringSer, intSer).serialize(Evolved("x", 1), out)
+
+    val in       = new DataInputDeserializer(out.getCopyOfBuffer)
+    val restored = TypeSerializerSnapshot.readVersionedSnapshot[Evolved](in, getClass.getClassLoader)
+
+    serializerOf(stringSer, intSer).snapshotConfiguration().resolveSchemaCompatibility(restored) shouldBe Symbol(
+      "compatibleAsIs"
+    )
+    val restoredSerializer = restored.restoreSerializer().asInstanceOf[CaseClassSerializer[Evolved]]
+    restoredSerializer.fieldNames shouldBe None
+    restoredSerializer.deserialize(in) shouldBe Evolved("x", 1)
+  }
+
+  // A state not registered again keeps the restored serializer, which the next savepoint snapshots
+  it should "be written again in the same format by the serializer it restores" in {
+    val restored =
+      new CaseClassSerializer[Evolved](evolutionOf(classOf[Evolved]), false, None, Array(stringSer, intSer))
+    val out = new DataOutputSerializer(1024)
+    TypeSerializerSnapshot.writeVersionedSnapshot(out, restored.snapshotConfiguration())
+
+    out.getCopyOfBuffer shouldBe writtenBefore240(serializerOf(stringSer, intSer))
   }
 
   it should "round-trip through writeSnapshot/readSnapshot" in {
@@ -79,28 +113,37 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
     original.resolveSchemaCompatibility(restored) shouldBe Symbol("compatibleAsIs")
   }
 
-  "an appended field" should "be read from old data with the restored serializer and filled with its default" in {
-    val oldSer = serializerOf(stringSer) // old code: single field
-
-    val out = new DataOutputSerializer(1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(out, oldSer.snapshotConfiguration())
-    oldSer.serialize(Evolved("x"), out)
-
-    val in              = new DataInputDeserializer(out.getSharedBuffer)
-    val restoredOldSnap = TypeSerializerSnapshot.readVersionedSnapshot[Evolved](in, getClass.getClassLoader)
-
-    val newSer = serializerOf(stringSer, intSer) // new code: appended `b`
-    newSer.snapshotConfiguration().resolveSchemaCompatibility(restoredOldSnap) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
-
-    // Flink reads the old bytes with the serializer restored from the savepoint; the missing `b` gets its default.
-    restoredOldSnap.restoreSerializer().deserialize(in) should be(Evolved("x", 0))
-  }
-
 }
 
 object ScalaCaseClassSerializerSnapshotTest {
+
+  /** The snapshot of the given serializer, as 2.3.x wrote it: the snapshot format version 3 records only the class name
+    * and the immutability.
+    */
+  def writtenBefore240(serializer: CaseClassSerializer[_]): Array[Byte] = {
+    val current  = new DataOutputSerializer(1024)
+    val snapshot = serializer.snapshotConfiguration()
+    snapshot.writeSnapshot(current)
+    val in          = new DataInputDeserializer(current.getCopyOfBuffer)
+    val magicNumber = in.readInt()
+    in.readInt() // Snapshot format version
+    val className = in.readUTF()
+    in.readInt() // Schema version
+    val isCaseClassImmutable = in.readBoolean()
+    StringArraySerializer.INSTANCE.deserialize(in) // Field names
+    val nestedSnapshots = new Array[Byte](in.available())
+    in.readFully(nestedSnapshots)
+
+    val out = new DataOutputSerializer(1024)
+    out.writeUTF(snapshot.getClass.getName)
+    out.writeInt(snapshot.getCurrentVersion)
+    out.writeInt(magicNumber)
+    out.writeInt(3)
+    out.writeUTF(className)
+    out.writeBoolean(isCaseClassImmutable)
+    out.write(nestedSnapshots)
+    out.getCopyOfBuffer
+  }
 
   case class Evolved(a: String, b: Int = 0)
   case class Other(a: String)
@@ -109,18 +152,11 @@ object ScalaCaseClassSerializerSnapshotTest {
   val intSer: TypeSerializer[_]    = IntSerializer.INSTANCE
 
   def serializerOf(fieldSerializers: TypeSerializer[_]*): CaseClassSerializer[Evolved] =
-    new CaseClassSerializer[Evolved](classOf[Evolved], fieldSerializers.toArray, false)
-
-  /** Writes the serializer's snapshot then reads it back, the way a savepoint does. */
-  def savepointed[T](serializer: TypeSerializer[_]): TypeSerializerSnapshot[T] =
-    savepointedSnapshot[T](serializer.snapshotConfiguration())
-
-  /** Writes a snapshot then reads it back, the way a savepoint does. */
-  def savepointedSnapshot[T](snapshot: TypeSerializerSnapshot[_]): TypeSerializerSnapshot[T] = {
-    val out = new DataOutputSerializer(1024 * 1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(out, snapshot)
-    val in = new DataInputDeserializer(out.getSharedBuffer)
-    TypeSerializerSnapshot.readVersionedSnapshot[T](in, getClass.getClassLoader)
-  }
+    new CaseClassSerializer[Evolved](
+      evolutionOf(classOf[Evolved]),
+      false,
+      Some(Array("a", "b").take(fieldSerializers.length)),
+      fieldSerializers.toArray
+    )
 
 }
