@@ -11,7 +11,9 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.net.{URL, URLClassLoader}
+import java.nio.file.Files
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
+import java.util.jar.{Attributes, JarOutputStream, Manifest}
 import scala.jdk.CollectionConverters._
 
 /** Test the registry of the evolving companions. The first lookup through a class loader does the companion scan of its
@@ -176,6 +178,28 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     val resolved = Evolutions.get[Any](FormerProbe, 0, wrapper).currentClass
     resolved shouldNot be(classOf[Probe])
     resolved.getClassLoader shouldBe otherJob
+  }
+
+  // IntelliJ shortens a long class path to a jar whose manifest lists the class path, as the JVM reads it
+  it should "resolve a former name declared in a jar that the Class-Path of a manifest lists" in {
+    val jobJar     = classOf[Probe].getProtectionDomain.getCodeSource.getLocation
+    val pathingJar = Files.createTempFile("pathing", ".jar")
+    val manifest   = new Manifest()
+    val attributes = manifest.getMainAttributes
+    attributes.put(Attributes.Name.MANIFEST_VERSION, "1.0")
+    attributes.put(Attributes.Name.CLASS_PATH, jobJar.toString)
+    new JarOutputStream(Files.newOutputStream(pathingJar), manifest).close()
+    val pathingJob = new URLClassLoader(Array(pathingJar.toUri.toURL), cl)
+
+    Evolutions.get[Probe](FormerProbe, 0, pathingJob).currentClass shouldBe classOf[Probe]
+  }
+
+  // Probe has an evolving companion: the scan cannot see it, which must not make its evolutions silently empty
+  it should "fail to look up a class whose evolving companion the scan did not find" in {
+    val emptyJob = new URLClassLoader(Array(Files.createTempDirectory("job").toUri.toURL), cl)
+
+    val failure = intercept[IllegalStateException](Evolutions.get[Probe](classOf[Probe].getName, 0, emptyJob))
+    failure.getMessage should include(classOf[Probe].getName)
   }
 
   /** Delegates to the class loader of the job, with the application class loader as parent, as Flink does. */

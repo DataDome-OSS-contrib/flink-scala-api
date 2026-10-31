@@ -171,6 +171,8 @@ object Evolutions extends EvolutionsFactory {
     *
     * @throws MissingEvolutionException
     *   if no declaration of the class name includes this version, and the class loader cannot load it
+    * @throws java.lang.IllegalStateException
+    *   if the companion scan did not find the evolving companion of the class
     * @throws Throwable
     *   the failure of the registration
     */
@@ -190,10 +192,19 @@ object Evolutions extends EvolutionsFactory {
               failure
             )
         }
+        // The declarations of a class with an evolving companion are missing only if the scan did not find it
+        if (declarations.isEmpty && hasEvolvingCompanion(currentClass, cl))
+          throw new IllegalStateException(s"The companion scan of $cl missed the evolving companion of $currentClass")
         new NoEvolution(currentClass, formerVersion, ConstructorCompat.lookupFieldNames(currentClass))
       }
       .asInstanceOf[AdtEvolution[T]]
   }
+
+  /** Whether the companion of the given class extends [[Evolving]], without initializing it. */
+  private def hasEvolvingCompanion(clazz: Class[_], cl: ClassLoader): Boolean =
+    ClassUtil.loadClass(s"${clazz.getName}$$", initialize = false, cl)
+      .toOption
+      .exists(classOf[Evolving[_]].isAssignableFrom)
 
   /** Submission check: register the declarations of the evolving companions of the job, from the thread of its main.
     *

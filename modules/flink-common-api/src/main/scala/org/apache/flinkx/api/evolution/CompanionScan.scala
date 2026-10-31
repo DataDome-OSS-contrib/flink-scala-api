@@ -5,16 +5,17 @@ import org.apache.flink.shaded.asm9.org.objectweb.asm.ClassReader
 import java.io.File
 import java.net.{URL, URLClassLoader}
 import java.nio.file.{Files, Path, Paths}
-import java.util.jar.JarFile
+import java.util.jar.{Attributes, JarFile}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
-import scala.util.Using
+import scala.util.{Try, Using}
 
 /** Companion scan: finds the evolving companions in the jars and class directories of a class loader.
   *
   * The evolving companions of a job are all in the jars of its class loader: the parent class loaders cannot see
   * [[Evolving]]. Flink gives a wrapper of this class loader, with the URLs of the class loader that it wraps. Without
-  * URLs, the scan reads the class path of the JVM: a job in a MiniCluster, or a test, has its classes there.
+  * URLs, the scan reads the class path of the JVM: a job in a MiniCluster, or a test, has its classes there. As the
+  * JVM, it also reads the jars that the `Class-Path` of a manifest lists.
   *
   * A companion can extend [[Evolving]] through a trait or a class of its own. The scan reads only the header of each
   * class file, then its supertypes. It reads each supertype once, and skips the JDK and the Scala library.
@@ -37,9 +38,32 @@ private[evolution] object CompanionScan {
       case loader: URLClassLoader => loader.getURLs.toSeq.flatMap(pathOf)
       case _                      => Seq.empty
     }
-    if (urls.nonEmpty) urls
-    else System.getProperty("java.class.path", "").split(File.pathSeparator).toSeq.filter(_.nonEmpty).map(Paths.get(_))
+    val roots =
+      if (urls.nonEmpty) urls
+      else
+        System.getProperty("java.class.path", "").split(File.pathSeparator).toSeq.filter(_.nonEmpty).map(Paths.get(_))
+    withManifestClassPaths(roots)
   }
+
+  /** The given roots, and the jars that the `Class-Path` of their manifests lists, as the JVM reads them. */
+  private def withManifestClassPaths(roots: Seq[Path]): Seq[Path] = {
+    val all                   = mutable.LinkedHashSet.empty[Path]
+    def add(root: Path): Unit = if (all.add(root.toAbsolutePath.normalize)) manifestClassPath(root).foreach(add)
+    roots.foreach(add)
+    all.toSeq
+  }
+
+  /** The roots that the `Class-Path` of the manifest of the given jar lists, as URLs relative to the jar. */
+  private def manifestClassPath(root: Path): Seq[Path] =
+    if (!Files.isRegularFile(root)) Nil
+    else
+      Using.resource(new JarFile(root.toFile)) { jar =>
+        Option(jar.getManifest)
+          .flatMap(manifest => Option(manifest.getMainAttributes.getValue(Attributes.Name.CLASS_PATH)))
+          .toSeq
+          .flatMap(_.split(' ').filter(_.nonEmpty))
+          .flatMap(entry => Try(Paths.get(root.toUri.resolve(entry))).toOption) // The JVM ignores an invalid URL
+      }
 
   private def pathOf(url: URL): Option[Path] =
     if (url.getProtocol == "file") Some(Paths.get(url.toURI)) else None
