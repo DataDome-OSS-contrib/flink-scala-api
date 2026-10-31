@@ -6,7 +6,7 @@ import org.apache.flinkx.api.evolution.AdtEvolution.{DeletedEvolution, EnumValue
 import org.apache.flinkx.api.evolution.EvolutionBuilder.Deletion
 import org.apache.flinkx.api.evolution.Evolutions.Declaration
 import org.apache.flinkx.api.evolution.FieldEvolution.{Add, Delete, Rename, Transform}
-import org.apache.flinkx.api.util.ClassUtil.{isObjectClass, resolveFormerClassName}
+import org.apache.flinkx.api.util.ClassUtil.{companionName, isObjectClass, resolveFormerClassName}
 
 import scala.collection.mutable
 
@@ -104,7 +104,7 @@ final class EvolutionBuilder[A](
     */
   private def renameClass(formerClassName: String, since: Int): Unit = {
     val formerName = resolveFormerClassName(formerClassName, currentClass)
-    renames(if (isObjectClass(currentClass) && !formerName.endsWith("$")) s"$formerName$$" else formerName) = since
+    renames(if (isObjectClass(currentClass)) companionName(formerName) else formerName) = since
   }
 
   /** Delete: the current source code no longer contains the subtype or field type `formerClassName`, relative or
@@ -113,8 +113,8 @@ final class EvolutionBuilder[A](
     */
   private def deleteClass(formerClassName: String, deleted: deletedClasses): Unit = {
     val formerName = resolveFormerClassName(formerClassName, currentClass)
-    if (!formerName.endsWith("$")) deletions += Deletion(s"$formerName$$", deleted.since, deleted.throwOnInstance)
-    deletions += Deletion(formerName, deleted.since, deleted.throwOnInstance)
+    Seq(companionName(formerName), formerName).distinct
+      .foreach(name => deletions += Deletion(name, deleted.since, deleted.throwOnInstance))
   }
 
   /** Delete: the current source code no longer contains the enum value `formerName`. */

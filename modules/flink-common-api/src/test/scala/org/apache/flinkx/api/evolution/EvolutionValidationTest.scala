@@ -74,8 +74,7 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     assertTypeError("Evolutions[WrongSinceNotLiteral]")
   }
 
-  // The migration never applies an evolution outside the version range. The rename of a subtype, as Horse, can use
-  // the versions of its sealed traits, but no higher version.
+  // The migration never applies an evolution outside the version range: a subtype counts in its own versions
   it should "reject an evolution whose since is outside the version range" in {
     assertTypeError("Evolutions[WrongSinceAboveVersion]")
     assertTypeError("Evolutions[WrongSinceBelowOne]")

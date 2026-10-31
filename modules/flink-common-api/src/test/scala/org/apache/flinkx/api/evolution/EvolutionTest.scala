@@ -470,10 +470,10 @@ object EvolutionTest {
     val evolutions = Evolutions[OuterEvolvedWithNested]
   }
 
-  case class UnrelatedFormerCaseClass(a: String, removed: String)
+  case class UnrelatedFormerCaseClass(a: String, deleted: String)
 
   @version(1)
-  @deletedFields(since = 1, "removed")
+  @deletedFields(since = 1, "deleted")
   case class UnrelatedCurrentCaseClass(a: String)
   object UnrelatedCurrentCaseClass extends Evolving[UnrelatedCurrentCaseClass] {
     val evolutions = Evolutions[UnrelatedCurrentCaseClass]
@@ -494,12 +494,12 @@ object EvolutionTest {
 
   @version(1)
   @renamed(since = 1, "FormerRenamedCaseClass")
-  @deletedFields(since = 1, "removed")
+  @deletedFields(since = 1, "deleted")
   case class RenamedCaseClass(a: String)
   object RenamedCaseClass extends Evolving[RenamedCaseClass] { val evolutions = Evolutions[RenamedCaseClass] }
 
   /* RenamedCaseClass at version 0
-  case class FormerRenamedCaseClass(a: String, removed: String)
+  case class FormerRenamedCaseClass(a: String, deleted: String)
    */
 
   @version(2)

@@ -86,7 +86,7 @@ object EvolutionErrorFixtures {
   case class WrongSinceAboveVersion(@added(since = 2) a: String = "")
 
   @version(1)
-  @deletedFields(since = 0, "removed")
+  @deletedFields(since = 0, "deleted")
   case class WrongSinceBelowOne(a: String)
 
   case class WrongRenamedOnFieldWithoutVersion(@renamed(1, "a") a: String)
