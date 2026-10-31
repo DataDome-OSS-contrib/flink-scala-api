@@ -109,9 +109,6 @@ package object evolution {
     * }
     * }}}
     *
-    * A renamed subtype declares its own `@version`. Its `since` applies to its own versions and to the versions of its
-    * sealed trait.
-    *
     * A class that reuses a former class name must declare a version equal to or higher than `since`. The submission
     * check verifies it.
     *
@@ -200,8 +197,8 @@ package object evolution {
     *
     * Annotation of an ADT.
     * @param since
-    *   The first version of the deleted classes without them: 1 if they had no `@version`. For an enum value, a version
-    *   of its enum
+    *   The first version without these classes, in the versions of the deleted classes: 1 if they had no `@version`.
+    *   For an enum value, a version of its enum
     * @param throwOnInstance
     *   `true` (default) to throw a [[DeletedInstanceException]] on an instance of a deleted class, `false` to read it
     *   as `null`. The migration skips an instance in a deleted field, which never throws

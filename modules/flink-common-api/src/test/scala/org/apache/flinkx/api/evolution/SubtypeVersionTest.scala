@@ -18,23 +18,23 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import SubtypeVersionTest._
 
-  it should "restore a renamed case class under a sealed trait of a higher version" in {
+  it should "migrate a renamed case class under a sealed trait of a higher version" in {
     val formerSerializer = formerLitter
 
     deserializeFormerForm[Litter](formerSerializer, FormerCaseClass("Rex")) shouldBe Dog("Rex")
     compatibilityWith[Litter](formerSerializer)(infoToSer[Litter]) shouldBe Symbol("compatibleAfterMigration")
   }
 
-  it should "restore a renamed case object under a sealed trait of a higher version" in {
+  it should "migrate a renamed case object under a sealed trait of a higher version" in {
     deserializeFormerForm[Litter](formerLitter, FormerCaseObject) shouldBe Wanderer
   }
 
-  it should "restore a deleted unversioned subtype under a sealed trait of a higher version" in {
+  it should "migrate a deleted unversioned subtype under a sealed trait of a higher version" in {
     deserializeFormerForm[Litter](formerLitter, FormerRunt("Tiny")) shouldBe null
   }
 
   // Herd keeps its version: the rename of its subtype counts only in the versions of the subtype
-  it should "restore a renamed subtype under an unchanged sealed trait" in {
+  it should "migrate a renamed subtype under an unchanged sealed trait" in {
     val foalName         = classOf[Colt].getName.replace("Colt", "Foal")
     val formerSerializer =
       formerTrait(classOf[Herd], 1, (foalName, classOf[FormerCaseClass], formerCaseClass(foalName, 0)))
@@ -43,7 +43,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
     compatibilityWith[Herd](formerSerializer)(infoToSer[Herd]) shouldBe Symbol("compatibleAfterMigration")
   }
 
-  it should "restore a renamed subtype of a version higher than the one of its sealed trait" in {
+  it should "migrate a renamed subtype of a version higher than the one of its sealed trait" in {
     val lambName         = classOf[Sheep].getName.replace("Sheep", "Lamb")
     val formerSerializer =
       formerTrait(classOf[Flock], 1, (lambName, classOf[FormerCaseClass], formerCaseClass(lambName, 3)))
@@ -53,7 +53,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   // Ram had the version 2: its deletion counts in its own versions, above the version of Flock
-  it should "restore a deleted versioned subtype" in {
+  it should "migrate a deleted versioned subtype" in {
     val ramName          = classOf[Sheep].getName.replace("Sheep", "Ram")
     val formerSerializer =
       formerTrait(classOf[Flock], 1, (ramName, classOf[FormerCaseClass], formerCaseClass(ramName, 2)))
@@ -61,8 +61,8 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
     deserializeFormerForm[Flock](formerSerializer, FormerCaseClass("Aries")) shouldBe null
   }
 
-  // Before release 2.4.0, the snapshot format 2 records the subtype names, then the snapshots of the subtypes
-  it should "restore a renamed subtype from a snapshot of format 2" in {
+  // Before release 2.4.0, the snapshot format version 2 records the subtype names, then the snapshots of the subtypes
+  it should "migrate a renamed subtype from a snapshot of format version 2" in {
     val puppyName = classOf[Dog].getName.replace("Dog", "Puppy")
     val puppy     = new CaseClassSerializer[Product](
       new AdtEvolution(puppyName, 0, classOf[Product]),
@@ -100,7 +100,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
       " name up to version 0. Declare its @renamed or @deletedClasses since a version above 1"
   }
 
-  /** A former serializer of Litter at version 2. The stand-in classes take the place of its former subtypes. */
+  /** The serializer of Litter at version 2. The stand-in classes take the place of its former subtypes. */
   private def formerLitter: TypeSerializer[AnyRef] = {
     val puppyName  = classOf[Dog].getName.replace("Dog", "Puppy")
     val strayName  = classOf[Dog].getName.replace("Dog", "Stray$")
@@ -117,8 +117,8 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
   }
 
-  /** A former serializer of the sealed trait `traitClass` at `traitVersion`, with its former subtypes: their former
-    * class name, the stand-in class that takes their place, and their serializer.
+  /** The serializer of the sealed trait `traitClass` at `traitVersion`, with its former subtypes: their former class
+    * name, the stand-in class that takes their place, and their serializer.
     */
   private def formerTrait(
       traitClass: Class[_],

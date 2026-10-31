@@ -125,7 +125,7 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   // The migration finds the current value of each former value by its name, not by its position
-  it should "restore the reordered values of an unversioned enum, a value being added" in {
+  it should "migrate the reordered values of an unversioned enum with an added value" in {
     given TypeSerializer[Failure]     = infoToSer[Failure]
     val derived                       = summon[TypeSerializer[Failure]].asInstanceOf[Scala3EnumSerializer[Failure]]
     def valueSerializer(name: String) = derived.enumValueSerializers(derived.enumValueNames.indexOf(name))

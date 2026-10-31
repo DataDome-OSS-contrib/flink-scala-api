@@ -135,13 +135,13 @@ private[evolution] object EvolutionMacro:
       value.primaryConstructor.paramSymss.flatten.filter(_.isTypeParam) match
         case Nil        => value.typeRef
         case typeParams => value.typeRef.appliedTo(typeParams.map(_ => TypeBounds.empty))
-    def builders(adt: Expr[EvolutionBuilder[T]]): List[Expr[EvolutionBuilder[?]]] =
+    def builders(adtBuilder: Expr[EvolutionBuilder[T]]): List[Expr[EvolutionBuilder[?]]] =
       caseObjectsBelow(symbol).distinct.map(_.termRef.asType).map { case '[c] => builderImpl[c](None) } ++
-        enumValuesWithParameters.map(typeOf(_).asType).map { case '[c] => builderImpl[c](Some(adt)) }
+        enumValuesWithParameters.map(typeOf(_).asType).map { case '[c] => builderImpl[c](Some(adtBuilder)) }
     '{
       new Evolutions[T](() => {
-        val adt = ${ builderImpl[T](None) }
-        adt +: ${ Varargs(builders('adt)) }
+        val adtBuilder = ${ builderImpl[T](None) }
+        adtBuilder +: ${ Varargs(builders('adtBuilder)) }
       })
     }
 
@@ -238,15 +238,15 @@ private[evolution] object EvolutionMacro:
       ofClass ++ ofFields ++ ofEnumValues
 
     validate()
-    val clazz    = classOfExpr(TypeRepr.of[T])
-    val enclosed = enumBuilder.fold('{ None })(enumBuilder => '{ Some($enumBuilder) })
+    val clazz           = classOfExpr(TypeRepr.of[T])
+    val enumBuilderExpr = enumBuilder.fold('{ None })(enumBuilder => '{ Some($enumBuilder) })
     '{
       val builder = new EvolutionBuilder[T](
         $clazz.asInstanceOf[Class[T]],
         ${ Expr(version) },
         $fieldNames,
         ${ Expr(isEnum) },
-        $enclosed
+        $enumBuilderExpr
       )
       ${ Expr.block(declarations('builder), '{ () }) }
       builder

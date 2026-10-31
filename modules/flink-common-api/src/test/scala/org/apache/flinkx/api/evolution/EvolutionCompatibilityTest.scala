@@ -179,7 +179,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     compatibilityWith[RolledBackTrait](formerSerializer) shouldBe Symbol("incompatible")
   }
 
-  // Click v4 declares an evolution that Click v3 does not know, without a change of its fields
+  // Click at version 4 declares an evolution that Click at version 3 does not know, without a change of its fields
   it should "resolve the schema compatibility of a case class after a rollback as incompatible" in {
     val derived          = infoToSer[Click].asInstanceOf[CaseClassSerializer[Click]]
     val formerSerializer = new CaseClassSerializer[Click](

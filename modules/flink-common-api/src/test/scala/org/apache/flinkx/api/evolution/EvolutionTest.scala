@@ -211,7 +211,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   // Without @deletedFields, the rename would discard the former value of 'a'
-  it should "not restore a field renamed to the name of an undeclared deleted field" in {
+  it should "not migrate a field renamed to the name of an undeclared deleted field" in {
     val exception = intercept[MigrationException](
       deserializeFormerFields(
         classOf[RenamedOverDeleted],
@@ -223,7 +223,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     exception.getMessage should include("Cannot rename field 'a': it is already one of")
   }
 
-  it should "restore a field renamed to the name of a deleted field" in {
+  it should "migrate a field renamed to the name of a deleted field" in {
     val (snapshot, restored) = deserializeFormerFields(
       classOf[RenamedOverDeclaredDeleted],
       0,
@@ -238,7 +238,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   // Version 2 renames 'a' to 'b', then version 3 renames 'b' to 'c'
-  it should "restore a field renamed twice" in {
+  it should "migrate a field renamed twice" in {
     forAll(Seq(1 -> "a", 2 -> "b")) { case (version, formerName) =>
       val (snapshot, restored) =
         deserializeFormerFields(classOf[RenamedTwice], version, (formerName, StringSerializer.INSTANCE, "x"))
@@ -251,7 +251,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   // Version 1 adds 'id', then version 2 renames it to 'ident'
-  it should "restore a field added, then renamed" in {
+  it should "migrate a field added, then renamed" in {
     val (_, fromV0) = deserializeFormerFields(classOf[AddedThenRenamed], 0, ("name", StringSerializer.INSTANCE, "n"))
     val (_, fromV1) = deserializeFormerFields(
       classOf[AddedThenRenamed],
@@ -265,7 +265,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   // Version 1 transforms 'sessionId', then version 2 renames it to 'id'
-  it should "restore a field transformed, then renamed" in {
+  it should "migrate a field transformed, then renamed" in {
     val (_, fromV0) =
       deserializeFormerFields(classOf[TransformedThenRenamed], 0, ("sessionId", StringSerializer.INSTANCE, "ab"))
     val (_, fromV1) =
@@ -276,7 +276,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   // The migration skips the deleted field: it builds no instance of the deleted classes, which would throw
-  it should "restore a case class whose deleted field holds instances of deleted classes" in {
+  it should "migrate a case class whose deleted field holds instances of deleted classes" in {
     val (snapshot, restored) = deserializeFormerFields(
       classOf[Tapped],
       0,

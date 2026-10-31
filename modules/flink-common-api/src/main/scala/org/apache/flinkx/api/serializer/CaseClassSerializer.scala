@@ -98,7 +98,7 @@ class CaseClassSerializer[T <: Product](
       case Left(failures)        => throw MigrationException(evolution.currentClass, evolution.formerVersion, failures)
     }
 
-  /** Which former field deserialize, computed once: it skips a deleted one, or each field of a deleted class. */
+  /** The former fields that the serializer reads, computed once: no deleted field, no field of a deleted class. */
   @transient private lazy val isKeptField: Array[Boolean] = {
     val kept = Array.fill(fieldSerializers.length)(isAsIs)
     if (!isAsIs && !isDeletedClass(evolution.currentClass)) migrationPlan.foreach(_.formerIndex.foreach(kept(_) = true))

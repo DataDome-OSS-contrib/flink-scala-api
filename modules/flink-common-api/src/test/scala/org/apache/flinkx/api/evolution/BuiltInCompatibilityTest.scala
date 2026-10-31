@@ -13,7 +13,7 @@ import org.scalatest.matchers.should.Matchers
 /** The schema changes that need no evolution annotation. */
 class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils {
 
-  it should "restore the reordered fields of an unversioned case class" in {
+  it should "migrate the reordered fields of an unversioned case class" in {
     val (snapshot, restored) =
       deserializeFormerFields(
         classOf[Pair],
@@ -28,7 +28,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
     )
   }
 
-  it should "restore the reordered fields of different types of an unversioned case class" in {
+  it should "migrate the reordered fields of different types of an unversioned case class" in {
     val (snapshot, restored) =
       deserializeFormerFields(
         classOf[Counter],
@@ -43,7 +43,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
     )
   }
 
-  it should "restore an unchanged unversioned case class as is" in {
+  it should "read an unchanged unversioned case class as is" in {
     val (snapshot, restored) =
       deserializeFormerFields(
         classOf[Pair],
@@ -59,7 +59,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
   }
 
   // Read by position, the former fields 'a' and 'b' would be swapped
-  it should "not restore the renamed and swapped fields of an unversioned case class as is" in {
+  it should "not read the renamed and swapped fields of an unversioned case class as is" in {
     val formerSerializer = new CaseClassSerializer[Triple](
       evolution = evolutionOf(classOf[Triple]),
       isCaseClassImmutable = true,
@@ -71,7 +71,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
   }
 
   // The migration finds the current subtype of each former subtype by its name, not by its position
-  it should "restore the reordered subtypes of an unversioned sealed trait, a subtype being added" in {
+  it should "migrate the reordered subtypes of an unversioned sealed trait with an added subtype" in {
     implicit val current: TypeSerializer[Shape] = infoToSer[Shape]
     // At version 0, Shape had only Square and Circle, in this order
     val formerSerializer = new CoproductSerializer[Shape](

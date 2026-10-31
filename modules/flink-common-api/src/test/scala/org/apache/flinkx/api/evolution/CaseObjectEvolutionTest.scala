@@ -34,11 +34,11 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
   }
 
-  it should "restore a case object renamed from a former name without the $ ending its class name" in {
+  it should "migrate a case object renamed from a former name without the $ ending its class name" in {
     deserializeFormerForm[Litter](formerSerializer, Cat) shouldBe Cat
   }
 
-  it should "restore a case object renamed from a former name with the $ ending its class name" in {
+  it should "migrate a case object renamed from a former name with the $ ending its class name" in {
     deserializeFormerForm[Litter](formerSerializer, Dog) shouldBe Dog
   }
 

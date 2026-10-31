@@ -45,8 +45,8 @@ class CoproductSerializer[T](
       s" ${subtypeNames.length} subtype names for ${subtypeSerializers.length} subtype serializers"
   )
 
-  // The evolution that migrates each deserialized instance, or null: a current serializer migrates nothing
-  private val migration: AdtEvolution[T] = evolution.filterNot(_.isEmpty).orNull
+  // The ADT evolution that migrates each deserialized instance, or null if it is empty, as for a current serializer
+  private val appliedEvolution: AdtEvolution[T] = evolution.filterNot(_.isEmpty).orNull
 
   override val isImmutableType: Boolean = subtypeSerializers.forall(_.isImmutableType)
   val isImmutableSerializer: Boolean    = subtypeSerializers.forall(s => s.duplicate().eq(s))
@@ -101,7 +101,7 @@ class CoproductSerializer[T](
       null.asInstanceOf[T]
     } else {
       val instance = subtypeSerializers(index).asInstanceOf[TypeSerializer[T]].deserialize(source)
-      if (migration == null) instance else migration.migrate(instance)
+      if (appliedEvolution == null) instance else appliedEvolution.migrate(instance)
     }
   }
 
@@ -193,9 +193,9 @@ object CoproductSerializer {
       } else {
         adapter.readSnapshot(readVersion, in, userCodeClassLoader)
       }
-      // Use the subtype version to find the current class of each former subtype
-      subtypeClasses = subtypeNames.zip(adapter.getNestedSerializerSnapshots).map { case (subName, subSnapshot) =>
-        currentClassOf(subSnapshot).getOrElse(Evolutions.get(subName, adtVersion, userCodeClassLoader).currentClass)
+      // The snapshot of a subtype records its version, which gives the current class of the former subtype
+      subtypeClasses = subtypeNames.zip(adapter.getNestedSerializerSnapshots).map { case (name, snapshot) =>
+        currentClassOf(snapshot).getOrElse(Evolutions.get(name, adtVersion, userCodeClassLoader).currentClass)
       }
     }
 

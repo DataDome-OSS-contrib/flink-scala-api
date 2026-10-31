@@ -14,7 +14,7 @@ import scala.util.{Try, Using}
   *
   * The evolving companions of a job are all in the jars of its class loader: the parent class loaders cannot see
   * [[Evolving]]. Flink gives a wrapper of this class loader, with the URLs of the class loader that it wraps. Without
-  * URLs, the scan reads the class path of the JVM: a job in a MiniCluster, or a test, has its classes there. As the
+  * URLs, the scan reads the class path of the JVM: a job in a MiniCluster, or a test, has its classes there. Like the
   * JVM, it also reads the jars that the `Class-Path` of a manifest lists.
   *
   * A companion can extend [[Evolving]] through a trait or a class of its own. The scan reads only the header of each
@@ -24,7 +24,7 @@ private[evolution] object CompanionScan {
 
   private val EvolvingName = classOf[Evolving[_]].getName.replace('.', '/')
 
-  /** Packages that contain no evolving companion: the scan reads none of their class files */
+  /** Packages that contain no evolving companion: the scan reads none of their class files. */
   private val LibraryPrefixes = Seq("java/", "javax/", "jdk/", "scala/")
 
   /** Class names of the evolving companions in the jars and class directories of the given class loader. */
