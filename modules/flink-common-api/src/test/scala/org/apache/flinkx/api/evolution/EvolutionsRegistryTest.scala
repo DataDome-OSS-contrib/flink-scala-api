@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.base.StringSerializer
-import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flink.util.{FileUtils, FlinkRuntimeException}
 import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures.DerivedBeforeDeclared
 import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
@@ -12,7 +12,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.net.{URL, URLClassLoader}
-import java.nio.file.Files
+import java.nio.file.{Files, Paths}
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
 import java.util.jar.{Attributes, JarOutputStream, Manifest}
 import scala.jdk.CollectionConverters._
@@ -125,6 +125,17 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     }
   }
 
+  // A class missing from the class path of the TaskManager fails the evolutions of a companion with a LinkageError
+  it should "fail every lookup with the first failure of the evolutions of a companion" in {
+    ConflictingScan.withFixture("missingDependency") {
+      val first  = intercept[FlinkRuntimeException](evolutionOf(classOf[Probe], 2))
+      val second = intercept[FlinkRuntimeException](evolutionOf(classOf[Probe], 2))
+      first.getMessage shouldBe s"Cannot build the evolutions of ${classOf[MissingDependency].getName}"
+      first.getCause shouldBe a[NoClassDefFoundError]
+      second shouldBe theSameInstanceAs(first)
+    }
+  }
+
   // After a name reuse, only the schema version identifies which class wrote the data
   it should "fail every lookup when a class reuses a former class name without a higher version" in {
     ConflictingScan.withFixture("declaredReuser") {
@@ -199,11 +210,14 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     evolutionOf(otherProbe, 2).currentClass shouldBe otherProbe
   }
 
-  // Flink gives the snapshots a wrapper that delegates to the class loader of the job, with another parent
+  // Flink gives the snapshots a wrapper that delegates to the class loader of the job, with another parent. In
+  // application mode, the URLs of the jars of usrlib are relative to the working directory
   it should "resolve a former name through a wrapper of the class loader defining the ADT" in {
-    val jobJar   = classOf[Probe].getProtectionDomain.getCodeSource.getLocation
+    val jobJar      = classOf[Probe].getProtectionDomain.getCodeSource.getLocation
+    val relativeJar =
+      FileUtils.toURL(FileUtils.relativizePath(FileUtils.getCurrentWorkingDirectory, Paths.get(jobJar.toURI)))
     val otherJob = new JobClassLoader(Array(jobJar))
-    val wrapper  = new SafetyNetLikeClassLoader(otherJob, jobJar)
+    val wrapper  = new SafetyNetLikeClassLoader(otherJob, relativeJar)
 
     val resolved = Evolutions.get[Any](FormerProbe, 0, wrapper).currentClass
     resolved shouldNot be(classOf[Probe])
@@ -333,6 +347,12 @@ object EvolutionsRegistryTest {
       sys.env.getOrElse("FLINK_SCALA_API_UNSET", throw new IllegalStateException("FLINK_SCALA_API_UNSET is not set"))
     override def apply(formerVersion: Int, instance: FailingPostEvolution): FailingPostEvolution =
       instance.copy(a = setting)
+  }
+
+  case class MissingDependency(a: String)
+  object MissingDependency extends Evolving[MissingDependency] {
+    def evolutions: Evolutions[MissingDependency] =
+      ConflictingScan.evolutionsOf("missingDependency", throw new NoClassDefFoundError("org/example/MissingDependency"))
   }
 
   // Reuses the former name of GivingFormerName at version 2, but this name refers to GivingFormerName up to version 2

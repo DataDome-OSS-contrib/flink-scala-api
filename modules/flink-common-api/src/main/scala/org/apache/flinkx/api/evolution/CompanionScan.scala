@@ -1,6 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.shaded.asm9.org.objectweb.asm.ClassReader
+import org.slf4j.{Logger, LoggerFactory}
 
 import java.io.File
 import java.net.{URL, URLClassLoader}
@@ -8,6 +9,7 @@ import java.nio.file.{Files, Path, Paths}
 import java.util.jar.{Attributes, JarFile}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
+import scala.util.control.NonFatal
 import scala.util.{Try, Using}
 
 /** Companion scan: finds the evolving companions in the jars and class directories of a class loader.
@@ -21,6 +23,8 @@ import scala.util.{Try, Using}
   * class file, then its supertypes. It reads each supertype once, and skips the JDK and the Scala library.
   */
 private[evolution] object CompanionScan {
+
+  private val log: Logger = LoggerFactory.getLogger(getClass)
 
   private val EvolvingName = classOf[Evolving[_]].getName.replace('.', '/')
 
@@ -65,8 +69,16 @@ private[evolution] object CompanionScan {
           .flatMap(entry => Try(Paths.get(root.toUri.resolve(entry))).toOption) // The JVM ignores an invalid URL
       }
 
+  /** The path of a `file` URL, or none if unreadable. Flink gives the jars of `usrlib` as unencoded relative URLs. */
   private def pathOf(url: URL): Option[Path] =
-    if (url.getProtocol == "file") Some(Paths.get(url.toURI)) else None
+    if (url.getProtocol == "file")
+      try Some(Try(Paths.get(url.toURI)).getOrElse(Paths.get(url.getPath))) // Read as the URLClassLoader reads it
+      catch {
+        case NonFatal(failure) =>
+          log.warn(s"The companion scan skips $url: ${failure.getMessage}")
+          None
+      }
+    else None
 
   private def companionsIn(root: Path, supertypes: Supertypes): Seq[String] =
     if (Files.isDirectory(root)) companionsInDirectory(root, supertypes)

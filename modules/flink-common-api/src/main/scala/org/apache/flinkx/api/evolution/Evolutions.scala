@@ -108,27 +108,21 @@ object Evolutions extends EvolutionsFactory {
   private def registerCompanions(cl: ClassLoader): Map[String, Seq[Declaration]] =
     CompanionScan
       .companionsOf(cl)
-      .flatMap(name => evolutionsOf(ClassUtil.loadClass(name, initialize = true, cl).get).map(name -> _))
-      .flatMap { case (companion, evolutions) => declarationsOf(companion, evolutions) }
+      .flatMap(name => declarationsOf(ClassUtil.loadClass(name, initialize = true, cl).get))
       .groupBy(_.className)
       .map { case (className, declarations) => className -> sortDeclarations(className, declarations, cl) }
 
-  /** The declarations of the given evolutions, held by `companion`.
+  /** The declarations of the evolutions that the given initialized companion holds, or none if it is not an object.
     *
     * @throws FlinkRuntimeException
     *   if they fail, for example because a mapper of the annotations does not initialize. Its message names the ADT
     */
-  private def declarationsOf(companion: String, evolutions: Evolutions[_]): Seq[Declaration] =
-    try evolutions.declarations
+  private def declarationsOf(companion: Class[_]): Seq[Declaration] =
+    try ClassUtil.moduleOf(companion).toSeq.flatMap { case evolving: Evolving[_] => evolving.evolutions.declarations }
     catch {
-      // Also a LinkageError, which the Try of the registry would let through
-      case failure @ (NonFatal(_) | _: LinkageError) =>
-        throw new FlinkRuntimeException(s"Cannot build the evolutions of ${companion.stripSuffix("$")}", failure)
+      case ex @ (NonFatal(_) | _: LinkageError) => // LinkageError to avoid the Try of the registry to let it through
+        throw new FlinkRuntimeException(s"Cannot build the evolutions of ${companion.getName.stripSuffix("$")}", ex)
     }
-
-  /** The evolutions that the given initialized companion holds, or none if it is not an object. */
-  private def evolutionsOf(companion: Class[_]): Option[Evolutions[_]] =
-    ClassUtil.moduleOf(companion).collect { case evolving: Evolving[_] => evolving.evolutions }
 
   /** Sort the declarations of a class name by last version, and keep each declaration once.
     * @throws FormerClassConflictException
