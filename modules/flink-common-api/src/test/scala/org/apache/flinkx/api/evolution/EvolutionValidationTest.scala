@@ -107,6 +107,14 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongAddedOnFieldWithoutVersion] }")
   }
 
+  // A sealed trait with an evolving companion declares its case objects: without one, the restore loses their evolutions
+  it should "reject the derivation of a versioned case object that no evolving companion declares" in {
+    assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongUndeclaredCaseObject.type] }")
+    assertTypeError(
+      "{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongCaseObjectUnderUnversionedTrait] }"
+    )
+  }
+
   it should "reject the derivation of an ADT with a version on a field" in {
     assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongVersionOnField] }")
   }
@@ -124,6 +132,11 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
   it should "build the message of a misplaced annotation" in {
     evolutionNotAllowed("added", "class Foo with version 0") shouldBe
       "@added annotation is not allowed on class Foo with version 0"
+  }
+
+  it should "build the message of a case object that nothing declares" in {
+    caseObjectNotDeclared("com.example.Outer$Cat") shouldBe "com.example.Outer$Cat declares @version." +
+      " The companion of its sealed trait must extend Evolving, to declare the case object"
   }
 
   it should "build the message of a companion declaring nothing" in {

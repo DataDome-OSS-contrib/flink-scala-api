@@ -35,23 +35,36 @@ private[api] object EvolutionMacro {
   def evolvableImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[Evolvable[T]] = {
     import c.universe._
 
-    val tpe     = weakTypeOf[T]
-    val symbol  = tpe.typeSymbol
+    val tpe        = weakTypeOf[T]
+    val symbol     = tpe.typeSymbol
     val version    = versionOf(c)(symbol)
     val parameters = primaryParameters(c)(tpe)
 
     rejectVersionedParameter(c)(symbol, parameters)
+    // At version 0 an ADT has no evolution
     if (version == 0) rejectEvolution(c)(symbol, parameters)
-    // At version 0 an ADT has no evolution, and the sealed trait of a case object declares it
-    if (version > 0 && !symbol.isModuleClass) {
-      val companion = symbol.companion
-      val evolving  = appliedType(typeOf[Evolving[_]].typeConstructor, tpe)
-      if (companion == NoSymbol || !(companion.typeSignature <:< evolving)) {
-        c.abort(c.enclosingPosition, companionNotEvolving(symbol.fullName))
-      }
-    }
+    // A case object declares its own evolutions, or a sealed trait with an evolving companion declares it
+    else if (symbol.isModuleClass) {
+      val declared = declaresEvolutionsOf(c)(tpe, symbol) ||
+        tpe.baseClasses.exists(parent => parent != symbol && isSealed(c)(parent) && hasEvolvingCompanion(c)(parent))
+      if (!declared) c.abort(c.enclosingPosition, caseObjectNotDeclared(symbol.fullName))
+    } else if (!hasEvolvingCompanion(c)(symbol)) c.abort(c.enclosingPosition, companionNotEvolving(symbol.fullName))
     c.Expr[Evolvable[T]](q"new _root_.org.apache.flinkx.api.evolution.Evolvable[$tpe]($version)")
   }
+
+  /** Whether the companion of the given ADT extends `Evolving` of this ADT. */
+  private def hasEvolvingCompanion(c: blackbox.Context)(adt: c.Symbol): Boolean = {
+    import c.universe._
+    adt.companion != NoSymbol && declaresEvolutionsOf(c)(adt.companion.typeSignature, adt)
+  }
+
+  /** Whether `tpe` extends `Evolving` of the given ADT, whatever the type arguments of a generic ADT. */
+  private def declaresEvolutionsOf(c: blackbox.Context)(tpe: c.Type, adt: c.Symbol): Boolean = {
+    import c.universe._
+    tpe.baseType(typeOf[Evolving[_]].typeSymbol).typeArgs.headOption.exists(_.typeSymbol == adt)
+  }
+
+  private def isSealed(c: blackbox.Context)(symbol: c.Symbol): Boolean = symbol.isClass && symbol.asClass.isSealed
 
   /** The subtypes of the given sealed type, through intermediate sealed traits. None for a class that is not sealed. */
   private def descendantsOf(c: blackbox.Context)(parent: c.Symbol): List[c.Symbol] =
@@ -86,7 +99,10 @@ private[api] object EvolutionMacro {
     (symbol :: parameters).foreach { owner =>
       evolutionAnnotationOf(c)(owner).foreach { annotation =>
         val field = if (owner == symbol) None else Some(owner.name.decodedName.toString)
-        c.abort(c.enclosingPosition, notAllowed(annotation, AnnotationRules.target(symbol.fullName, field, version = 0)))
+        c.abort(
+          c.enclosingPosition,
+          notAllowed(annotation, AnnotationRules.target(symbol.fullName, field, version = 0))
+        )
       }
     }
 

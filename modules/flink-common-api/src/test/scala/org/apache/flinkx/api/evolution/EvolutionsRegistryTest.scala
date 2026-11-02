@@ -39,6 +39,16 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     Evolutions.get[Any](s"${classOf[ThroughClass].getName}Former", 0, cl).currentClass shouldBe classOf[ThroughClass]
   }
 
+  it should "resolve an absolute former class name of another package" in {
+    Evolutions.get[Any]("org.example.former.Relocated", 0, cl).currentClass shouldBe classOf[Relocated]
+  }
+
+  it should "declare once a case object that two sealed traits declare" in {
+    val formerName = Both.getClass.getName.replace("Both$", "FormerBoth$")
+
+    Evolutions.get[Any](formerName, 0, cl).currentClass shouldBe Both.getClass
+  }
+
   // After a name reuse, only the companion of the renamed subtype tells which class the former name refers to
   it should "resolve the former name of a subtype now borne by another class" in {
     Evolutions.get[Pet](classOf[Horse].getName, 0, cl).currentClass shouldBe classOf[Pony]
@@ -139,6 +149,14 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
       val failure = intercept[FormerClassConflictException](evolutionOf(classOf[Probe], 2))
       failure.declared shouldBe s"deleted by ${classOf[DeletingCaseObjectName].getName} up to version 0"
       failure.conflicting shouldBe s"used by ${TakenCaseObject.getClass.getName} at version 0"
+    }
+  }
+
+  // After a move into an enclosing object, a relative former name resolves next to the current class: to itself
+  it should "fail every lookup when a former class name resolves to the current class" in {
+    ConflictingScan.withFixture("selfRenamed") {
+      val failure = intercept[FlinkRuntimeException](evolutionOf(classOf[Probe], 2))
+      failure.getCause.getMessage shouldBe formerNameIsCurrent(classOf[SelfRenamed].getName, "SelfRenamed")
     }
   }
 
@@ -252,6 +270,21 @@ object EvolutionsRegistryTest {
   case class ThroughClass(a: String)
   object ThroughClass extends EvolvingClass[ThroughClass] { val evolutions = Evolutions[ThroughClass] }
 
+  @version(1)
+  @renamed(since = 1, "org.example.former.Relocated")
+  case class Relocated(a: String)
+  object Relocated extends Evolving[Relocated] { val evolutions = Evolutions[Relocated] }
+
+  @version(1)
+  sealed trait LeftTrait
+  object LeftTrait extends Evolving[LeftTrait] { val evolutions = Evolutions[LeftTrait] }
+  @version(1)
+  sealed trait RightTrait
+  object RightTrait extends Evolving[RightTrait] { val evolutions = Evolutions[RightTrait] }
+  @version(1)
+  @renamed(since = 1, "FormerBoth")
+  case object Both extends LeftTrait with RightTrait
+
   // Fixtures in conflict on purpose: the companion scan finds them only when ConflictingScan switches them on
 
   @version(1)
@@ -338,6 +371,14 @@ object EvolutionsRegistryTest {
   object DeletingCaseObjectName extends Evolving[DeletingCaseObjectName] {
     def evolutions: Evolutions[DeletingCaseObjectName] =
       ConflictingScan.evolutionsOf("caseObjectReuser", Evolutions[DeletingCaseObjectName])
+  }
+
+  // Its relative former name resolves to the current class: a move out of the package needs an absolute name
+  @version(1)
+  @renamed(since = 1, "SelfRenamed")
+  case class SelfRenamed(a: String)
+  object SelfRenamed extends Evolving[SelfRenamed] {
+    def evolutions: Evolutions[SelfRenamed] = ConflictingScan.evolutionsOf("selfRenamed", Evolutions[SelfRenamed])
   }
 
 }

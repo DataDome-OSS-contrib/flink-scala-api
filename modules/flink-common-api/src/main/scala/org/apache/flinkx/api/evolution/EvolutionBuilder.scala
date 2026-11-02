@@ -101,10 +101,17 @@ final class EvolutionBuilder[A](
 
   /** Rename: the data written at a version lower than `since` has the class name `formerClassName`, relative or
     * absolute. The class name of an object ends with `$`: this method adds it if necessary.
+    *
+    * @throws IllegalArgumentException
+    *   if the former class name resolves to the current class, as a relative name after a move into an enclosing object
     */
   private def renameClass(formerClassName: String, since: Int): Unit = {
     val formerName = resolveFormerClassName(formerClassName, currentClass)
-    renames(if (isObjectClass(currentClass)) companionName(formerName) else formerName) = since
+    val className  = if (isObjectClass(currentClass)) companionName(formerName) else formerName
+    if (className == currentClass.getName) {
+      throw new IllegalArgumentException(formerNameIsCurrent(currentClass.getName, formerClassName))
+    }
+    renames(className) = since
   }
 
   /** Delete: the current source code no longer contains the subtype or field type `formerClassName`, relative or

@@ -13,9 +13,10 @@ import org.apache.flink.configuration.{
 }
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration
 import org.apache.flink.test.util.MiniClusterWithClientResource
+import org.apache.flink.util.StateMigrationException
 import org.apache.flinkx.api.evolution.EvolutionRestoreFixtures._
 import org.apache.flinkx.api.serializer.CaseClassSerializer
-import org.apache.flinkx.api.serializers._
+import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.typeinfo.CaseClassTypeInfo
 import org.apache.flinkx.api.{IntegrationTestSink, StreamExecutionEnvironment}
 import org.scalatest.BeforeAndAfterAll
@@ -32,6 +33,9 @@ import scala.jdk.CollectionConverters._
 /** Restores in a MiniCluster a savepoint of a former ADT, with a state descriptor that `open` creates.
   *
   * The job graph contains no evolution: the companion scan finds the evolving companion in the jars of the job.
+  *
+  * Flink restores a keyed state only with a key serializer that is compatible as is: the key type of a keyed stream
+  * cannot evolve, even with the evolution annotations.
   */
 class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
@@ -73,6 +77,23 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
     new CaseClassTypeInfo[Order](classOf[Order], fieldTypes, current.fieldNames, former)
   }
 
+  /** Visitor at version 0, with its only field `id`. */
+  private def formerVisitorInfo: TypeInformation[Visitor] = {
+    val current    = implicitly[TypeInformation[Visitor]].asInstanceOf[CaseClassTypeInfo[Visitor]]
+    val serializer = current.createSerializer(new SerializerConfigImpl()).asInstanceOf[CaseClassSerializer[Visitor]]
+    val former     = new CaseClassSerializer[Visitor](
+      Evolutions.get[Visitor](classOf[Visitor].getName, 0, getClass.getClassLoader),
+      serializer.isCaseClassImmutable,
+      Some(Array("id")),
+      serializer.getFieldSerializers.take(1).asInstanceOf[Array[TypeSerializer[_]]]
+    )
+    new CaseClassTypeInfo[Visitor](classOf[Visitor], Seq(current.getTypeAt[Any](0)), Seq("id"), former)
+  }
+
+  /** The exception and its causes. */
+  private def causes(failure: Throwable): Seq[Throwable] =
+    Iterator.iterate(failure)(_.getCause).takeWhile(_ != null).toSeq
+
   it should "apply the declared evolutions to a state whose descriptor is built on the TaskManager" in {
     val checkpoints = Files.createTempDirectory("flinkx-evolution")
 
@@ -104,6 +125,38 @@ class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfter
 
     withClue("the state must be restored, and read back through the declared postEvolution:")(
       IntegrationTestSink.values.asScala.toList.map(_.toString).head should startWith("Order(a!,1) ->")
+    )
+  }
+
+  it should "not restore a keyed state whose key type declares an evolution" in {
+    val checkpoints = Files.createTempDirectory("flinkx-evolution-key")
+
+    IntegrationTestSink.values.clear()
+    val writing = environment(checkpoints, None)
+    writing
+      .addSource(new Endless(Seq(Visit(Visitor("a"), 1))))
+      .keyBy(_.visitor)(formerVisitorInfo)
+      .process(new CountVisits)
+      .uid("count")
+      .addSink(new IntegrationTestSink[String])
+    val written = writing.executeAsync("write")
+    eventually(timeout(Span(30, Seconds)))(IntegrationTestSink.values.size should be >= 1)
+    val savepoint = written.stopWithSavepoint(false, checkpoints.toUri.toString, SavepointFormatType.CANONICAL).get()
+
+    Evolutions.reset()
+
+    val restoring = environment(checkpoints, Some(savepoint))
+    restoring
+      .fromElements(Visit(Visitor("a"), 2))
+      .keyBy(_.visitor)
+      .process(new CountVisits)
+      .uid("count")
+      .addSink(new IntegrationTestSink[String])
+    val failure = intercept[Exception](restoring.execute("restore"))
+
+    val migration = causes(failure).collectFirst { case e: StateMigrationException => e }
+    withClue(s"the restore must fail on the key serializer, not with ${causes(failure).map(_.getMessage)}:")(
+      migration.map(_.getMessage).getOrElse("") should include("key serializer")
     )
   }
 

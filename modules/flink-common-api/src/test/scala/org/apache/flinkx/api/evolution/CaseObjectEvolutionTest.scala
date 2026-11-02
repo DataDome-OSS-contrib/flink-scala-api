@@ -1,9 +1,11 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.TypeSerializer
+import org.apache.flink.api.common.typeutils.base.IntSerializer
 import org.apache.flinkx.api.TestUtils
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.serializer.{CoproductSerializer, ScalaCaseObjectSerializer}
+import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -69,6 +71,28 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     Evolutions.get[Any](named("Kitten"), 0, getClass.getClassLoader).currentClass shouldBe classOf[Kitten]
   }
 
+  // A case class and a case object have different serializers: @renamed cannot turn one into the other
+  it should "replace a case class by a case object of the same name with a deletion and a post-evolution mapper" in {
+    val formerSerializer = new CoproductSerializer[AnyRef](
+      evolution = Some(evolutionOf(classOf[Switch]).asInstanceOf[AdtEvolution[AnyRef]]),
+      subtypeClasses = Array[Class[_]](classOf[FormerOn], Off.getClass),
+      subtypeNames = Array(named("On"), Off.getClass.getName),
+      subtypeSerializers = Array[TypeSerializer[_]](
+        new CaseClassSerializer[FormerOn](
+          new AdtEvolution(named("On"), 0, classOf[FormerOn]),
+          isCaseClassImmutable = true,
+          fieldNames = Some(Array("level")),
+          scalaFieldSerializers = Array(IntSerializer.INSTANCE)
+        ),
+        new ScalaCaseObjectSerializer[Off.type](evolutionOf(Off.getClass.asInstanceOf[Class[Off.type]]))
+      )
+    )
+
+    deserializeFormerForm[Switch](formerSerializer, FormerOn(3)) shouldBe On
+    deserializeFormerForm[Switch](formerSerializer, Off) shouldBe Off
+    compatibilityWith[Switch](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
+  }
+
 }
 
 object CaseObjectEvolutionTest {
@@ -116,5 +140,25 @@ object CaseObjectEvolutionTest {
   sealed trait Nest
   object Nest     extends Evolving[Nest] { val evolutions = Evolutions[Nest] }
   case object Hen extends Nest
+
+  /* Switch at version 0
+  sealed trait Switch
+  case class On(level: Int) extends Switch
+  case object Off extends Switch
+   */
+
+  @version(1)
+  @deletedClasses(since = 1, throwOnInstance = false, "On")
+  @postEvolution(restoreOn)
+  sealed trait Switch
+  object Switch extends Evolving[Switch] { val evolutions = Evolutions[Switch] }
+  @version(1) // Version 1 at least: the deleted case class On has the version 0
+  case object On  extends Switch
+  case object Off extends Switch
+
+  def restoreOn(version: Int, switch: Switch): Switch = if (switch == null) On else switch
+
+  // Takes the place of the case class On at version 0
+  case class FormerOn(level: Int)
 
 }

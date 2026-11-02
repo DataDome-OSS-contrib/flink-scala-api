@@ -34,6 +34,19 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     clickV0As(snapshot.restoreSerializer(), clazz).deserialize(data)
   }
 
+  /** The serializer of a former case class with one field, written at version 0 under the current class name. */
+  private def formerField[T <: Product](clazz: Class[T], field: String, serializer: TypeSerializer[_]) =
+    new CaseClassSerializer[T](evolutionOf(clazz), true, Some(Array(field)), Array(serializer))
+
+  /** The serializer of Chain at version 0, with Link at version 0. */
+  private def formerChain: CoproductSerializer[AnyRef] =
+    new CoproductSerializer[AnyRef](
+      evolution = Some(evolutionOf(classOf[Chain]).asInstanceOf[AdtEvolution[AnyRef]]),
+      subtypeClasses = Array[Class[_]](classOf[Link]),
+      subtypeNames = Array(classOf[Link].getName),
+      subtypeSerializers = Array[TypeSerializer[_]](formerField(classOf[Link], "s", StringSerializer.INSTANCE))
+    )
+
   /* Uncomment this test and Click at version 0 to write Click-v0.snapshot again
   it should "serialize Click v0" in {
     val event: Click = Click("a", List(ClickEvent("2021-01-01", 1), ClickEvent("2022-02-02", 2)), 5, "id1", "b")
@@ -339,6 +352,114 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     readClickV0As(classOf[WrongDeletedField]) shouldBe WrongDeletedField("a")
   }
 
+  // In one version, the deletion applies before the add: the field keeps its name with another type
+  it should "replace a field by a field of the same name and another type in one version" in {
+    val (snapshot, restored) = deserializeFormerFields(classOf[Replaced], 0, ("x", IntSerializer.INSTANCE, 7))
+
+    restored shouldBe Replaced("s")
+    infoToSer[Replaced].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
+  }
+
+  // Version 1 deletes x: Int, then version 2 adds x: String: the data of versions 0 and 1 migrate
+  it should "replace a field by a field of the same name across two versions" in {
+    val (_, fromV0) = deserializeFormerFields(classOf[ReplacedLater], 0, ("x", IntSerializer.INSTANCE, 7))
+    val (_, fromV1) = deserializeFormerFields(classOf[ReplacedLater], 1)
+
+    fromV0 shouldBe ReplacedLater("s")
+    fromV1 shouldBe ReplacedLater("s")
+  }
+
+  // The first rename finds its current name taken by the other field: two fields cannot exchange their names
+  it should "not exchange the names of two fields with two @renamed in one version" in {
+    val former = new CaseClassSerializer[SwappedFields](
+      evolutionOf(classOf[SwappedFields]),
+      true,
+      Some(Array("a", "b")),
+      Array(IntSerializer.INSTANCE, IntSerializer.INSTANCE)
+    )
+
+    compatibilityWith[SwappedFields](former) shouldBe Symbol("incompatible")
+    val exception = intercept[MigrationException](deserializeFormerForm[SwappedFields](former, SwappedFields(1, 2)))
+    exception.getMessage should include("Cannot rename field 'a': it is already one of")
+  }
+
+  it should "exchange the values of two fields with a post-evolution mapper" in {
+    val (snapshot, restored) = deserializeFormerFields(
+      classOf[SwappedByMapper],
+      0,
+      ("a", IntSerializer.INSTANCE, 1),
+      ("b", IntSerializer.INSTANCE, 2)
+    )
+
+    restored shouldBe SwappedByMapper(2, 1)
+    infoToSer[SwappedByMapper].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
+  }
+
+  // The schema compatibility resolution does not check the former type of a transformed field
+  it should "fail at the first record when the mapper of a transformed field expects another type" in {
+    val former = formerField(classOf[WrongMapperInput], "x", IntSerializer.INSTANCE)
+
+    compatibilityWith[WrongMapperInput](former) shouldBe Symbol("compatibleAfterMigration")
+    intercept[ClassCastException](deserializeFormerForm[WrongMapperInput](former, FormerX(42)))
+  }
+
+  // The restored serializer of a deleted class builds no instance: a transform needs the former class, renamed if necessary
+  it should "not transform a field whose former type is a deleted class" in {
+    val oldName                               = classOf[Holder].getName.replace("Holder", "Old")
+    def former[T <: Product](clazz: Class[T]) = formerField(
+      clazz,
+      "f",
+      new CaseClassSerializer[FormerOld](
+        new AdtEvolution(oldName, 0, classOf[FormerOld]),
+        isCaseClassImmutable = true,
+        fieldNames = Some(Array("a")),
+        scalaFieldSerializers = Array(StringSerializer.INSTANCE)
+      )
+    )
+
+    compatibilityWith[Holder](former(classOf[Holder])) shouldBe Symbol("compatibleAfterMigration")
+    intercept[DeletedInstanceException](
+      deserializeFormerForm[Holder](former(classOf[Holder]), FormerHolder(FormerOld("x")))
+    )
+    // Without @transformed, the deleted class of the field makes the schema incompatible
+    compatibilityWith[HolderKept](former(classOf[HolderKept])) shouldBe Symbol("incompatible")
+  }
+
+  // A higher version without evolution changes nothing: the data of the lower versions reads as is
+  it should "read the data of a lower version as is when the version increases without evolution" in {
+    forAll(Seq(0, 1)) { version =>
+      val (snapshot, restored) =
+        deserializeFormerFields(classOf[Bumped], version, ("a", StringSerializer.INSTANCE, "x"))
+
+      restored shouldBe Bumped("x")
+      infoToSer[Bumped].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol("compatibleAsIs")
+    }
+  }
+
+  it should "apply the post-evolution mappers of a subtype, then of its sealed trait" in {
+    deserializeFormerForm[Chain](formerChain, Link("x")) shouldBe Link("x,link,chain")
+  }
+
+  // Only a deleted instance gives null to the mapper: chainMapper would fail on a null record
+  it should "not give a null record to the post-evolution mapper of a sealed trait" in {
+    deserializeFormerForm[Chain](formerChain, null) shouldBe null
+  }
+
+  // The companion of a generic ADT extends Evolving of the wildcard type, which declares every type argument
+  it should "migrate a generic versioned case class" in {
+    val (snapshot, restored) =
+      deserializeFormerFields(classOf[Boxed[String]], 0, ("a", StringSerializer.INSTANCE, "x"))
+
+    restored shouldBe Boxed("x", 0)
+    infoToSer[Boxed[String]].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
+  }
+
 }
 
 object EvolutionTest {
@@ -639,5 +760,97 @@ object EvolutionTest {
   object RenamedOverDeclaredDeleted extends Evolving[RenamedOverDeclaredDeleted] {
     val evolutions = Evolutions[RenamedOverDeclaredDeleted]
   }
+
+  /* Replaced at version 0
+  case class Replaced(x: Int)
+   */
+
+  @version(1)
+  @deletedFields(since = 1, "x")
+  case class Replaced(@added(since = 1) x: String = "s")
+  object Replaced extends Evolving[Replaced] { val evolutions = Evolutions[Replaced] }
+
+  /* ReplacedLater at version 0, then at version 1
+  case class ReplacedLater(x: Int)
+  @version(1) @deletedFields(since = 1, "x") case class ReplacedLater()
+   */
+
+  @version(2)
+  @deletedFields(since = 1, "x")
+  case class ReplacedLater(@added(since = 2) x: String = "s")
+  object ReplacedLater extends Evolving[ReplacedLater] { val evolutions = Evolutions[ReplacedLater] }
+
+  /* SwappedFields and SwappedByMapper at version 0
+  case class SwappedFields(a: Int, b: Int)
+   */
+
+  @version(1)
+  case class SwappedFields(@renamed(since = 1, "b") a: Int, @renamed(since = 1, "a") b: Int)
+  object SwappedFields extends Evolving[SwappedFields] { val evolutions = Evolutions[SwappedFields] }
+
+  @version(1)
+  @postEvolution(swap)
+  case class SwappedByMapper(a: Int, b: Int)
+  object SwappedByMapper extends Evolving[SwappedByMapper] { val evolutions = Evolutions[SwappedByMapper] }
+
+  def swap(version: Int, swapped: SwappedByMapper): SwappedByMapper = SwappedByMapper(swapped.b, swapped.a)
+
+  /* WrongMapperInput at version 0
+  case class WrongMapperInput(x: Int)
+   */
+
+  @version(1)
+  case class WrongMapperInput(@transformed(since = 1, stringIdentity) x: String)
+  object WrongMapperInput extends Evolving[WrongMapperInput] { val evolutions = Evolutions[WrongMapperInput] }
+
+  def stringIdentity(s: String): String = s
+
+  // Takes the place of WrongMapperInput at version 0
+  case class FormerX(x: Int)
+
+  /* Holder and HolderKept at version 0
+  case class Holder(f: Old)
+  case class Old(a: String)
+   */
+
+  @version(1)
+  @deletedClasses(since = 1, "Old")
+  case class Holder(@transformed(since = 1, oldToFresh) f: Fresh)
+  object Holder extends Evolving[Holder] { val evolutions = Evolutions[Holder] }
+
+  @version(1)
+  @deletedClasses(since = 1, "Old")
+  case class HolderKept(f: Fresh)
+  object HolderKept extends Evolving[HolderKept] { val evolutions = Evolutions[HolderKept] }
+
+  case class Fresh(b: String)
+
+  def oldToFresh(old: Product): Fresh = Fresh(old.productElement(0).toString)
+
+  // Take the place of Holder and Old at version 0
+  case class FormerHolder(f: FormerOld)
+  case class FormerOld(a: String)
+
+  @version(2)
+  case class Bumped(a: String)
+  object Bumped extends Evolving[Bumped] { val evolutions = Evolutions[Bumped] }
+
+  @version(1)
+  @postEvolution(chainMapper)
+  sealed trait Chain
+  object Chain extends Evolving[Chain] { val evolutions = Evolutions[Chain] }
+  @version(1)
+  @postEvolution(linkMapper)
+  case class Link(s: String) extends Chain
+  object Link                extends Evolving[Link] { val evolutions = Evolutions[Link] }
+
+  def linkMapper(version: Int, link: Link): Link     = link.copy(s = s"${link.s},link")
+  def chainMapper(version: Int, chain: Chain): Chain = chain match {
+    case Link(s) => Link(s"$s,chain")
+  }
+
+  @version(1)
+  case class Boxed[A](a: A, @added(since = 1) n: Int = 0)
+  object Boxed extends Evolving[Boxed[_]] { val evolutions = Evolutions[Boxed[_]] }
 
 }

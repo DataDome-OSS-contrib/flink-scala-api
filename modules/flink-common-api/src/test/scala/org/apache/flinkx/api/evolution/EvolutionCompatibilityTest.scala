@@ -74,6 +74,14 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     compatibilityWith[ClickAction](formerSerializer) shouldBe Symbol("compatibleAsIs")
   }
 
+  // Without field names, the restored serializer reads by position and applies no evolution: the schema cannot change
+  it should "resolve the schema compatibility of a case class snapshot recording no field name with an added field as incompatible" in {
+    val formerSerializer =
+      new CaseClassSerializer[Stamped](evolutionOf(classOf[Stamped]), true, None, Array(infoToSer[String]))
+
+    compatibilityWith[Stamped](formerSerializer) shouldBe Symbol("incompatible")
+  }
+
   // The migration never converts an ADT to an unrelated ADT, even if the evolutions make their schemas identical
   it should "resolve the schema compatibility of an unrelated case class as incompatible" in {
     val formerSerializer = new CaseClassSerializer[UnrelatedFormerCaseClass](

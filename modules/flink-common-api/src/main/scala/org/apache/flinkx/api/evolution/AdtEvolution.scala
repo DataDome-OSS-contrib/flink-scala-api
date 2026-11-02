@@ -3,7 +3,7 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.annotation.Internal
 import org.apache.flinkx.api.evolution.AdtEvolution.EnumValueEvolution
 import org.apache.flinkx.api.evolution.AdtEvolution.EnumValueEvolution.{Deleted, Renamed}
-import org.apache.flinkx.api.evolution.FieldEvolution.MigratedField
+import org.apache.flinkx.api.evolution.FieldEvolution.{Delete, MigratedField}
 
 /** ADT evolution: all the evolutions that the migration applies to the data written under one former class name, at one
   * former version.
@@ -89,14 +89,18 @@ sealed class AdtEvolution[T] private[evolution] (
       case None => valueOf(formerValueName)
     }
 
-  private def checkInstantiation(fieldNames: collection.Set[String]): Seq[String] =
+  private def checkInstantiation(fieldNames: collection.Set[String]): Seq[String] = {
+    val deleted = fieldEvolutions.collect { case Delete(_, name) => name }
     currentFieldNames.toSeq.collect {
+      case n if !fieldNames.contains(n) && deleted.contains(n) =>
+        s"Field '$n' is deleted, but the current schema contains it. Correct @deletedFields, or declare @added on it"
       case n if !fieldNames.contains(n) =>
         s"Field '$n' is not in the former data. Declare @added(since = <version>) or @renamed on it"
     } ++ fieldNames.toSeq.collect {
       case n if !currentFieldNames.contains(n) =>
         s"Former field '$n' is not in the current schema. Declare @deletedFields(since = <version>, \"$n\") or @renamed"
     }
+  }
 
 }
 

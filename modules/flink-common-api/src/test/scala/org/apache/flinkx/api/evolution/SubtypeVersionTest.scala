@@ -89,6 +89,23 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
     roundtrip[Seq[Stray.type]](infoToSer[Seq[Stray.type]], Seq(Stray))
   }
 
+  // In the state of its former sealed trait, the subtype is a deleted class. Its version tells its data apart
+  it should "change the sealed trait of a subtype with a version above the deletion" in {
+    val formerSerializer = formerTrait(
+      classOf[FromTrait],
+      0,
+      (classOf[Moved].getName, classOf[FormerCaseClass], formerCaseClass(classOf[Moved].getName, 0)),
+      (classOf[Stayed].getName, classOf[Stayed], infoToSer[Stayed])
+    )
+
+    deserializeFormerForm[FromTrait](formerSerializer, FormerCaseClass("x")) shouldBe null
+    deserializeFormerForm[FromTrait](formerSerializer, Stayed(1)) shouldBe Stayed(1)
+    compatibilityWith[FromTrait](formerSerializer)(infoToSer[FromTrait]) shouldBe Symbol("compatibleAfterMigration")
+    roundtrip[ToTrait](infoToSer[ToTrait], Moved("x"))
+    // Every state that holds Moved at version 0 reads it as deleted, not only the state of FromTrait
+    AdtEvolution.isDeletedClass(evolutionOf(classOf[Moved]).currentClass) shouldBe true
+  }
+
   it should "not compile a rename of a subtype since a version above its own version" in {
     assertTypeError("Evolutions[WrongRenamedSinceAboveOwnVersion]")
   }
@@ -198,6 +215,24 @@ object SubtypeVersionTest {
   @renamed(since = 4, "Lamb")
   case class Sheep(name: String) extends Flock
   object Sheep                   extends Evolving[Sheep] { val evolutions = Evolutions[Sheep] }
+
+  /* FromTrait at version 0
+  sealed trait FromTrait
+  case class Moved(name: String) extends FromTrait
+  case class Stayed(b: Int) extends FromTrait
+   */
+
+  @version(1)
+  @deletedClasses(since = 1, throwOnInstance = false, "Moved")
+  sealed trait FromTrait
+  object FromTrait          extends Evolving[FromTrait] { val evolutions = Evolutions[FromTrait] }
+  case class Stayed(b: Int) extends FromTrait
+
+  sealed trait ToTrait
+  @version(1) // Version 1 at least: its data in the state of FromTrait has the version 0
+  case class Moved(name: String) extends ToTrait
+  object Moved                   extends Evolving[Moved] { val evolutions = Evolutions[Moved] }
+  case class Native(c: Int)      extends ToTrait
 
   @version(2)
   sealed trait WrongParent

@@ -60,6 +60,17 @@ object EvolutionErrorFixtures {
     val evolutions                                       = Evolutions[DerivedBeforeDeclared]
   }
 
+  /** A versioned case object outside a sealed trait: no evolving companion declares it. */
+  @version(1)
+  @renamed(since = 1, "A")
+  case object WrongUndeclaredCaseObject
+
+  /** Its sealed trait has no evolving companion to declare the case object. */
+  sealed trait WrongCaseObjectUnderUnversionedTrait
+  @version(1)
+  @renamed(since = 1, "A")
+  case object WrongCaseObjectUnderUnversioned extends WrongCaseObjectUnderUnversionedTrait
+
   @version(1)
   @renamed(since = 2, "A")
   case class WrongRenamedSinceAboveVersion(a: String)

@@ -1,7 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.TypeSerializer
-import org.apache.flink.api.common.typeutils.base.IntSerializer
+import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.TestUtils.evolutionOf
@@ -15,6 +15,17 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   import org.apache.flinkx.api.Scala3EnumTest.FailureCategory
   import EvolutionMacroEnumTest.*
+
+  /** The serializer of an enum with the values `Low` and `High` without parameters, under the given ADT evolution. */
+  private def lowHigh[T <: Product](evolution: AdtEvolution[T]): Scala3EnumSerializer[T] =
+    new Scala3EnumSerializer[T](
+      evolution = Some(evolution),
+      enumValueNames = Array("Low", "High"),
+      enumValueSerializers = Array[TypeSerializer[?]](
+        new Scala3EnumValueSerializer(evolution, "Low"),
+        new Scala3EnumValueSerializer(evolution, "High")
+      )
+    )
 
   // A deleted value can have parameters, and then a class of its own in each name of its enum
   it should "declare the enum, the former name it was renamed from and the class names of its deleted value" in {
@@ -70,6 +81,21 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
     assertTypeError("Evolutions[WrongEnumValueRenamedSinceAboveVersion]")
   }
 
+  // Unlike a sealed trait, an enum deletes its values in its own versions
+  it should "not compile a declaration deleting an enum value since a version above the one of its enum" in {
+    assertTypeError("Evolutions[WrongEnumValueDeletedSinceAboveVersion]")
+  }
+
+  // An enum value has the version of its enum, with or without parameters
+  it should "not compile a version on an enum value" in {
+    assertTypeError("Evolutions[WrongEnumValueVersioned]")
+    assertTypeError("Evolutions[WrongEnumValueWithParametersVersioned]")
+    assertTypeError("{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongEnumValueVersioned] }")
+    assertTypeError(
+      "{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongEnumValueWithParametersVersioned] }"
+    )
+  }
+
   // An enum value with parameters has a class of its own, whose snapshot records its class name and its fields
   it should "migrate an enum value with parameters renamed with an added field" in {
     given TypeSerializer[Vehicle] = infoToSer[Vehicle]
@@ -100,6 +126,27 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "plan the migration of a generic enum value with parameters" in {
     evolutionOf(classOf[Box.Full[?]]).plan(Array("a")).map(_.length) shouldBe Right(2)
+  }
+
+  // The companion of a generic ADT extends Evolving of the wildcard type, which declares every type argument
+  it should "roundtrip a generic versioned enum" in {
+    roundtrip[Box[Int]](infoToSer[Box[Int]], Box.Full(1, 2))
+  }
+
+  // The migration skips the deleted field: it builds no value of the deleted enum
+  it should "migrate a case class whose deleted field holds a value of a deleted enum" in {
+    val levelName            = classOf[Logged].getName.replace("Logged", "Level")
+    val (snapshot, restored) = deserializeFormerFields(
+      classOf[Logged],
+      0,
+      ("id", StringSerializer.INSTANCE, "a"),
+      ("level", lowHigh(new AdtEvolution(levelName, 0, classOf[FormerLevel])), FormerLevel.High)
+    )
+
+    restored shouldBe Logged("a")
+    infoToSer[Logged].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
+      "compatibleAfterMigration"
+    )
   }
 
   it should "not compile a declaration adding a field without default value to an enum value" in {
@@ -169,6 +216,17 @@ object EvolutionMacroEnumTest {
     @renamed(since = 2, "A") case B
   }
 
+  @version(1)
+  enum WrongEnumValueVersioned {
+    @version(2) case A
+    case B
+  }
+
+  @version(1)
+  enum WrongEnumValueWithParametersVersioned {
+    @version(1) case A(a: Int)
+  }
+
   /* Vehicle at version 0
   enum Vehicle { case Car(seats: Int); case Truck(load: Int); case Bike }
    */
@@ -210,5 +268,23 @@ object EvolutionMacroEnumTest {
 
   @version(1)
   enum WrongEnumValueAddedWithoutDefault { case A(@added(since = 1) a: Int) }
+
+  @version(1)
+  @deletedClasses(since = 2, "Gone")
+  enum WrongEnumValueDeletedSinceAboveVersion { case A }
+
+  /* Logged at version 0
+  case class Logged(id: String, level: Level)
+  enum Level { case Low, High }
+   */
+
+  @version(1)
+  @deletedFields(since = 1, "level")
+  @deletedClasses(since = 1, "Level")
+  case class Logged(id: String)
+  object Logged extends Evolving[Logged] { val evolutions = Evolutions[Logged] }
+
+  // Takes the place of the enum Level at version 0
+  enum FormerLevel { case Low, High }
 
 }

@@ -18,15 +18,20 @@ private[evolution] object EvolutionMacro:
   def evolvableImpl[T: Type](using Quotes): Expr[Evolvable[T]] =
     import quotes.reflect.*
 
-    val symbol = TypeRepr.of[T].typeSymbol
+    val tpe    = TypeRepr.of[T]
+    val symbol = tpe.typeSymbol
 
     rejectVersionedParameter(symbol)
-    // At version 0 an ADT has no evolution, and the sealed trait of a case object declares it
-    if versionOf(symbol) > 0 && !symbol.flags.is(Flags.Module) then
-      // An enum value has the type of its enum, which declares its evolutions
-      val companion = Option.when(symbol.companionModule.exists)(symbol.companionModule.termRef)
-      val evolving  = Symbol.requiredClass(classOf[Evolving[?]].getName).typeRef.appliedTo(symbol.typeRef)
-      if !companion.exists(_ <:< evolving) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
+    rejectVersionedEnumValue(symbol)
+    // At version 0 an ADT has no evolution. An enum value has the version of its enum, which declares its evolutions
+    if versionOf(symbol) > 0 then
+      // A case object declares its own evolutions, or a sealed trait with an evolving companion declares it
+      if symbol.flags.is(Flags.Module) then
+        val declared = declaresEvolutionsOf(tpe, symbol) || tpe.baseClasses.exists(parent =>
+          parent != symbol && parent.flags.is(Flags.Sealed) && hasEvolvingCompanion(parent)
+        )
+        if !declared then report.errorAndAbort(caseObjectNotDeclared(symbol.fullName))
+      else if !hasEvolvingCompanion(symbol) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
     // An enum value with parameters has no version of its own: its snapshot records the version of its enum
     val version = versionOf(enumOf(TypeRepr.of[T]).getOrElse(symbol))
     if version == 0 then rejectEvolution(symbol)
@@ -47,6 +52,25 @@ private[evolution] object EvolutionMacro:
         )
       }
     }
+
+  /** Whether the companion of the given ADT extends `Evolving` of this ADT. */
+  private def hasEvolvingCompanion(using q: Quotes)(adt: q.reflect.Symbol): Boolean =
+    adt.companionModule.exists && declaresEvolutionsOf(adt.companionModule.termRef, adt)
+
+  /** Whether `tpe` extends `Evolving` of the given ADT, whatever the type arguments of a generic ADT. */
+  private def declaresEvolutionsOf(using q: Quotes)(tpe: q.reflect.TypeRepr, adt: q.reflect.Symbol): Boolean =
+    import q.reflect.*
+    tpe.baseType(Symbol.requiredClass(classOf[Evolving[?]].getName)) match
+      case AppliedType(_, List(declared)) => declared.typeSymbol == adt
+      case _                              => false
+
+  /** Reject a `@version` on an enum value: an enum value has the version of its enum. */
+  private def rejectVersionedEnumValue(using q: Quotes)(symbol: q.reflect.Symbol): Unit =
+    import q.reflect.*
+    val values    = if symbol.flags.is(Flags.Enum) && !symbol.flags.is(Flags.Case) then symbol.children else Nil
+    val ownValue  = Option.when(enumOf(symbol.typeRef).isDefined)(symbol)
+    val versioned = (values ++ ownValue).filter(isVersioned)
+    versioned.headOption.foreach(value => report.errorAndAbort(evolutionNotAllowed("version", value.fullName)))
 
   /** The name of the first evolution annotation of the given symbol, if it has one. */
   private def evolutionAnnotationOf(using q: Quotes)(symbol: q.reflect.Symbol): Option[String] = {
@@ -189,6 +213,7 @@ private[evolution] object EvolutionMacro:
       def reject(term: Term, target: String): Nothing = report.errorAndAbort(evolutionNotAllowed(nameOf(term), target))
 
       rejectVersionedParameter(symbol)
+      rejectVersionedEnumValue(symbol)
 
       evolutionAnnotationsOf(symbol).foreach { term =>
         if !AnnotationRules.allowedOnAdt(nameOf(term), version, isCoproduct) then

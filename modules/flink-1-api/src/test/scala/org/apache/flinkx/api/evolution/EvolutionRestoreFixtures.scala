@@ -6,6 +6,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.functions.source.SourceFunction
 import org.apache.flink.util.Collector
+import org.apache.flinkx.api.auto._
 
 /** An ADT renamed since the savepoint, and the functions of the job that writes and restores the savepoint. */
 object EvolutionRestoreFixtures {
@@ -31,6 +32,36 @@ object EvolutionRestoreFixtures {
     }
 
     override def cancel(): Unit = running = false
+  }
+
+  /* Visitor at version 0
+  case class Visitor(id: String)
+   */
+
+  /** The key type of a keyed stream, which declares an evolution. */
+  @version(1)
+  case class Visitor(id: String, @added(since = 1) region: String = "eu")
+  object Visitor extends Evolving[Visitor] { val evolutions = Evolutions[Visitor] }
+
+  case class Visit(visitor: Visitor, count: Int)
+
+  /** Sums the visits of each visitor. It creates its state descriptor in `open`, on the TaskManager. */
+  class CountVisits extends KeyedProcessFunction[Visitor, Visit, String] {
+
+    @transient private var total: ValueState[Int] = _
+
+    override def open(context: OpenContext): Unit =
+      total = getRuntimeContext.getState(new ValueStateDescriptor[Int]("total", implicitly[TypeInformation[Int]]))
+
+    override def processElement(
+        value: Visit,
+        ctx: KeyedProcessFunction[Visitor, Visit, String]#Context,
+        out: Collector[String]
+    ): Unit = {
+      val sum = Option(total.value()).getOrElse(0) + value.count
+      total.update(sum)
+      out.collect(s"${value.visitor.id}: $sum")
+    }
   }
 
   /** Keeps the last value of each key. It creates its state descriptor in `open`, on the TaskManager. */

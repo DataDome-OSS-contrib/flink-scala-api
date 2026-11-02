@@ -118,6 +118,28 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
     )
   }
 
+  it should "report a deleted field that the current schema keeps" in {
+    evolutionOf(classOf[DeletedButKept]).plan(Array("kept")) shouldBe Left(
+      Seq(
+        "Field 'kept' is deleted, but the current schema contains it. Correct @deletedFields, or declare @added on it"
+      )
+    )
+  }
+
+  // The since of a deletion has no upper bound: it declares the class name up to since - 1
+  it should "apply a deletion whose since is higher than the versions of the deleted class" in {
+    val overshot = classOf[Probe].getName.replace("Probe", "Overshot")
+    (0 to 4).foreach { version =>
+      withClue(s"version $version:")(
+        AdtEvolution.isDeletedClass(
+          Evolutions.get[Any](overshot, version, getClass.getClassLoader).currentClass
+        ) shouldBe
+          true
+      )
+    }
+    intercept[MissingEvolutionException](Evolutions.get[Any](overshot, 5, getClass.getClassLoader))
+  }
+
 }
 
 object EvolutionMacroTest {
@@ -147,5 +169,17 @@ object EvolutionMacroTest {
   @version(2147483647)
   case class Highest(a: String)
   object Highest extends Evolving[Highest] { val evolutions = Evolutions[Highest] }
+
+  @version(1)
+  @deletedFields(since = 1, "kept")
+  case class DeletedButKept(kept: String)
+  object DeletedButKept extends Evolving[DeletedButKept] { val evolutions = Evolutions[DeletedButKept] }
+
+  // Overshot had the versions 0 and 1 only: its deletion still counts since 5
+  @version(1)
+  @deletedClasses(since = 5, throwOnInstance = false, "Overshot")
+  sealed trait Loft
+  object Loft              extends Evolving[Loft] { val evolutions = Evolutions[Loft] }
+  case class Attic(a: Int) extends Loft
 
 }

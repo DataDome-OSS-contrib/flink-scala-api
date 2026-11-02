@@ -272,6 +272,14 @@ package object evolution {
       s" object $name extends Evolving[$name] { val evolutions = Evolutions[$name] }"
   }
 
+  /** Message of a versioned case object that no evolving companion declares, which the macros give at compile time. */
+  private[api] def caseObjectNotDeclared(adt: String): String =
+    s"$adt declares @version. The companion of its sealed trait must extend Evolving, to declare the case object"
+
+  /** Message of a former class name that resolves to the current class. */
+  private[api] def formerNameIsCurrent(adt: String, formerName: String): String =
+    s"The former class name \"$formerName\" of $adt resolves to $adt itself. Write the absolute former class name"
+
   /** Message of a negative `@version`. */
   private[api] def versionNotAllowed(adt: String, version: Int): String =
     s"The version of $adt must be 0 or higher: @version($version) is not valid"

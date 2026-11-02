@@ -3,6 +3,7 @@ package org.apache.flinkx.api
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.util.FlinkRuntimeException
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.auto.*
 import org.apache.flinkx.api.evolution.AdtEvolution.NoEvolution
 import org.apache.flinkx.api.evolution.{Evolutions, Evolving, deletedClasses, renamed, version}
@@ -98,6 +99,19 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
     currentSerializer
       .snapshotConfiguration()
       .resolveSchemaCompatibility(formerSerializer.snapshotConfiguration()) shouldBe Symbol("incompatible")
+  }
+
+  // An enum value without parameters and an enum value with parameters have different serializers
+  it should "resolve the schema compatibility of an enum value that gets parameters as incompatible" in {
+    val v0               = evolutionOf(classOf[Gear])
+    val formerSerializer = new Scala3EnumSerializer[Gear](
+      evolution = Some(v0),
+      enumValueNames = Array("Low", "High"),
+      enumValueSerializers =
+        Array[TypeSerializer[?]](new Scala3EnumValueSerializer(v0, "Low"), new Scala3EnumValueSerializer(v0, "High"))
+    )
+
+    compatibilityWith[Gear](formerSerializer) shouldBe Symbol("incompatible")
   }
 
   // After a rollback, the evolutions of the higher versions are missing: the migration is not possible
@@ -219,5 +233,16 @@ object Scala3EnumTest {
   case class FailureEvent(step: String, category: FailureCategory)
 
   case class FooEvent(step: String, foo: Example.Foo)
+
+  /* Gear at version 0
+  enum Gear { case Low, High }
+   */
+
+  @version(1)
+  enum Gear {
+    case Low(ratio: Int = 1)
+    case High
+  }
+  object Gear extends Evolving[Gear] { val evolutions = Evolutions[Gear] }
 
 }
