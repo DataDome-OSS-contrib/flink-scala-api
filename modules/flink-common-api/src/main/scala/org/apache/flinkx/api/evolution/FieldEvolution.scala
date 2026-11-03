@@ -118,14 +118,17 @@ object FieldEvolution {
 
   }
 
-  /** Convert the value of the field `name` with the `mapper`. Declared by `@transformed`. */
+  /** Convert the value of the field `name` with the `mapper`. An added field keeps its default value, which has the
+    * current type. Declared by `@transformed`.
+    */
   private[evolution] final case class Transform(override val since: Int, name: String, mapper: AnyRef => AnyRef)
       extends FieldEvolution(since, Phase.Transform) {
 
     override def apply(fields: mutable.Map[String, MigratedField]): Option[String] =
       fields.get(name) match {
-        case Some(field) => fields.update(name, Transformed(field, mapper)); None
-        case _           => notFound("transform", name, fields.keys)
+        case Some(_: Added) => None
+        case Some(field)    => fields.update(name, Transformed(field, mapper)); None
+        case _              => notFound("transform", name, fields.keys)
       }
 
   }

@@ -250,18 +250,18 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     }
   }
 
-  // Version 1 adds 'id', then version 2 renames it to 'ident'
-  it should "migrate a field added, then renamed" in {
-    val (_, fromV0) = deserializeFormerFields(classOf[AddedThenRenamed], 0, ("name", StringSerializer.INSTANCE, "n"))
+  // Version 1 adds 'id', then version 2 renames it to 'ident' and transforms it: the default value is not transformed
+  it should "migrate a field added, then renamed and transformed" in {
+    val (_, fromV0) = deserializeFormerFields(classOf[AddedThenChanged], 0, ("name", StringSerializer.INSTANCE, "n"))
     val (_, fromV1) = deserializeFormerFields(
-      classOf[AddedThenRenamed],
+      classOf[AddedThenChanged],
       1,
       ("name", StringSerializer.INSTANCE, "n"),
-      ("id", StringSerializer.INSTANCE, "i")
+      ("id", IntSerializer.INSTANCE, 7)
     )
 
-    fromV0 shouldBe AddedThenRenamed("n", "none")
-    fromV1 shouldBe AddedThenRenamed("n", "i")
+    fromV0 shouldBe AddedThenChanged("n", "none")
+    fromV1 shouldBe AddedThenChanged("n", "7")
   }
 
   // Version 1 transforms 'sessionId', then version 2 renames it to 'id'
@@ -711,14 +711,17 @@ object EvolutionTest {
   case class RenamedTwice(@renamed(since = 2, "a") @renamed(since = 3, "b") c: String)
   object RenamedTwice extends Evolving[RenamedTwice] { val evolutions = Evolutions[RenamedTwice] }
 
-  /* AddedThenRenamed at version 0, then at version 1
-  case class AddedThenRenamed(name: String)
-  @version(1) case class AddedThenRenamed(name: String, @added(since = 1) id: String = "none")
+  /* AddedThenChanged at version 0, then at version 1
+  case class AddedThenChanged(name: String)
+  @version(1) case class AddedThenChanged(name: String, @added(since = 1) id: Int = 0)
    */
 
   @version(2)
-  case class AddedThenRenamed(name: String, @added(since = 1) @renamed(since = 2, "id") ident: String = "none")
-  object AddedThenRenamed extends Evolving[AddedThenRenamed] { val evolutions = Evolutions[AddedThenRenamed] }
+  case class AddedThenChanged(
+      name: String,
+      @added(since = 1) @renamed(since = 2, "id") @transformed(since = 2, mapIntToString) ident: String = "none"
+  )
+  object AddedThenChanged extends Evolving[AddedThenChanged] { val evolutions = Evolutions[AddedThenChanged] }
 
   val upperCase: String => String = _.toUpperCase
 
