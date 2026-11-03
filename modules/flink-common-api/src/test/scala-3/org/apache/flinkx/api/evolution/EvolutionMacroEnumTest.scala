@@ -125,7 +125,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   it should "plan the migration of a generic enum value with parameters" in {
-    evolutionOf(classOf[Box.Full[?]]).plan(Array("a")).map(_.length) shouldBe Right(2)
+    evolutionOf(classOf[Box.Full[?]]).plan(Some(Array("a"))).map(_.length) shouldBe Right(2)
   }
 
   // The companion of a generic ADT extends Evolving of the wildcard type, which declares every type argument

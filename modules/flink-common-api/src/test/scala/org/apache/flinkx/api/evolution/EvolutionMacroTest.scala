@@ -26,7 +26,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
       formerFields: Array[String]
   ): Either[Seq[String], Seq[Option[Int]]] =
     evolution
-      .plan(formerFields)
+      .plan(Some(formerFields))
       .map(_.toSeq.map {
         case Former(index) => Some(index)
         case _             => None
@@ -37,7 +37,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
 
   /** All the failures that the plan of `clazz` reports for the fields of Click at version 0. */
   private def planFailures(clazz: Class[_]): Seq[String] =
-    evolutionOf(clazz).plan(ClickV0FieldNames).swap.getOrElse(Seq.empty)
+    evolutionOf(clazz).plan(Some(ClickV0FieldNames)).swap.getOrElse(Seq.empty)
 
   it should "declare the former and the current name of a case class" in {
     namesOf(Probe.evolutions) shouldBe Set(
@@ -113,13 +113,13 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
 
   // An unversioned ADT has the No evolution, whose plan also reports a field added without @added
   it should "report a field added without annotation to an unversioned case class" in {
-    evolutionOf(classOf[AddedFieldWithoutAnnotation]).plan(Array("a")).swap shouldBe Right(
+    evolutionOf(classOf[AddedFieldWithoutAnnotation]).plan(Some(Array("a"))).swap shouldBe Right(
       Seq("Field 'b' is not in the former data. Declare @added(since = <version>) or @renamed on it")
     )
   }
 
   it should "report a deleted field that the current schema keeps" in {
-    evolutionOf(classOf[DeletedButKept]).plan(Array("kept")) shouldBe Left(
+    evolutionOf(classOf[DeletedButKept]).plan(Some(Array("kept"))) shouldBe Left(
       Seq(
         "Field 'kept' is deleted, but the current schema contains it. Correct @deletedFields, or declare @added on it"
       )

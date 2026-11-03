@@ -21,7 +21,7 @@ class UserApiTest extends AnyFlatSpec with Matchers {
   it should "apply the mappers of an ADT, private to its package" in {
     val evolution = Evolutions.get[Invoice](classOf[Invoice].getName, 0, getClass.getClassLoader)
 
-    evolution.plan(Array("amount")).map(_.map(_.migrate(Array[AnyRef](Int.box(42)))).toSeq) shouldBe
+    evolution.plan(Some(Array("amount"))).map(_.map(_.migrate(Array[AnyRef](Int.box(42)))).toSeq) shouldBe
       Right(Seq("42 cents"))
     evolution.migrate(Invoice("42 cents")) shouldBe Invoice("42 cents since v0")
   }

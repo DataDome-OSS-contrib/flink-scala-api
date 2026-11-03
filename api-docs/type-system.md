@@ -489,9 +489,9 @@ object Horse extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
 * A former class name that no class has and no evolution declares stops the restore with a
   `MissingEvolutionException`.
 * A rollback is incompatible if the former version is higher than the current version.
-* A savepoint written before release 2.4.0 records no field names: the restore reads the case class fields by position,
-  without field evolutions or post-evolution mappers. Restore it once with release 2.4.0 without a schema change, then
-  take a savepoint.
+* A savepoint written before release 2.4.0 records no field names: the restore reads the case class fields by position.
+  The field evolutions and post-evolution mappers cannot apply to them: a case class that declares some for this data is
+  incompatible. Restore it once with release 2.4.0 without a schema change, then take a savepoint.
 * Keep `flink-scala-api` in the jar of the job: each job then has its own registry of evolutions. In the `lib`
   directory of the cluster, the jobs of a TaskManager share the registry. It stays correct, but it keeps the class
   loaders of the stopped jobs.

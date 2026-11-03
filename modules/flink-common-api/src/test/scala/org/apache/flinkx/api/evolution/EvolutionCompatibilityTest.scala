@@ -62,8 +62,7 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     compatibilityWith[Action](infoToSer[Action]) shouldBe Symbol("compatibleAsIs")
   }
 
-  // A snapshot written before release 2.4.0 has no field names: the standard resolution compares the fields by position
-  it should "resolve the schema compatibility of a case class snapshot recording no field name as is" in {
+  it should "resolve the schema compatibility of a case class snapshot recording no field name with evolutions as incompatible" in {
     val formerSerializer = new CaseClassSerializer[ClickAction](
       evolution = evolutionOf(classOf[ClickAction]),
       isCaseClassImmutable = true,
@@ -71,7 +70,10 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
       scalaFieldSerializers = Array(infoToSer[String], infoToSer[String])
     )
 
-    compatibilityWith[ClickAction](formerSerializer) shouldBe Symbol("compatibleAsIs")
+    compatibilityWith[ClickAction](formerSerializer) shouldBe Symbol("incompatible")
+    val formerClickAction = ClickAction("1", "2021-01-01")
+    val failure = intercept[MigrationException](deserializeFormerForm[ClickAction](formerSerializer, formerClickAction))
+    failure.getMessage should include("before release 2.4.0")
   }
 
   // Without field names, the restored serializer reads by position and applies no evolution: the schema cannot change

@@ -174,19 +174,6 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
   }
 
-  // The evolutions never apply to a snapshot without field names, with the restored or the current serializer
-  it should "not apply @postEvolution to a case class snapshot recording no field name" in {
-    val formerSerializer = new CaseClassSerializer[Ticket](
-      evolution = evolutionOf(classOf[Ticket]),
-      isCaseClassImmutable = true,
-      fieldNames = None,
-      scalaFieldSerializers = Array(infoToSer[String])
-    )
-
-    compatibilityWith[Ticket](formerSerializer) shouldBe Symbol("compatibleAsIs")
-    deserializeFormerForm[Ticket](formerSerializer, Ticket("t")) shouldBe Ticket("t")
-  }
-
   // A case class without field records no field name either, but its snapshot has no field serializer to read by position
   it should "add a field to a case class that had none" in {
     val (snapshot, restored) = deserializeFormerFields(classOf[Flag], 0)

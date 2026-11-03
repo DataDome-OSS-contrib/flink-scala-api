@@ -42,26 +42,27 @@ sealed class AdtEvolution[T] private[evolution] (
   /** Whether no evolution and no post-evolution mapper apply to the former data. */
   def isEmpty: Boolean = fieldEvolutions.isEmpty && enumValueEvolutions.isEmpty && postEvolution.isEmpty
 
-  /** Whether the former data of a case class reads as is, without migration: nothing applies to it and its fields have
-    * the current order, or it records no field name and its fields are read by position.
+  /** Whether the former data of a case class reads as is, without migration: nothing applies to it, and its fields have
+    * the current order or are read by position.
     *
     * @param formerFieldNames
     *   Former field names of the case class, in declaration order. None before release 2.4.0
     */
   def isAsIs(formerFieldNames: Option[Array[String]]): Boolean =
-    formerFieldNames.forall(names => isEmpty && names.sameElements(currentFieldNames))
+    isEmpty && formerFieldNames.forall(_.sameElements(currentFieldNames))
 
   /** Plan the migration of the former fields of a case class. This method reads no data.
     *
     * @param formerFieldNames
-    *   Former field names of the case class, in declaration order
+    *   Former field names of the case class, in declaration order. None before release 2.4.0: no evolution applies
     * @return
     *   The migration plan, in the current declaration order, or why the evolutions cannot migrate the former fields
     */
-  def plan(formerFieldNames: Array[String]): Either[Seq[String], Array[MigratedField]] =
-    FieldEvolution.plan(fieldEvolutions, formerFieldNames) match {
-      case Left(failure) => Left(Seq(failure))
-      case Right(fields) =>
+  def plan(formerFieldNames: Option[Array[String]]): Either[Seq[String], Array[MigratedField]] =
+    formerFieldNames.map(FieldEvolution.plan(fieldEvolutions, _)) match {
+      case None => Left(Seq("A savepoint before release 2.4.0 has no field names: restore it without schema change"))
+      case Some(Left(failure)) => Left(Seq(failure))
+      case Some(Right(fields)) =>
         val failures = checkInstantiation(fields.keySet)
         if (failures.nonEmpty) Left(failures) else Right(currentFieldNames.map(fields))
     }

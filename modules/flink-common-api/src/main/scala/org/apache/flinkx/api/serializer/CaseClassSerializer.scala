@@ -93,7 +93,7 @@ class CaseClassSerializer[T <: Product](
 
   /** The migration plan, computed once at the first record that needs it */
   @transient private lazy val migrationPlan: Array[MigratedField] =
-    evolution.plan(fieldNames.getOrElse(Array.empty)) match {
+    evolution.plan(fieldNames) match {
       case Right(migratedFields) => migratedFields
       case Left(failures)        => throw MigrationException(evolution.currentClass, evolution.formerVersion, failures)
     }
@@ -309,7 +309,7 @@ final class ScalaCaseClassSerializerSnapshot[T <: scala.Product](
     *     serializers do not correspond
     */
   override protected def checkMigration(former: ScalaCaseClassSerializerSnapshot[T]): Option[String] =
-    former.evolution.plan(former.memberNames) match {
+    former.evolution.plan(former.fieldNames) match {
       case Left(failures)       => Some(failures.mkString("\n"))
       case Right(migrationPlan) =>
         val formerFieldSnapshots  = former.getNestedSerializerSnapshots
