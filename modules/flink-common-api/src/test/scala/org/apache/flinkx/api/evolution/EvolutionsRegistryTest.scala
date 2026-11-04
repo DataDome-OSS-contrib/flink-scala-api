@@ -108,9 +108,24 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
       val failure = intercept[FormerClassConflictException](evolutionOf(classOf[Probe], 2))
       Set(failure.declared, failure.conflicting) shouldBe Set(
         s"renamed to ${classOf[ClaimingByRename].getName} up to version 0",
-        s"deleted by ${classOf[ClaimingByDeletion].getName} up to version 0"
+        s"deleted by ${classOf[ClaimingByDeletion].getName} with throwOnInstance = true up to version 0"
       )
     }
+  }
+
+  it should "fail every lookup when a class name is deleted twice in one version with two behaviors" in {
+    def deletedBy(adt: Class[_], throws: Boolean) =
+      s"deleted by ${adt.getName} with throwOnInstance = $throws up to version 0"
+    def conflictOf(fixture: String) = ConflictingScan.withFixture(fixture) {
+      val failure = intercept[FormerClassConflictException](evolutionOf(classOf[Probe], 2))
+      Set(failure.declared, failure.conflicting)
+    }
+
+    conflictOf("deletedByTwo") shouldBe Set(
+      deletedBy(classOf[FirstDeletingFish], throws = true),
+      deletedBy(classOf[SecondDeletingFish], throws = false)
+    )
+    conflictOf("deletedTwice") shouldBe Set(true, false).map(deletedBy(classOf[DeletingFishTwice], _))
   }
 
   // A mapper initializes during the registration: only its first initialization gives the cause of its failure
@@ -157,7 +172,8 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
   it should "find a case object that reuses a name deleted without the $ ending its class name" in {
     ConflictingScan.withFixture("caseObjectReuser") {
       val failure = intercept[FormerClassConflictException](evolutionOf(classOf[Probe], 2))
-      failure.declared shouldBe s"deleted by ${classOf[DeletingCaseObjectName].getName} up to version 0"
+      failure.declared shouldBe
+        s"deleted by ${classOf[DeletingCaseObjectName].getName} with throwOnInstance = true up to version 0"
       failure.conflicting shouldBe s"used by ${TakenCaseObject.getClass.getName} at version 0"
     }
   }
@@ -315,6 +331,31 @@ object EvolutionsRegistryTest {
   object SecondClaimingFormerName extends Evolving[SecondClaimingFormerName] {
     def evolutions: Evolutions[SecondClaimingFormerName] =
       ConflictingScan.evolutionsOf("sharedFormerName", Evolutions[SecondClaimingFormerName])
+  }
+
+  @version(1)
+  @deletedClasses(since = 1, "org.example.Fish")
+  case class FirstDeletingFish(a: String)
+  object FirstDeletingFish extends Evolving[FirstDeletingFish] {
+    def evolutions: Evolutions[FirstDeletingFish] =
+      ConflictingScan.evolutionsOf("deletedByTwo", Evolutions[FirstDeletingFish])
+  }
+
+  @version(1)
+  @deletedClasses(since = 1, throwOnInstance = false, "org.example.Fish")
+  case class SecondDeletingFish(a: String)
+  object SecondDeletingFish extends Evolving[SecondDeletingFish] {
+    def evolutions: Evolutions[SecondDeletingFish] =
+      ConflictingScan.evolutionsOf("deletedByTwo", Evolutions[SecondDeletingFish])
+  }
+
+  @version(1)
+  @deletedClasses(since = 1, "org.example.Fish")
+  @deletedClasses(since = 1, throwOnInstance = false, "org.example.Fish")
+  case class DeletingFishTwice(a: String)
+  object DeletingFishTwice extends Evolving[DeletingFishTwice] {
+    def evolutions: Evolutions[DeletingFishTwice] =
+      ConflictingScan.evolutionsOf("deletedTwice", Evolutions[DeletingFishTwice])
   }
 
   @version(1)

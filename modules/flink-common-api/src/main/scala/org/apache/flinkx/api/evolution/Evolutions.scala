@@ -2,7 +2,7 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.annotation.{Internal, VisibleForTesting}
 import org.apache.flink.util.FlinkRuntimeException
-import org.apache.flinkx.api.evolution.AdtEvolution.{NoEvolution, isDeletedClass}
+import org.apache.flinkx.api.evolution.AdtEvolution.{DeletedEvolution, NoEvolution}
 import org.apache.flinkx.api.evolution.Evolutions.Declaration
 import org.apache.flinkx.api.serializer.ConstructorCompat
 import org.apache.flinkx.api.util.ClassUtil
@@ -80,6 +80,12 @@ object Evolutions extends EvolutionsFactory {
     /** The current class that the class name refers to, or the deletion marker. */
     lazy val currentClass: Class[_] = evolutionAt(0).currentClass
 
+    /** For a deleted class name, whether an instance throws or reads as `null`. */
+    lazy val throwOnInstance: Option[Boolean] = evolutionAt(0) match {
+      case deleted: DeletedEvolution[_] => Some(deleted.throwOnInstance)
+      case _                            => None
+    }
+
   }
 
   /** One registry per class loader: a class name refers to the class of the job that does the lookup */
@@ -126,12 +132,12 @@ object Evolutions extends EvolutionsFactory {
 
   /** Sort the declarations of a class name by last version, and keep each declaration once.
     * @throws FormerClassConflictException
-    *   if the class name refers to two classes in the data of one version
+    *   if the class name refers to two classes in the data of one version, or is deleted twice with two behaviors
     */
   private def sortDeclarations(className: String, declarations: Seq[Declaration], cl: ClassLoader): Seq[Declaration] = {
     // Evolutions.get uses the first declaration whose last version is equal to or higher than the former version
     val sorted = declarations
-      .distinctBy(declaration => (declaration.lastVersion, declaration.currentClass))
+      .distinctBy(declaration => (declaration.lastVersion, declaration.currentClass, declaration.throwOnInstance))
       .sortBy(_.lastVersion)
     checkNameReuse(className, sorted, cl)
     sorted
@@ -157,10 +163,13 @@ object Evolutions extends EvolutionsFactory {
   }
 
   /** What the given declaration of a former class name refers to, for the message of a conflict. */
-  private def refersTo(declaration: Declaration): String =
-    if (isDeletedClass(declaration.currentClass))
-      s"deleted by ${declaration.declaredBy.getName} up to version ${declaration.lastVersion}"
-    else s"renamed to ${declaration.currentClass.getName} up to version ${declaration.lastVersion}"
+  private def refersTo(declaration: Declaration): String = {
+    val upTo = s"up to version ${declaration.lastVersion}"
+    declaration.throwOnInstance match {
+      case Some(throws) => s"deleted by ${declaration.declaredBy.getName} with throwOnInstance = $throws $upTo"
+      case None         => s"renamed to ${declaration.currentClass.getName} $upTo"
+    }
+  }
 
   /** The class with the given name, if a savepoint can contain its data: a class or a case object, no other object and
     * no mirror class of an object.

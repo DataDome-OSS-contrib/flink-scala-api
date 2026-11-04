@@ -126,8 +126,11 @@ object AdtEvolution {
     * @param throwOnInstance
     *   `true` to throw a [[DeletedInstanceException]] for a deleted instance, `false` to give `null`
     */
-  private[api] final class DeletedEvolution[T](formerClassName: String, formerVersion: Int, throwOnInstance: Boolean)
-      extends AdtEvolution[T](formerClassName, formerVersion, DeletedClass.asInstanceOf[Class[T]]) {
+  private[api] final class DeletedEvolution[T](
+      formerClassName: String,
+      formerVersion: Int,
+      val throwOnInstance: Boolean
+  ) extends AdtEvolution[T](formerClassName, formerVersion, DeletedClass.asInstanceOf[Class[T]]) {
 
     /** The deletion applies to the former data. */
     override def isEmpty: Boolean = false
