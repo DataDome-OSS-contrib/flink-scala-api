@@ -133,7 +133,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
     roundtrip[Box[Int]](infoToSer[Box[Int]], Box.Full(1, 2))
   }
 
-  // The migration skips the deleted field: it builds no value of the deleted enum
+  // The migration skips the deleted field: it builds no value of the deleted enum. A state of the deleted enum reads it
   it should "migrate a case class whose deleted field holds a value of a deleted enum" in {
     val levelName            = classOf[Logged].getName.replace("Logged", "Level")
     val (snapshot, restored) = deserializeFormerFields(
@@ -147,6 +147,10 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
     infoToSer[Logged].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
       "compatibleAfterMigration"
     )
+    val deletedLevel = lowHigh(Evolutions.get[FormerLevel](levelName, 0, getClass.getClassLoader))
+    val failure      =
+      intercept[DeletedInstanceException](deletedLevel.deserialize(new DataInputDeserializer(Array[Byte](1))))
+    failure.getMessage should include(levelName)
   }
 
   it should "not compile a declaration adding a field without default value to an enum value" in {

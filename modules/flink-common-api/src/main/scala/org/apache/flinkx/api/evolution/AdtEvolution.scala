@@ -141,6 +141,13 @@ object AdtEvolution {
     /** Migrate a deleted instance to `null`, or throw a [[DeletedInstanceException]]. */
     override def migrate(instance: => T): T = AdtEvolution.deletedInstance(formerClassName, throwOnInstance)
 
+    /** A value of a deleted enum has no current name. */
+    override def currentEnumValueName(formerValueName: String): Option[String] = None
+
+    /** Migrate a value of a deleted enum to `null`, or throw a [[DeletedInstanceException]]. */
+    override def migrateEnumValue(formerValueName: String)(valueOf: String => T): T =
+      AdtEvolution.deletedInstance(formerClassName, throwOnInstance)
+
   }
 
   /** ADT evolution of an ADT that declares no evolution. It only migrates a case class whose fields are reordered. */
