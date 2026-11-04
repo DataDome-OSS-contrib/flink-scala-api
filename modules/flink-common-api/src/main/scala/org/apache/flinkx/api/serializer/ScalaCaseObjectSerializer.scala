@@ -3,7 +3,7 @@ package org.apache.flinkx.api.serializer
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flinkx.api.evolution.AdtEvolution
-import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isSameClass, readEvolution, writeEvolution}
+import org.apache.flinkx.api.serializer.EvolvingSnapshot.{readEvolution, writeEvolution}
 import org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.ScalaCaseObjectSerializerSnapshot
 import org.apache.flinkx.api.util.ClassUtil
 
@@ -36,13 +36,12 @@ object ScalaCaseObjectSerializer {
 
   private val CurrentVersion = 2
 
-  class ScalaCaseObjectSerializerSnapshot[T](
-      serializer: Option[ScalaCaseObjectSerializer[T]]
-  ) extends TypeSerializerSnapshot[T] {
+  class ScalaCaseObjectSerializerSnapshot[T](serializer: Option[ScalaCaseObjectSerializer[T]])
+      extends EvolvingSnapshot[T, ScalaCaseObjectSerializerSnapshot[T]] {
 
     def this() = this(None)
 
-    private[serializer] var evolution: AdtEvolution[T] = _
+    private var evolution: AdtEvolution[T] = _
 
     serializer.foreach(s => evolution = s.evolution)
 
@@ -54,15 +53,18 @@ object ScalaCaseObjectSerializer {
 
     override def getCurrentVersion: Int = CurrentVersion
 
-    /** Compatible as is when both snapshots describe the same case object, possibly under a former class name. */
-    override def resolveSchemaCompatibility(
-        former: TypeSerializerSnapshot[T]
-    ): TypeSerializerSchemaCompatibility[T] = former match {
-      case sameKind: ScalaCaseObjectSerializerSnapshot[_] if isSameClass(evolution, sameKind.evolution) =>
-        TypeSerializerSchemaCompatibility.compatibleAsIs()
-      case _ =>
-        TypeSerializerSchemaCompatibility.incompatible()
-    }
+    override private[serializer] def adtEvolution: Option[AdtEvolution[T]] = Some(evolution)
+
+    /** A case object has no member. */
+    override private[serializer] def memberNames: Array[String] = Array.empty
+
+    /** The migration of a case object only applies its post-evolution mapper: it is always possible. */
+    override protected def checkMigration(former: ScalaCaseObjectSerializerSnapshot[T]): Option[String] = None
+
+    /** The same case object, possibly under a former class name, reads as is. */
+    override protected def resolveStandardCompatibility(
+        former: ScalaCaseObjectSerializerSnapshot[T]
+    ): TypeSerializerSchemaCompatibility[T] = TypeSerializerSchemaCompatibility.compatibleAsIs()
 
     override def restoreSerializer(): TypeSerializer[T] =
       new ScalaCaseObjectSerializer[T](evolution)

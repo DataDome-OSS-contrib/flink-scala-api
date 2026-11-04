@@ -126,8 +126,7 @@ object CoproductSerializer {
 
   class CoproductSerializerSnapshot[T](
       serializer: Option[CoproductSerializer[T]]
-  ) extends TypeSerializerSnapshot[T]
-      with EvolvingSnapshot[T, CoproductSerializerSnapshot[T]] {
+  ) extends EvolvingSnapshot[T, CoproductSerializerSnapshot[T]] {
 
     // Empty constructor is required to instantiate this class during deserialization.
     def this() = this(None)

@@ -93,6 +93,29 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     compatibilityWith[Switch](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
   }
 
+  // Under an unchanged sealed trait, only the snapshot of the case object tells that its mapper applies
+  it should "migrate a case object with a post-evolution mapper, but not roll back its version" in {
+    def gearAt(highVersion: Int): CoproductSerializer[Gear] = {
+      val high = High.getClass.asInstanceOf[Class[Gear]]
+      val low  = Low.getClass.asInstanceOf[Class[Gear]]
+      new CoproductSerializer[Gear](
+        evolution = Some(evolutionOf(classOf[Gear], 1)),
+        subtypeClasses = Array[Class[_]](high, low),
+        subtypeNames = Array(high.getName, low.getName),
+        subtypeSerializers = Array[TypeSerializer[_]](
+          new ScalaCaseObjectSerializer[Gear](evolutionOf(high, highVersion)),
+          new ScalaCaseObjectSerializer[Gear](evolutionOf(low, 0))
+        )
+      )
+    }
+    highMapped = 0
+
+    compatibilityWith[Gear](gearAt(1)) shouldBe Symbol("compatibleAfterMigration")
+    deserializeFormerForm[Gear](gearAt(1), High) shouldBe High
+    highMapped shouldBe 1
+    compatibilityWith[Gear](gearAt(3)) shouldBe Symbol("incompatible")
+  }
+
 }
 
 object CaseObjectEvolutionTest {
@@ -160,5 +183,23 @@ object CaseObjectEvolutionTest {
 
   // Takes the place of the case class On at version 0
   case class FormerOn(level: Int)
+
+  /* Gear at version 1, High at version 1
+  @version(1) sealed trait Gear
+  @version(1) case object High extends Gear
+  case object Low extends Gear
+   */
+
+  @version(1)
+  sealed trait Gear
+  object Gear extends Evolving[Gear] { val evolutions = Evolutions[Gear] }
+  @version(2)
+  @postEvolution(countHigh)
+  case object High extends Gear
+  case object Low  extends Gear
+
+  @volatile var highMapped = 0
+
+  def countHigh(version: Int, high: High.type): High.type = { highMapped += 1; high }
 
 }
