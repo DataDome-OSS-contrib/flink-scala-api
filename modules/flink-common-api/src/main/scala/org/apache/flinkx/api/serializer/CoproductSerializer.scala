@@ -203,6 +203,13 @@ object CoproductSerializer {
 
     override private[serializer] def memberNames: Array[String] = subtypeNames
 
+    /** Also when a former subtype name refers to another class: a deleted class, or a class reusing the name. The
+      * classes are compared by name: two class loaders can load the same class.
+      */
+    override protected def isEvolutionRequired(former: CoproductSerializerSnapshot[T]): Boolean =
+      super.isEvolutionRequired(former) || adtEvolution.isDefined && former.adtEvolution.isDefined &&
+        !former.subtypeClasses.map(_.getName).sameElements(subtypeClasses.map(_.getName))
+
     override protected def resolveStandardCompatibility(
         former: CoproductSerializerSnapshot[T]
     ): TypeSerializerSchemaCompatibility[T] = adapter.resolveSchemaCompatibility(former.adapter)
@@ -217,7 +224,7 @@ object CoproductSerializer {
         .filterNot(i => AdtEvolution.isDeletedClass(former.subtypeClasses(i)))
         .flatMap { i =>
           val formerClassName = former.subtypeNames(i)
-          val currentIndex    = subtypeClasses.indexOf(former.subtypeClasses(i))
+          val currentIndex    = subtypeClasses.indexWhere(_.getName == former.subtypeClasses(i).getName)
           if (currentIndex < 0) {
             Some(s"Former subtype '$formerClassName' is not in $adtName. ${renamedOrDeletedHint(formerClassName)}")
           } else if (isIncompatible(currentSubtypeSnapshots(currentIndex), formerSubtypeSnapshots(i))) {

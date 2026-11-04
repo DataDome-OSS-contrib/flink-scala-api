@@ -103,8 +103,10 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
    */
 
+  // Animal v0 records the subtype names of Animal v2, but Horse refers to the deleted class in its data
   it should "deserialize Animal v0 to null, its subtype being deleted" in {
     testDeserializeFromFile[Animal]("Animal-v0", null)
+    compatibilityWithFile[Animal]("Animal-v0") shouldBe Symbol("compatibleAfterMigration")
   }
 
   // Version 1 deletes Horse, and a class of version 2 reuses its name
