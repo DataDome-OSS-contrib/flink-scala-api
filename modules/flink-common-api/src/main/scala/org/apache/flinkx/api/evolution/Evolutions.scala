@@ -52,9 +52,9 @@ final class Evolutions[T](builders: () => Seq[EvolutionBuilder[_]]) {
   * A declaration of a class name gives the ADT evolution of each version up to its last version, see
   * [[EvolutionBuilder.build]].
   *
-  * Packaging: each class loader has its own registry, so a job never reads the declarations of another job. Usually,
-  * this library is in the application jar. If it is in the `lib` directory of the cluster, the registry keeps the class
-  * loaders of the jobs after they stop.
+  * Packaging: each class loader has its own registry, so a job never reads the declarations of another job. The
+  * evolving ADTs must be in the application jar. If `flink-scala-api` is in the `lib` directory of the cluster, the
+  * registry then keeps the class loaders of the stopped jobs.
   *
   * Concurrency: the tasks of a TaskManager restore their state in parallel. The registration takes a lock, and the
   * lookups wait for it to complete. A companion does no lookup during its initialization.
@@ -181,7 +181,7 @@ object Evolutions extends EvolutionsFactory {
     * @throws MissingEvolutionException
     *   if no declaration of the class name includes this version, and the class loader cannot load it
     * @throws java.lang.IllegalStateException
-    *   if the companion scan did not find the evolving companion of the class
+    *   if the companion scan did not find the evolving companion of the class, outside the jars of the job
     * @throws Throwable
     *   the failure of the registration
     */
@@ -203,7 +203,7 @@ object Evolutions extends EvolutionsFactory {
         }
         // The declarations of a class with an evolving companion are missing only if the scan did not find it
         if (declarations.isEmpty && hasEvolvingCompanion(currentClass, cl))
-          throw new IllegalStateException(s"The companion scan of $cl missed the evolving companion of $currentClass")
+          throw new IllegalStateException(companionNotScanned(currentClass.getName))
         new NoEvolution(currentClass, formerVersion, ConstructorCompat.lookupFieldNames(currentClass))
       }
       .asInstanceOf[AdtEvolution[T]]

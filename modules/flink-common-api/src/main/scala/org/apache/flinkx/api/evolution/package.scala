@@ -234,8 +234,8 @@ package object evolution {
       cause: Throwable
   ) extends FlinkRuntimeException(
         s"Cannot restore '$formerClassName' written at version $formerVersion: " + lastVersion.fold(
-          "no class has this name, and no evolution declares it. Declare @renamed on its current class, or" +
-            " @deletedClasses on its ADT"
+          "no class has this name, and no evolution in the jar of the job declares it. Declare @renamed on its" +
+            " current class, or @deletedClasses on its ADT"
         )(last =>
           s"the evolutions declare this class name up to version $last. Declare its @renamed or @deletedClasses" +
             s" since a version above $formerVersion"
@@ -275,6 +275,10 @@ package object evolution {
   /** Message of a versioned case object that no evolving companion declares, which the macros give at compile time. */
   private[api] def caseObjectNotDeclared(adt: String): String =
     s"$adt declares @version. The companion of its sealed trait must extend Evolving, to declare the case object"
+
+  /** Message of an evolving companion that the companion scan did not find, outside the jars of the job. */
+  private[api] def companionNotScanned(adt: String): String =
+    s"The companion scan missed the evolving companion of $adt. Keep the evolving ADTs in the jar of the job"
 
   /** Message of a former class name that resolves to the current class. */
   private[api] def formerNameIsCurrent(adt: String, formerName: String): String =

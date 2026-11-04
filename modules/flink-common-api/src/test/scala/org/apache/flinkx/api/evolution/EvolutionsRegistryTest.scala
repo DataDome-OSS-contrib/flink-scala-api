@@ -86,9 +86,8 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
 
     val exception = intercept[MissingEvolutionException](savepointed[Probe](serializer))
 
-    exception.getMessage should startWith(
-      s"Cannot restore '$goneName' written at version 2: no class has this name, and no evolution declares it."
-    )
+    exception.getMessage should startWith(s"Cannot restore '$goneName' written at version 2: no class has this name")
+    exception.getMessage should include("no evolution in the jar of the job declares it")
     exception.getCause shouldBe a[ClassNotFoundException]
   }
 
@@ -238,12 +237,13 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     Evolutions.get[Probe](FormerProbe, 0, pathingJob).currentClass shouldBe classOf[Probe]
   }
 
-  // Probe has an evolving companion: the scan cannot see it, which must not make its evolutions silently empty
+  // Probe has an evolving companion in a parent class loader, as in the lib directory of the cluster: the scan cannot
+  // see it, which must not make its evolutions silently empty
   it should "fail to look up a class whose evolving companion the scan did not find" in {
     val emptyJob = new URLClassLoader(Array(Files.createTempDirectory("job").toUri.toURL), cl)
 
     val failure = intercept[IllegalStateException](Evolutions.get[Probe](classOf[Probe].getName, 0, emptyJob))
-    failure.getMessage should include(classOf[Probe].getName)
+    failure.getMessage shouldBe companionNotScanned(classOf[Probe].getName)
   }
 
   /** Delegates to the class loader of the job, with the application class loader as parent, as Flink does. */
