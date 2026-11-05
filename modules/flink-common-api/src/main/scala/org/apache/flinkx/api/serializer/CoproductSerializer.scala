@@ -192,9 +192,9 @@ object CoproductSerializer {
       } else {
         adapter.readSnapshot(readVersion, in, userCodeClassLoader)
       }
-      // The snapshot of a subtype records its version, which gives the current class of the former subtype
+      // An evolving snapshot subtype gives its current class, the current class of the unversioned subtype otherwise
       subtypeClasses = subtypeNames.zip(adapter.getNestedSerializerSnapshots).map { case (name, snapshot) =>
-        currentClassOf(snapshot).getOrElse(Evolutions.get(name, adtVersion, userCodeClassLoader).currentClass)
+        currentClassOf(snapshot).getOrElse(Evolutions.get(name, 0, userCodeClassLoader).currentClass)
       }
     }
 

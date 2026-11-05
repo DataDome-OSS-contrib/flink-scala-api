@@ -29,8 +29,13 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
     deserializeFormerForm[Litter](formerLitter, FormerCaseObject) shouldBe Wanderer
   }
 
+  // The snapshot of a user type information records no class name: the deleted subtype has the version 0 too
   it should "migrate a deleted unversioned subtype under a sealed trait of a higher version" in {
+    val runtName          = classOf[Dog].getName.replace("Dog", "Runt")
+    val userTypeRuntTrait = formerTrait(classOf[Litter], 2, (runtName, classOf[String], StringSerializer.INSTANCE))
+
     deserializeFormerForm[Litter](formerLitter, FormerRunt("Tiny")) shouldBe null
+    compatibilityWith[Litter](userTypeRuntTrait)(infoToSer[Litter]) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // Herd keeps its version: the rename of its subtype counts only in the versions of the subtype
