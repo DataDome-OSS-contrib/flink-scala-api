@@ -28,18 +28,17 @@ import org.apache.flink.api.common.typeutils.{
   TypeSerializerSnapshot
 }
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase
-import org.apache.flink.core.memory.{DataInputView, DataOutputView, DataOutputViewStreamWrapper}
+import org.apache.flink.core.memory.{DataInputView, DataOutputView}
 import org.apache.flink.types.NullFieldException
 import org.apache.flinkx.api.evolution.FieldEvolution.{Former, MigratedField}
 import org.apache.flinkx.api.evolution.AdtEvolution.isDeletedClass
 import org.apache.flinkx.api.evolution.{AdtEvolution, MigrationException}
-import org.apache.flinkx.api.serializer.CaseClassSerializer.{Discarded, EmptyByteArray}
+import org.apache.flinkx.api.serializer.CaseClassSerializer.EmptyByteArray
 import org.apache.flinkx.api.serializer.EvolvingSnapshot.{isIncompatible, readEvolution, writeEvolution}
 import org.apache.flinkx.api.serializer.ScalaCaseClassSerializerSnapshot.{CurrentVersion, PositionalVersion}
+import org.apache.flinkx.api.util.{DiscardingDataOutputView => Discarded}
 import org.apache.flinkx.api.{NullMarker, VariableLengthDataType}
 import org.slf4j.{Logger, LoggerFactory}
-
-import java.io.OutputStream
 
 /** Serializer of a case class. It delegates fields serialization to sub-serializers. Handle nullable case class.
   *
@@ -232,12 +231,6 @@ class CaseClassSerializer[T <: Product](
 
 object CaseClassSerializer {
   private val EmptyByteArray: Array[Byte] = new Array(0)
-
-  /** The output of a skipped field: it discards the bytes, so its state holds no data. */
-  private val Discarded: DataOutputView = new DataOutputViewStreamWrapper(new OutputStream {
-    override def write(b: Int): Unit                             = ()
-    override def write(b: Array[Byte], off: Int, len: Int): Unit = ()
-  })
 }
 
 /** [[TypeSerializerSnapshot]] for [[CaseClassSerializer]]. */

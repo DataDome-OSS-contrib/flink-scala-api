@@ -1,6 +1,7 @@
 package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
+import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flink.util.InstantiationUtil
@@ -229,7 +230,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val (snapshot, restored) = deserializeFormerFields(
       classOf[RenamedOverDeclaredDeleted],
       0,
-      ("a", IntSerializer.INSTANCE, 1),
+      ("a", BytePrimitiveArraySerializer.INSTANCE, Array[Byte](1, 2, 3)),
       ("b", IntSerializer.INSTANCE, 2)
     )
 
