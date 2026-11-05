@@ -34,8 +34,8 @@ import scala.jdk.CollectionConverters._
   *
   * The job graph contains no evolution: the companion scan finds the evolving companion in the jars of the job.
   *
-  * Flink restores a keyed state only with a key serializer that is compatible as is: the key type of a keyed stream
-  * cannot evolve, even with the evolution annotations.
+  * Flink restores a keyed state only with a key serializer that is compatible as is: the schema of the key type of a
+  * keyed stream cannot evolve, even with the evolution annotations.
   */
 class EvolutionRestoreTest extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 

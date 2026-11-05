@@ -103,12 +103,14 @@ class Scala3EnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // An enum value without parameters and an enum value with parameters have different serializers
   it should "resolve the schema compatibility of an enum value that gets parameters as incompatible" in {
-    val v0               = evolutionOf(classOf[Gear])
+    val formerEvolution  = evolutionOf(classOf[Gear])
     val formerSerializer = new Scala3EnumSerializer[Gear](
-      evolution = Some(v0),
+      evolution = Some(formerEvolution),
       enumValueNames = Array("Low", "High"),
-      enumValueSerializers =
-        Array[TypeSerializer[?]](new Scala3EnumValueSerializer(v0, "Low"), new Scala3EnumValueSerializer(v0, "High"))
+      enumValueSerializers = Array[TypeSerializer[?]](
+        new Scala3EnumValueSerializer(formerEvolution, "Low"),
+        new Scala3EnumValueSerializer(formerEvolution, "High")
+      )
     )
 
     compatibilityWith[Gear](formerSerializer) shouldBe Symbol("incompatible")

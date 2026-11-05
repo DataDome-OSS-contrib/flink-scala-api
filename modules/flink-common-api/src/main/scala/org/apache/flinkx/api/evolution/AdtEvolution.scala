@@ -60,7 +60,8 @@ sealed class AdtEvolution[T] private[evolution] (
     */
   def plan(formerFieldNames: Option[Array[String]]): Either[Seq[String], Array[MigratedField]] =
     formerFieldNames.map(FieldEvolution.plan(fieldEvolutions, _)) match {
-      case None => Left(Seq("A savepoint before release 2.4.0 has no field names: restore it without schema change"))
+      case None =>
+        Left(Seq("No field names before release 2.4.0: restore this savepoint without a schema change"))
       case Some(Left(failure)) => Left(Seq(failure))
       case Some(Right(fields)) =>
         val failures = checkInstantiation(fields.keySet)

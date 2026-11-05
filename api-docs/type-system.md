@@ -350,10 +350,12 @@ import org.apache.flinkx.api.evolution._
 @deletedClasses(since = 1, throwOnInstance = false, "Purchase")
 @postEvolution(updateAction)
 sealed trait Action
+object Action extends Evolving[Action] { val evolutions = Evolutions[Action] }
 
 @version(1)
 @renamed(since = 1, "View")
 case class Web(ts: Long) extends Action
+object Web extends Evolving[Web] { val evolutions = Evolutions[Web] }
 
 @version(2)
 @deletedFields(since = 1, "unused", "history")
@@ -364,6 +366,7 @@ case class Click(
     @added(since = 2) ts: Long = System.currentTimeMillis(),
     @transformed(since = 1, intToString) sessionId: String
 ) extends Action
+object Click extends Evolving[Click] { val evolutions = Evolutions[Click] }
 
 def intToString(i: Int): String = i.toString
 def updateClick(formerVersion: Int, click: Click): Click =
@@ -384,8 +387,11 @@ In this example:
 > [!NOTE]
 > You do not need the annotation of an obsolete evolution: if its `since` is equal to or lower than the version of all
 > the savepoints that you restore. For example, with `Click`:
-> * with savepoints of version 1, keep only `@version(2)` and `@added(since = 2)`;
-> * with savepoints of version 2 only, you need no annotation, not even `@version(2)`. `Click` then has the version 0.
+> * with savepoints of version 1, keep `@version(2)` and `@added(since = 2)`;
+> * with savepoints of version 2 only, keep only `@version(2)` and the evolving companion.
+>
+> You need `@version` and the evolving companion as long as you restore savepoints. Only a deployment without state can
+> do without them.
 
 
 ### Former class names
@@ -446,6 +452,7 @@ case class Dog(
   name: String,
   @renamed(since = 1, "kind") breed: String
 )
+object Dog extends Evolving[Dog] { val evolutions = Evolutions[Dog] }
 ```
 Then version 2 deletes `breed`. To restore the savepoints of versions 0 and 1, declare the two deletions:
 ```scala mdoc:reset-object
@@ -455,6 +462,7 @@ import org.apache.flinkx.api.evolution._
 @deletedFields(since = 1, "kind")
 @deletedFields(since = 2, "breed")
 case class Dog(name: String)
+object Dog extends Evolving[Dog] { val evolutions = Evolutions[Dog] }
 ```
 
 A class can reuse the former class name of a renamed or deleted class. This class must declare a version equal to or

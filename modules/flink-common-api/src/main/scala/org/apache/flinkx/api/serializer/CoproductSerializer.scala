@@ -192,7 +192,7 @@ object CoproductSerializer {
       } else {
         adapter.readSnapshot(readVersion, in, userCodeClassLoader)
       }
-      // An evolving snapshot subtype gives its current class, the current class of the unversioned subtype otherwise
+      // The evolving snapshot of a subtype gives its current class. Else, the subtype is unversioned: version 0
       subtypeClasses = subtypeNames.zip(adapter.getNestedSerializerSnapshots).map { case (name, snapshot) =>
         currentClassOf(snapshot).getOrElse(Evolutions.get(name, 0, userCodeClassLoader).currentClass)
       }
@@ -202,7 +202,7 @@ object CoproductSerializer {
 
     override private[serializer] def memberNames: Array[String] = subtypeNames
 
-    /** Also when a former subtype name refers to another class: a deleted class, or a class reusing the name. The
+    /** Also when a former subtype name refers to another class: a deleted class, or a class that reuses the name. The
       * classes are compared by name: two class loaders can load the same class.
       */
     override protected def isEvolutionRequired(former: CoproductSerializerSnapshot[T]): Boolean =

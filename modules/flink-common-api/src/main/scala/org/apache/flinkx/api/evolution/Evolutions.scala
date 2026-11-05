@@ -126,7 +126,7 @@ object Evolutions extends EvolutionsFactory {
   private def declarationsOf(companion: Class[_]): Seq[Declaration] =
     try ClassUtil.moduleOf(companion).toSeq.flatMap { case evolving: Evolving[_] => evolving.evolutions.declarations }
     catch {
-      case ex @ (NonFatal(_) | _: LinkageError) => // LinkageError to avoid the Try of the registry to let it through
+      case ex @ (NonFatal(_) | _: LinkageError) => // Also a LinkageError: the Try of the registry does not catch it
         throw new FlinkRuntimeException(s"Cannot build the evolutions of ${companion.getName.stripSuffix("$")}", ex)
     }
 

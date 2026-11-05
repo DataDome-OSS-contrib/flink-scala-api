@@ -104,7 +104,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
    */
 
-  // Animal v0 records the subtype names of Animal v2, but Horse refers to the deleted class in its data
+  // Animal-v0 records the subtype names of Animal at version 2, but Horse refers to the deleted class in its data
   it should "deserialize Animal v0 to null, its subtype being deleted" in {
     testDeserializeFromFile[Animal]("Animal-v0", null)
     compatibilityWithFile[Animal]("Animal-v0") shouldBe Symbol("compatibleAfterMigration")
@@ -399,12 +399,12 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The restored serializer of a deleted class builds no instance: a transform needs the former class, renamed if necessary
   it should "not transform a field whose former type is a deleted class" in {
-    val oldName                               = classOf[Holder].getName.replace("Holder", "Old")
+    val goneName                              = classOf[Holder].getName.replace("Holder", "Gone")
     def former[T <: Product](clazz: Class[T]) = formerField(
       clazz,
       "f",
-      new CaseClassSerializer[FormerOld](
-        new AdtEvolution(oldName, 0, classOf[FormerOld]),
+      new CaseClassSerializer[FormerGone](
+        new AdtEvolution(goneName, 0, classOf[FormerGone]),
         isCaseClassImmutable = true,
         fieldNames = Some(Array("a")),
         scalaFieldSerializers = Array(StringSerializer.INSTANCE)
@@ -413,7 +413,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
     compatibilityWith[Holder](former(classOf[Holder])) shouldBe Symbol("compatibleAfterMigration")
     intercept[DeletedInstanceException](
-      deserializeFormerForm[Holder](former(classOf[Holder]), FormerHolder(FormerOld("x")))
+      deserializeFormerForm[Holder](former(classOf[Holder]), FormerHolder(FormerGone("x")))
     )
     // Without @transformed, the deleted class of the field makes the schema incompatible
     compatibilityWith[HolderKept](former(classOf[HolderKept])) shouldBe Symbol("incompatible")
@@ -802,27 +802,27 @@ object EvolutionTest {
   case class FormerX(x: Int)
 
   /* Holder and HolderKept at version 0
-  case class Holder(f: Old)
-  case class Old(a: String)
+  case class Holder(f: Gone)
+  case class Gone(a: String)
    */
 
   @version(1)
-  @deletedClasses(since = 1, "Old")
-  case class Holder(@transformed(since = 1, oldToFresh) f: Fresh)
+  @deletedClasses(since = 1, "Gone")
+  case class Holder(@transformed(since = 1, goneToFresh) f: Fresh)
   object Holder extends Evolving[Holder] { val evolutions = Evolutions[Holder] }
 
   @version(1)
-  @deletedClasses(since = 1, "Old")
+  @deletedClasses(since = 1, "Gone")
   case class HolderKept(f: Fresh)
   object HolderKept extends Evolving[HolderKept] { val evolutions = Evolutions[HolderKept] }
 
   case class Fresh(b: String)
 
-  def oldToFresh(old: Product): Fresh = Fresh(old.productElement(0).toString)
+  def goneToFresh(gone: Product): Fresh = Fresh(gone.productElement(0).toString)
 
-  // Take the place of Holder and Old at version 0
-  case class FormerHolder(f: FormerOld)
-  case class FormerOld(a: String)
+  // Take the place of Holder and Gone at version 0
+  case class FormerHolder(f: FormerGone)
+  case class FormerGone(a: String)
 
   @version(2)
   case class Bumped(a: String)
