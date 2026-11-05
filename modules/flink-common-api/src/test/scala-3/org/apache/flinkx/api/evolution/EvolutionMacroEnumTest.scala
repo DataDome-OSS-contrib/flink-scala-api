@@ -164,6 +164,14 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
     )
   }
 
+  // An enum value with parameters has the version of its enum: its derivation checks the companion of its enum
+  it should "reject the derivation of an enum value of a versioned enum without evolving companion" in {
+    val errors = scala.compiletime.testing.typeCheckErrors(
+      "{ import org.apache.flinkx.api.auto._; deriveTypeInformation[WrongEnumNotEvolving.Low] }"
+    )
+    errors.map(_.message).mkString should include("WrongEnumNotEvolving declares @version. Its companion must extend")
+  }
+
   /** The serializer of Vehicle at version 0: FormerValue takes the place of its values with parameters. */
   private def formerVehicleSerializer(vehicleName: String): Scala3EnumSerializer[Product] =
     new Scala3EnumSerializer[Product](
@@ -210,6 +218,12 @@ object EvolutionMacroEnumTest {
     @renamed(since = 1, "A") case B
   }
   object Swapped extends Evolving[Swapped] { val evolutions = Evolutions[Swapped] }
+
+  @version(1)
+  enum WrongEnumNotEvolving {
+    case Low(ratio: Int)
+    case High
+  }
 
   enum WrongEnumValueRenamedWithoutVersion {
     @renamed(since = 1, "A") case B

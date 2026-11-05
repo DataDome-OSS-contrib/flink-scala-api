@@ -23,17 +23,18 @@ private[evolution] object EvolutionMacro:
 
     rejectVersionedParameter(symbol)
     rejectVersionedEnumValue(symbol)
-    // At version 0 an ADT has no evolution. An enum value has the version of its enum, which declares its evolutions
-    if versionOf(symbol) > 0 then
+    // An enum value with parameters has the version of its enum, whose companion declares its evolutions
+    val adt     = enumOf(tpe).getOrElse(symbol)
+    val version = versionOf(adt)
+    // At version 0 an ADT has no evolution
+    if version > 0 then
       // A case object declares its own evolutions, or a sealed trait with an evolving companion declares it
-      if symbol.flags.is(Flags.Module) then
-        val declared = declaresEvolutionsOf(tpe, symbol) || tpe.baseClasses.exists(parent =>
-          parent != symbol && parent.flags.is(Flags.Sealed) && hasEvolvingCompanion(parent)
+      if adt.flags.is(Flags.Module) then
+        val declared = declaresEvolutionsOf(tpe, adt) || tpe.baseClasses.exists(parent =>
+          parent != adt && parent.flags.is(Flags.Sealed) && hasEvolvingCompanion(parent)
         )
-        if !declared then report.errorAndAbort(caseObjectNotDeclared(symbol.fullName))
-      else if !hasEvolvingCompanion(symbol) then report.errorAndAbort(companionNotEvolving(symbol.fullName))
-    // An enum value with parameters has no version of its own: its snapshot records the version of its enum
-    val version = versionOf(enumOf(TypeRepr.of[T]).getOrElse(symbol))
+        if !declared then report.errorAndAbort(caseObjectNotDeclared(adt.fullName))
+      else if !hasEvolvingCompanion(adt) then report.errorAndAbort(companionNotEvolving(adt.fullName))
     if version == 0 then rejectEvolution(symbol)
     '{ new Evolvable[T](${ Expr(version) }) }
 
