@@ -628,12 +628,6 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     asScalaStream(javaEnv.fromSource(source, watermarkStrategy, sourceName, typeInfo))
   }
 
-  /** Registers the declared evolutions before the job submission: a wrong declaration stops the submission. */
-  private def checked[A](submit: => A): A = {
-    Evolutions.check()
-    submit
-  }
-
   /** Triggers the program execution. The environment will execute all parts of the program that have resulted in a
     * "sink" operation. Sink operations are for example printing results or forwarding them to a message queue.
     *
@@ -642,7 +636,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     * @return
     *   The result of the job execution, containing elapsed time and accumulators.
     */
-  def execute(): JobExecutionResult = checked(javaEnv.execute())
+  def execute(): JobExecutionResult = Evolutions.checked(javaEnv.execute())
 
   /** Triggers the program execution. The environment will execute all parts of the program that have resulted in a
     * "sink" operation. Sink operations are for example printing results or forwarding them to a message queue.
@@ -652,7 +646,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     * @return
     *   The result of the job execution, containing elapsed time and accumulators.
     */
-  def execute(jobName: String): JobExecutionResult = checked(javaEnv.execute(jobName))
+  def execute(jobName: String): JobExecutionResult = Evolutions.checked(javaEnv.execute(jobName))
 
   /** Register a [[JobListener]] in this environment. The [[JobListener]] will be notified on specific job status
     * changed.
@@ -681,7 +675,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     *   A [[JobClient]] that can be used to communicate with the submitted job, completed on submission succeeded.
     */
   @PublicEvolving
-  def executeAsync(): JobClient = checked(javaEnv.executeAsync())
+  def executeAsync(): JobClient = Evolutions.checked(javaEnv.executeAsync())
 
   /** Triggers the program execution asynchronously. The environment will execute all parts of the program that have
     * resulted in a "sink" operation. Sink operations are for example printing results or forwarding them to a message
@@ -697,7 +691,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     *   A [[JobClient]] that can be used to communicate with the submitted job, completed on submission succeeded.
     */
   @PublicEvolving
-  def executeAsync(jobName: String): JobClient = checked(javaEnv.executeAsync(jobName))
+  def executeAsync(jobName: String): JobClient = Evolutions.checked(javaEnv.executeAsync(jobName))
 
   /** Creates the plan with which the system will execute the program, and returns it as a String using a JSON
     * representation of the execution data flow graph. Note that this needs to be called, before the plan is executed.

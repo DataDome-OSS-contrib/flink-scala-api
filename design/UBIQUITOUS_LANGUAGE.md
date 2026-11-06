@@ -123,7 +123,7 @@ them as the former class name and the former version.
 | Register           | To put the declarations of the evolving companions in the registry. The first lookup, or the submission check, does it.                                      | `registerCompanions`     | declare                    |
 | Companion scan     | The search of the evolving companions in the jars of the class loader of the job, or in the class path of the JVM.                                           | `CompanionScan`          |                            |
 | Lookup             | To get from the registry the ADT evolution of a former class name at a former version.                                                                       | `Evolutions.get`         | resolve                    |
-| Submission check   | The registration that the Scala execution environment does before it submits the job. A wrong declaration then stops the submission, not the first restore.  | `Evolutions.check()`     | startup, job start         |
+| Submission check   | The registration that the Scala execution environment does before it submits the job. A wrong declaration then stops the submission, not the first restore.  | `Evolutions.checked`     | startup, job start         |
 
 ## 7. Flink vocabulary
 

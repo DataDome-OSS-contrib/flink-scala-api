@@ -37,9 +37,14 @@ class StreamExecutionEnvironmentTest extends AnyFlatSpec with Matchers with Inte
 
   // The submission check stops a job with a wrong declaration, before its first restore
   it should "fail to execute a job whose evolutions are declared wrongly" in {
+    import org.apache.flinkx.api.semiauto._
     ConflictingScan.withFixture("sharedFormerName") {
+      val stream = env.fromSequence(1, 3)
       intercept[FormerClassConflictException](env.execute())
       intercept[FormerClassConflictException](env.executeAsync())
+      intercept[FormerClassConflictException](stream.executeAndCollect())
+      intercept[FormerClassConflictException](stream.executeAndCollect(3))
+      intercept[FormerClassConflictException](new DataStreamUtils(stream).collect())
     }
   }
 

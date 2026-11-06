@@ -1,6 +1,6 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.annotation.{Internal, VisibleForTesting}
+import org.apache.flink.annotation.{Internal, PublicEvolving, VisibleForTesting}
 import org.apache.flink.util.FlinkRuntimeException
 import org.apache.flinkx.api.evolution.AdtEvolution.{DeletedEvolution, NoEvolution}
 import org.apache.flinkx.api.evolution.Evolutions.Declaration
@@ -44,7 +44,7 @@ final class Evolutions[T](builders: () => Seq[EvolutionBuilder[_]]) {
   *   - The first lookup in a class loader scans its jars for the evolving companions, initializes them and registers
   *     all their declarations. Any companion can declare a former class name, so the registry needs all of them. A
   *     failed registration fails every lookup.
-  *   - The submission check ([[check]]) registers the declarations when the Scala execution environment submits the
+  *   - The submission check ([[checked]]) registers the declarations when the Scala execution environment submits the
   *     job. A wrong declaration then stops the submission, not the first restore.
   *   - During the restore, each ADT serializer snapshot does a lookup ([[get]]) of the former class name and the former
   *     version that it records. The restored serializer then applies this ADT evolution to the former data.
@@ -58,7 +58,7 @@ final class Evolutions[T](builders: () => Seq[EvolutionBuilder[_]]) {
   * Concurrency: the tasks of a TaskManager restore their state in parallel. The registration takes a lock, and the
   * lookups wait for it to complete. A companion does no lookup during its initialization.
   */
-@Internal
+@PublicEvolving
 object Evolutions extends EvolutionsFactory {
 
   /** What one ADT declares for one class name.
@@ -229,12 +229,16 @@ object Evolutions extends EvolutionsFactory {
       .toOption
       .exists(classOf[Evolving[_]].isAssignableFrom)
 
-  /** Submission check: register the declarations of the evolving companions of the job, from the thread of its main.
+  /** Submission check, then `submit`: register the declarations of the evolving companions of the job, from the thread
+    * of its main. A wrong declaration stops the submission.
     *
     * @throws Throwable
     *   the failure of the registration
     */
-  private[api] def check(): Unit = registryOf(Thread.currentThread.getContextClassLoader).declarations
+  def checked[A](submit: => A, cl: ClassLoader = Thread.currentThread.getContextClassLoader): A = {
+    registryOf(cl).declarations
+    submit
+  }
 
   /** Empty the registries. The next lookup registers the declarations again. */
   @VisibleForTesting
