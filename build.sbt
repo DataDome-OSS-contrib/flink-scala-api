@@ -230,6 +230,61 @@ lazy val mimaSettings = Seq(
     ),
     ProblemFilters.exclude[IncompatibleResultTypeProblem](
       "org.apache.flinkx.api.serializers.cache()scala.collection.concurrent.TrieMap"
+    ),
+    // The ADT serializers take the ADT evolution of their data and the names of their members
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CaseClassSerializer.this"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.CoproductSerializer.this"),
+    ProblemFilters.exclude[IncompatibleMethTypeProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer.this"
+    ),
+    ProblemFilters.exclude[IncompatibleMethTypeProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer#ScalaCaseObjectSerializerSnapshot.this"
+    ),
+    // The case object snapshot holds the ADT evolution of the case object, not its class
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer#ScalaCaseObjectSerializerSnapshot.clazz"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer#ScalaCaseObjectSerializerSnapshot.clazz_="
+    ),
+    // The derivation of an ADT reads its schema version from an implicit Evolvable
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.CommonTaggedDerivation.join"),
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("org.apache.flinkx.api.CommonTaggedDerivation.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TaggedDerivation.split"),
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("org.apache.flinkx.api.TaggedDerivation.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TypeInformationDerivation.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TypeInformationDerivation.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.auto.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.auto.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.semiauto.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.semiauto.split"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializers.join"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializers.split"),
+    // Evolutions.get now resolves the class names that the snapshots record, deleted class names included
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.util.ClassUtil.resolveClassByName"),
+    // Case class field names are in an Array, as in the serializers and their snapshots
+    ProblemFilters.exclude[com.typesafe.tools.mima.core.IncompatibleMethTypeProblem](
+      "org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable"
+    ),
+    // The Scala 3 enum serializers take the ADT evolution of the enum, not its companion module class
+    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializer.Scala3EnumSerializer.this"),
+    ProblemFilters.exclude[IncompatibleMethTypeProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializer.this"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.this"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.enumValueName"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.enumValueName_="
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.companionClass"
+    ),
+    ProblemFilters.exclude[DirectMissingMethodProblem](
+      "org.apache.flinkx.api.serializer.Scala3EnumValueSerializerSnapshot.companionClass_="
     )
   )
 )
@@ -267,7 +322,7 @@ lazy val `flink` = (projectMatrix in file("modules/flink-common-api"))
   )
 
 lazy val `flink-1-api` = (projectMatrix in file("modules/flink-1-api"))
-  .dependsOn(`flink`)
+  .dependsOn(`flink` % "compile->compile;test->test")
   .settings(commonSettings)
   .settings(mimaSettings)
   .customRow(
@@ -281,7 +336,7 @@ lazy val `flink-1-api` = (projectMatrix in file("modules/flink-1-api"))
   )
 
 lazy val `flink-2-api` = (projectMatrix in file("modules/flink-2-api"))
-  .dependsOn(`flink`)
+  .dependsOn(`flink` % "compile->compile;test->test")
   .settings(commonSettings)
   .settings(mimaSettings)
   .customRow(
