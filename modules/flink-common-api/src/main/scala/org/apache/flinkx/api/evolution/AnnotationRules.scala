@@ -17,17 +17,17 @@ private[evolution] object AnnotationRules {
   def allowedOnUnversionedSubtype(annotation: String, version: Int, isEnum: Boolean): Boolean =
     version > 0 && isEnum && annotation == "renamed"
 
-  /** The highest `since` of the given annotation on an ADT, or none for an annotation without `since`. The `since` of a
-    * deleted class counts in the versions of this class, not in the versions of the ADT: it has no upper bound.
+  /** Whether the given annotation on an ADT has a `since`. */
+  def hasSinceOnAdt(annotation: String): Boolean = annotation != "postEvolution"
+
+  /** The highest `since` of the given annotation on an ADT, or none without upper bound. The `since` of a deleted class
+    * counts in the versions of this class, not in the versions of the ADT.
     */
-  def lastSinceOnAdt(annotation: String, version: Int, isEnum: Boolean): Option[Int] = annotation match {
-    case "postEvolution"             => None
-    case "deletedClasses" if !isEnum => Some(Int.MaxValue)
-    case _                           => Some(version)
-  }
+  def lastSinceOnAdt(annotation: String, version: Int, isEnum: Boolean): Option[Int] =
+    if (annotation == "deletedClasses" && !isEnum) None else Some(version)
 
   /** Whether the given `since` applies to data: an evolution with a `since` out of this range never applies to it. */
-  def isSinceAllowed(since: Int, lastVersion: Int): Boolean = since >= 1 && since <= lastVersion
+  def isSinceAllowed(since: Int, lastVersion: Option[Int]): Boolean = since >= 1 && lastVersion.forall(since <= _)
 
   /** The name of the target of a rejected annotation: the ADT or one of its fields. */
   def target(adt: String, field: Option[String], version: Int): String =

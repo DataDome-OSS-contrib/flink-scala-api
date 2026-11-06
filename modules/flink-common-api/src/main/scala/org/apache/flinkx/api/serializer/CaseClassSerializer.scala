@@ -186,11 +186,12 @@ class CaseClassSerializer[T <: Product](
       source.skipBytesToRead(nullPadding.length)
       null.asInstanceOf[T]
     } else {
+      val isKept = isKeptField
       // Read the former fields in their former order
       val formerValues = new Array[AnyRef](sourceArity)
       var i            = 0
       while (i < sourceArity) {
-        if (isKeptField(i)) formerValues(i) = fieldSerializers(i).deserialize(source)
+        if (isKept(i)) formerValues(i) = fieldSerializers(i).deserialize(source)
         else fieldSerializers(i).copy(source, Discarded)
         i += 1
       }

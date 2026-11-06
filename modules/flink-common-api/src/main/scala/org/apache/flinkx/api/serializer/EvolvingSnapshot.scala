@@ -78,7 +78,7 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
   }
 
   /** Why the former snapshot describes another ADT, if it does. Unknown if a snapshot records no class name. */
-  private def otherClass(former: S): Option[String] = (adtEvolution, former.adtEvolution) match {
+  private def otherClass(formerSnapshot: S): Option[String] = (adtEvolution, formerSnapshot.adtEvolution) match {
     case (Some(current), Some(former)) if !EvolvingSnapshot.isSameClass(current, former) =>
       val refersTo = if (isDeletedClass(former.currentClass)) "a deleted class" else former.currentClass.getName
       Some(s"The former class name '${former.formerClassName}' refers to $refersTo")

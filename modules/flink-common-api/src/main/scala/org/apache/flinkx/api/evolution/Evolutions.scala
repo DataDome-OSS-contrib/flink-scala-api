@@ -98,7 +98,7 @@ object Evolutions extends EvolutionsFactory {
     // (ExceptionInInitializerError, LinkageError), and the subtasks that restore in parallel do not scan the jars again
     private lazy val declared: Try[Map[String, Seq[Declaration]]] = {
       val registered = Try(registerCompanions(classLoader))
-      classLoader = null // The value of a weak key must not keep the key to be released
+      classLoader = null // A value of the weak map must not refer to its key: else the map never releases it
       registered
     }
 

@@ -119,7 +119,7 @@ private[evolution] object CompanionScan {
         .toList
     }
 
-  /** Log why the scan skips an entry that it cannot read, as the JVM does. */
+  /** Log why the scan skips an entry that it cannot read, like the JVM. */
   private def skipped(entry: Any, failure: Throwable): Option[Nothing] = {
     log.warn(s"The companion scan skips $entry: $failure")
     None

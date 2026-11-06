@@ -272,7 +272,7 @@ Two words tell the two sides of a restore apart:
 
 ### Built-in compatibility
 
-Since release 2.4.0, these changes need no annotation:
+These changes need no annotation, if release 2.4.0 or higher wrote the savepoint:
 * Case class: reorder the fields.
 * Sealed trait: reorder the subtypes, or add subtypes.
 * Scala 3 enum: reorder the values, or add values.
@@ -497,9 +497,9 @@ object Horse extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
 * A former class name that no class has and no evolution declares stops the restore with a
   `MissingEvolutionException`.
 * A rollback is incompatible if the former version is higher than the current version.
-* A savepoint written before release 2.4.0 records no field names: the restore reads the case class fields by position.
-  The field evolutions and post-evolution mappers cannot apply to them: a case class that declares some for this data is
-  incompatible. Restore it once with release 2.4.0 without a schema change, then take a savepoint.
+* A savepoint written before release 2.4.0 records neither the field names of a case class, nor the class name of a
+  sealed trait or of an enum. Restore it once with release 2.4.0 without a schema change, then take a savepoint. Until
+  then, the restore reads the ADT members by position, and any schema change is incompatible.
 * The evolving ADTs must be in the jar of the job.
 
 ## Compatibility

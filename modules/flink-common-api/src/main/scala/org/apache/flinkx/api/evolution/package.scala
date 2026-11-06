@@ -293,8 +293,9 @@ package object evolution {
     s"The $parameter of @$annotation on $target must be an integer literal"
 
   /** Message of an evolution whose `since` is outside the version range of its ADT. */
-  private[api] def sinceNotAllowed(adt: String, since: Int, version: Int): String =
-    s"An evolution of $adt has since = $since, out of the range 1 to $version. Increase @version or change since"
+  private[api] def sinceNotAllowed(adt: String, since: Int, lastVersion: Option[Int]): String = if (lastVersion.isEmpty)
+    s"An evolution of $adt has since = $since, below 1. Change since"
+  else s"An evolution of $adt has since = $since, out of the range 1 to $lastVersion. Increase @version or change since"
 
   /** Message of an `@added` field without a default value. */
   private[api] def addedFieldWithoutDefault(adt: String, field: String): String =

@@ -201,8 +201,8 @@ private[evolution] object EvolutionMacro:
       owner.annotations.filter(is[EvolutionAnnotation])
     }
 
-    /** Reject a `since` that is not an integer literal, or not from 1 to `lastVersion`. */
-    def checkSince(term: Term, target: String, lastVersion: Int = version): Unit =
+    /** Reject a `since` that is not an integer literal, below 1, or above `lastVersion` if any. */
+    def checkSince(term: Term, target: String, lastVersion: Option[Int] = Some(version)): Unit =
       val since = intArgument(term, "since").getOrElse(report.errorAndAbort(notLiteral(nameOf(term), "since", target)))
       if !AnnotationRules.isSinceAllowed(since, lastVersion) then
         report.errorAndAbort(sinceNotAllowed(symbol.fullName, since, lastVersion))
@@ -219,7 +219,8 @@ private[evolution] object EvolutionMacro:
       evolutionAnnotationsOf(symbol).foreach { term =>
         if !AnnotationRules.allowedOnAdt(nameOf(term), version, isCoproduct) then
           reject(term, AnnotationRules.target(symbol.fullName, None, version))
-        AnnotationRules.lastSinceOnAdt(nameOf(term), version, isEnum).foreach(checkSince(term, symbol.fullName, _))
+        if AnnotationRules.hasSinceOnAdt(nameOf(term)) then
+          checkSince(term, symbol.fullName, AnnotationRules.lastSinceOnAdt(nameOf(term), version, isEnum))
       }
 
       if symbol.annotations.count(is[postEvolution[?]]) > 1 then
