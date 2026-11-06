@@ -75,7 +75,6 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     Evolutions.get(formerName, 0, cl).currentClass shouldBe classOf[DerivedBeforeDeclared]
   }
 
-  // Without a declaration, the restore reads the former data as current data, and no later check finds the error
   it should "fail to restore a former class name that no class has and no companion declares" in {
     val goneName   = "org.example.Gone"
     val serializer = new CaseClassSerializer[Probe](
@@ -90,6 +89,14 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     exception.getMessage should startWith(s"Cannot restore '$goneName' written at version 2: no class has this name")
     exception.getMessage should include("no evolution in the jar of the job declares it")
     exception.getCause shouldBe a[ClassNotFoundException]
+    val unlinkedJob = new ClassLoader(cl) {
+      override def loadClass(name: String, resolve: Boolean): Class[_] =
+        if (name == goneName) throw new NoClassDefFoundError("org/example/MissingParent")
+        else super.loadClass(name, resolve)
+    }
+    val failure = intercept[FlinkRuntimeException](Evolutions.get[Probe](goneName, 2, unlinkedJob))
+    failure.getMessage shouldBe s"Cannot load $goneName"
+    failure.getCause shouldBe a[NoClassDefFoundError]
   }
 
   // A job with a wrong declaration must not restore its state: each lookup reports the same failure

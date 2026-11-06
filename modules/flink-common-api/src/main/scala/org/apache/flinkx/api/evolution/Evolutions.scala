@@ -192,7 +192,9 @@ object Evolutions extends EvolutionsFactory {
     * The first lookup in the given class loader registers the declarations of all its evolving companions.
     *
     * @throws MissingEvolutionException
-    *   if no declaration of the class name includes this version, and the class loader cannot load it
+    *   if no declaration of the class name includes this version, and no class has this name
+    * @throws org.apache.flink.util.FlinkRuntimeException
+    *   if no declaration of the class name includes this version, and its class does not load
     * @throws java.lang.IllegalStateException
     *   if the companion scan did not find the evolving companion of the class, outside the jars of the job
     * @throws Throwable
@@ -205,14 +207,15 @@ object Evolutions extends EvolutionsFactory {
       .map(_.evolutionAt(formerVersion))
       .getOrElse {
         val currentClass = ClassUtil.loadClass(formerClassName, initialize = false, cl) match {
-          case Success(clazz)   => clazz
-          case Failure(failure) =>
+          case Success(clazz)                           => clazz
+          case Failure(failure: ClassNotFoundException) =>
             throw MissingEvolutionException(
               formerClassName,
               formerVersion,
               declarations.lastOption.map(_.lastVersion),
               failure
             )
+          case Failure(failure) => throw failure // The class exists, but does not load: a link error, for example
         }
         // The declarations of a class with an evolving companion are missing only if the scan did not find it
         if (declarations.isEmpty && hasEvolvingCompanion(currentClass, cl))
