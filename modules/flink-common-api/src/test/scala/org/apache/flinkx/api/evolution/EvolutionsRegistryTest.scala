@@ -271,6 +271,22 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     Evolutions.get[Probe](FormerProbe, 0, pathingJob).currentClass shouldBe classOf[Probe]
   }
 
+  // Like the JVM, the scan skips the entries that it cannot read, instead of failing every lookup of the class loader
+  it should "resolve a former name next to a file that is not a jar, a truncated jar and an unreadable directory" in {
+    val notJar    = Files.write(Files.createTempFile("not-a", ".jar"), "not a jar".getBytes)
+    val truncated = Files.createTempFile("truncated", ".jar")
+    new JarOutputStream(Files.newOutputStream(truncated), new Manifest()).close()
+    Files.write(truncated, Files.readAllBytes(truncated).take(10))
+    val classes    = Files.createTempDirectory("classes")
+    val unreadable = Files.createDirectory(classes.resolve("unreadable"))
+    unreadable.toFile.setReadable(false)
+    val jobJar = classOf[Probe].getProtectionDomain.getCodeSource.getLocation
+    val job    = new URLClassLoader(Array(notJar, truncated, classes).map(_.toUri.toURL) :+ jobJar, cl)
+
+    try Evolutions.get[Probe](FormerProbe, 0, job).currentClass shouldBe classOf[Probe]
+    finally unreadable.toFile.setReadable(true)
+  }
+
   // Probe has an evolving companion in a parent class loader, as in the lib directory of the cluster: the scan cannot
   // see it, which must not make its evolutions silently empty
   it should "fail to look up a class whose evolving companion the scan did not find" in {

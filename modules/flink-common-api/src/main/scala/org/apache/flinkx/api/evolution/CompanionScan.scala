@@ -3,9 +3,10 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.shaded.asm9.org.objectweb.asm.ClassReader
 import org.slf4j.{Logger, LoggerFactory}
 
-import java.io.File
+import java.io.{File, IOException}
 import java.net.{URL, URLClassLoader}
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.{FileVisitResult, Files, Path, Paths, SimpleFileVisitor}
 import java.util.jar.{Attributes, JarFile}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -17,7 +18,8 @@ import scala.util.{Try, Using}
   * The evolving companions of a job are in the jars of its class loader: the scan does not read the jars of the parent
   * class loaders, such as the `lib` directory of the cluster. Flink gives a wrapper of this class loader, with the URLs
   * of the class loader that it wraps. Without URLs, the scan reads the class path of the JVM: a job in a MiniCluster,
-  * or a test, has its classes there. Like the JVM, it also reads the jars that the `Class-Path` of a manifest lists.
+  * or a test, has its classes there. Like the JVM, it also reads the jars that the `Class-Path` of a manifest lists,
+  * and skips an entry that it cannot read: a file that is not a jar, a truncated jar, an unreadable directory.
   *
   * A companion can extend [[Evolving]] through a trait or a class of its own. The scan reads only the header of each
   * class file, then its supertypes. It reads each supertype once, and skips the JDK and the Scala library.
@@ -61,39 +63,51 @@ private[evolution] object CompanionScan {
   private def manifestClassPath(root: Path): Seq[Path] =
     if (!Files.isRegularFile(root)) Nil
     else
-      Using.resource(new JarFile(root.toFile)) { jar =>
-        Option(jar.getManifest)
-          .flatMap(manifest => Option(manifest.getMainAttributes.getValue(Attributes.Name.CLASS_PATH)))
-          .toSeq
-          .flatMap(_.split(' ').filter(_.nonEmpty))
-          .flatMap(entry => Try(Paths.get(root.toUri.resolve(entry))).toOption) // The JVM ignores an invalid URL
-      }
+      try
+        Using.resource(new JarFile(root.toFile)) { jar =>
+          Option(jar.getManifest)
+            .flatMap(manifest => Option(manifest.getMainAttributes.getValue(Attributes.Name.CLASS_PATH)))
+            .toSeq
+            .flatMap(_.split(' ').filter(_.nonEmpty))
+            .flatMap(entry => Try(Paths.get(root.toUri.resolve(entry))).toOption) // The JVM ignores an invalid URL
+        }
+      catch { case NonFatal(_) => Nil } // companionsIn skips this root, and logs why
 
   /** The path of a `file` URL, or none if unreadable. Flink gives the jars of `usrlib` as unencoded relative URLs. */
   private def pathOf(url: URL): Option[Path] =
     if (url.getProtocol == "file")
       try Some(Try(Paths.get(url.toURI)).getOrElse(Paths.get(url.getPath))) // Read as the URLClassLoader reads it
-      catch {
-        case NonFatal(failure) =>
-          log.warn(s"The companion scan skips $url: ${failure.getMessage}")
-          None
-      }
+      catch { case NonFatal(failure) => skipped(url, failure) }
     else None
 
   private def companionsIn(root: Path, supertypes: Supertypes): Seq[String] =
-    if (Files.isDirectory(root)) companionsInDirectory(root, supertypes)
-    else if (Files.isRegularFile(root)) companionsInJar(root, supertypes)
-    else Seq.empty
+    try
+      if (Files.isDirectory(root)) companionsInDirectory(root, supertypes)
+      else if (Files.isRegularFile(root)) companionsInJar(root, supertypes)
+      else Seq.empty
+    catch { case NonFatal(failure) => skipped(root, failure).toList }
 
-  private def companionsInDirectory(root: Path, supertypes: Supertypes): Seq[String] =
-    Using.resource(Files.walk(root)) { paths =>
-      paths
-        .iterator()
-        .asScala
-        .filter(path => isCompanionFile(entryName(root, path)) && Files.isRegularFile(path))
-        .flatMap(path => companionNamed(Files.readAllBytes(path), supertypes))
-        .toList
-    }
+  /** The companions of the class directory `root`. An unreadable file or subdirectory does not stop the scan. */
+  private def companionsInDirectory(root: Path, supertypes: Supertypes): Seq[String] = {
+    val companions = mutable.ArrayBuffer.empty[String]
+    Files.walkFileTree(
+      root,
+      new SimpleFileVisitor[Path] {
+        override def visitFile(path: Path, attributes: BasicFileAttributes): FileVisitResult = {
+          if (attributes.isRegularFile && isCompanionFile(entryName(root, path)))
+            try companions ++= companionNamed(Files.readAllBytes(path), supertypes)
+            catch { case failure: IOException => skipped(path, failure) }
+          FileVisitResult.CONTINUE
+        }
+
+        override def visitFileFailed(path: Path, failure: IOException): FileVisitResult = {
+          skipped(path, failure)
+          FileVisitResult.CONTINUE
+        }
+      }
+    )
+    companions.toList
+  }
 
   private def companionsInJar(jar: Path, supertypes: Supertypes): Seq[String] =
     Using.resource(new JarFile(jar.toFile)) { file =>
@@ -104,6 +118,12 @@ private[evolution] object CompanionScan {
         .flatMap(entry => companionNamed(Using.resource(file.getInputStream(entry))(_.readAllBytes()), supertypes))
         .toList
     }
+
+  /** Log why the scan skips an entry that it cannot read, as the JVM does. */
+  private def skipped(entry: Any, failure: Throwable): Option[Nothing] = {
+    log.warn(s"The companion scan skips $entry: $failure")
+    None
+  }
 
   /** The name of a class file in a class directory, as in a jar. */
   private def entryName(root: Path, path: Path): String =
