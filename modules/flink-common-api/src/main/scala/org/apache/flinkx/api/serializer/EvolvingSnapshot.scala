@@ -2,6 +2,7 @@ package org.apache.flinkx.api.serializer
 
 import org.apache.flink.api.common.typeutils.{TypeSerializerSchemaCompatibility, TypeSerializerSnapshot}
 import org.apache.flink.core.memory.{DataInputView, DataOutputView}
+import org.apache.flinkx.api.evolution.AdtEvolution.isDeletedClass
 import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions}
 import org.slf4j.{Logger, LoggerFactory}
 
@@ -58,12 +59,13 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
     case _                                => TypeSerializerSchemaCompatibility.incompatible()
   }
 
-  private def resolveSameKindCompatibility(former: S): TypeSerializerSchemaCompatibility[T] =
-    if (isOtherClass(former)) TypeSerializerSchemaCompatibility.incompatible()
-    else if (former.adtVersion > adtVersion)
+  private def resolveSameKindCompatibility(former: S): TypeSerializerSchemaCompatibility[T] = otherClass(former) match {
+    case Some(reason)                           => incompatible(former, reason)
+    case None if former.adtVersion > adtVersion =>
       incompatible(former, s"Rollback to version $adtVersion. Restore a savepoint of version $adtVersion or lower")
-    else if (isEvolutionRequired(former)) resolveEvolvingCompatibility(former)
-    else resolveStandardCompatibility(former)
+    case None if isEvolutionRequired(former) => resolveEvolvingCompatibility(former)
+    case None                                => resolveStandardCompatibility(former)
+  }
 
   private def resolveEvolvingCompatibility(former: S): TypeSerializerSchemaCompatibility[T] =
     checkMigration(former).fold(TypeSerializerSchemaCompatibility.compatibleAfterMigration[T]())(
@@ -75,11 +77,12 @@ private[serializer] trait EvolvingSnapshot[T, S <: EvolvingSnapshot[T, S]] exten
     TypeSerializerSchemaCompatibility.incompatible()
   }
 
-  /** Whether the former snapshot describes another ADT, which is unknown if a snapshot records no class name. */
-  private def isOtherClass(former: S): Boolean = (adtEvolution, former.adtEvolution) match {
-    case (Some(currentEvolution), Some(formerEvolution)) =>
-      !EvolvingSnapshot.isSameClass(currentEvolution, formerEvolution)
-    case _ => false
+  /** Why the former snapshot describes another ADT, if it does. Unknown if a snapshot records no class name. */
+  private def otherClass(former: S): Option[String] = (adtEvolution, former.adtEvolution) match {
+    case (Some(current), Some(former)) if !EvolvingSnapshot.isSameClass(current, former) =>
+      val refersTo = if (isDeletedClass(former.currentClass)) "a deleted class" else former.currentClass.getName
+      Some(s"The former class name '${former.formerClassName}' refers to $refersTo")
+    case _ => None
   }
 
 }
