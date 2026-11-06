@@ -11,6 +11,7 @@ import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.lang.ref.WeakReference
 import java.net.{URL, URLClassLoader}
 import java.nio.file.{Files, Paths}
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
@@ -237,6 +238,23 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
     val resolved = Evolutions.get[Any](FormerProbe, 0, wrapper).currentClass
     resolved shouldNot be(classOf[Probe])
     resolved.getClassLoader shouldBe otherJob
+  }
+
+  // In the lib directory of the cluster, the registry outlives the jobs: it must release the class loader of each one
+  it should "release the class loader of a job after the job drops the wrapper of its class loader" in {
+    def lookUpInJob(): WeakReference[ClassLoader] = {
+      val jobJar   = classOf[Probe].getProtectionDomain.getCodeSource.getLocation
+      val otherJob = new JobClassLoader(Array(jobJar))
+      Evolutions.get[Any](FormerProbe, 0, new SafetyNetLikeClassLoader(otherJob, jobJar))
+      new WeakReference(otherJob)
+    }
+    val released = lookUpInJob()
+
+    // A lookup of another job removes the registries of the released wrappers
+    val isReleased = Iterator.continually {
+      System.gc(); Evolutions.get[Probe](FormerProbe, 0, cl); released.get == null
+    }
+    isReleased.take(50).exists(identity) shouldBe true
   }
 
   // IntelliJ shortens a long class path to a jar whose manifest lists the class path, as the JVM reads it

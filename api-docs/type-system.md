@@ -500,8 +500,7 @@ object Horse extends Evolving[Horse] { val evolutions = Evolutions[Horse] }
 * A savepoint written before release 2.4.0 records no field names: the restore reads the case class fields by position.
   The field evolutions and post-evolution mappers cannot apply to them: a case class that declares some for this data is
   incompatible. Restore it once with release 2.4.0 without a schema change, then take a savepoint.
-* The evolving ADTs must be in the jar of the job. If `flink-scala-api` is in the `lib` directory of the cluster, the
-  registry then keeps the class loaders of the stopped jobs.
+* The evolving ADTs must be in the jar of the job.
 
 ## Compatibility
 

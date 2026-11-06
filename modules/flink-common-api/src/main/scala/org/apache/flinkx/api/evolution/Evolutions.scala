@@ -7,7 +7,7 @@ import org.apache.flinkx.api.evolution.Evolutions.Declaration
 import org.apache.flinkx.api.serializer.ConstructorCompat
 import org.apache.flinkx.api.util.ClassUtil
 
-import scala.collection.concurrent
+import java.util
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -53,8 +53,7 @@ final class Evolutions[T](builders: () => Seq[EvolutionBuilder[_]]) {
   * [[EvolutionBuilder.build]].
   *
   * Packaging: each class loader has its own registry, so a job never reads the declarations of another job. The
-  * evolving ADTs must be in the application jar. If `flink-scala-api` is in the `lib` directory of the cluster, the
-  * registry then keeps the class loaders of the stopped jobs.
+  * evolving ADTs must be in the application jar.
   *
   * Concurrency: the tasks of a TaskManager restore their state in parallel. The registration takes a lock, and the
   * lookups wait for it to complete. A companion does no lookup during its initialization.
@@ -89,14 +88,19 @@ object Evolutions extends EvolutionsFactory {
   }
 
   /** One registry per class loader: a class name refers to the class of the job that does the lookup */
-  private val registries: concurrent.Map[ClassLoader, Registry] = concurrent.TrieMap.empty
+  // The class loader of the job is a wrapper, dropped when the job stops: the weak key then releases the registry
+  private val registries = new util.WeakHashMap[ClassLoader, Registry]()
 
   /** The declarations of the evolving companions of one class loader, registered at the first lookup. */
-  private final class Registry(classLoader: ClassLoader) {
+  private final class Registry(private var classLoader: ClassLoader) {
 
     // Every lookup fails with the first failure: only the first initialization of a companion gives the real cause
     // (ExceptionInInitializerError, LinkageError), and the subtasks that restore in parallel do not scan the jars again
-    private lazy val declared: Try[Map[String, Seq[Declaration]]] = Try(registerCompanions(classLoader))
+    private lazy val declared: Try[Map[String, Seq[Declaration]]] = {
+      val registered = Try(registerCompanions(classLoader))
+      classLoader = null // The value of a weak key must not keep the key to be released
+      registered
+    }
 
     def declarations: Map[String, Seq[Declaration]] = declared.get
 
@@ -104,7 +108,7 @@ object Evolutions extends EvolutionsFactory {
 
   /** The registry of the given class loader, created at the first lookup. */
   private def registryOf(classLoader: ClassLoader): Registry =
-    registries.getOrElseUpdate(classLoader, new Registry(classLoader))
+    registries.synchronized(registries.computeIfAbsent(classLoader, new Registry(_)))
 
   /** Initialize the evolving companions of the class loader, and register all their declarations.
     *
@@ -234,6 +238,6 @@ object Evolutions extends EvolutionsFactory {
 
   /** Empty the registries. The next lookup registers the declarations again. */
   @VisibleForTesting
-  private[api] def reset(): Unit = registries.clear()
+  private[api] def reset(): Unit = registries.synchronized(registries.clear())
 
 }
