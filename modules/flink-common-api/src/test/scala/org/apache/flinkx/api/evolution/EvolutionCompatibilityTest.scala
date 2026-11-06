@@ -159,6 +159,10 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
     )
 
     compatibilityWith[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol("incompatible")
+    val failure = intercept[MigrationException](
+      deserializeFormerForm[AddedFieldWithoutAnnotation](formerSerializer, AddedFieldWithoutAnnotation("a"))
+    )
+    failure.getMessage should include("Field 'b' is not in the former data. Declare @added")
   }
 
   it should "resolve the schema compatibility of a sealed trait with a subtype deleted without annotation as incompatible" in {

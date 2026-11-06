@@ -31,7 +31,7 @@ private[api] trait TypeInformationDerivation {
         val clazz      = classTag[T].runtimeClass.asInstanceOf[Class[T]]
         val fieldNames = ctx.parameters.map(_.label).toArray
 
-        val evolution = new NoEvolution(clazz, implicitly[Evolvable[T]].version, fieldNames)
+        val evolution = new NoEvolution(clazz, implicitly[Evolvable[T]].version, Some(fieldNames))
 
         val serializer = if (typeOf[T].typeSymbol.isModuleClass) {
           new ScalaCaseObjectSerializer[T](evolution)

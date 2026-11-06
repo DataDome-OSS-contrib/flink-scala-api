@@ -152,14 +152,14 @@ object AdtEvolution {
   }
 
   /** ADT evolution of an ADT that declares no evolution. It only migrates a case class whose fields are reordered. */
-  private[api] final class NoEvolution[T](currentClass: Class[T], version: Int, fieldNames: Array[String] = Array.empty)
-      extends AdtEvolution(currentClass.getName, version, currentClass, fieldNames) {
+  private[api] final class NoEvolution[T](
+      currentClass: Class[T],
+      version: Int,
+      fieldNames: Option[Array[String]] = None
+  ) extends AdtEvolution(currentClass.getName, version, currentClass, fieldNames.getOrElse(Array.empty)) {
 
     override def isAsIs(formerFieldNames: Option[Array[String]]): Boolean =
-      // Only reordered fields migrate: an added or a deleted field keeps the standard resolution
-      formerFieldNames.forall(names =>
-        names.length != currentFieldNames.length || names.sameElements(currentFieldNames)
-      )
+      fieldNames.isEmpty || super.isAsIs(formerFieldNames)
 
   }
 

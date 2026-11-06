@@ -17,8 +17,8 @@ class ScalaCaseClassSerializerSnapshotTest extends AnyFlatSpec with Matchers {
   }
 
   "resolveSchemaCompatibility" should "be compatibleAsIs when the schema is unchanged" in {
-    val registered = serializerOf(stringSer).snapshotConfiguration()
-    val restored   = savepointed[Evolved](serializerOf(stringSer))
+    val registered = serializerOf(stringSer, intSer).snapshotConfiguration()
+    val restored   = savepointed[Evolved](serializerOf(stringSer, intSer))
 
     registered.resolveSchemaCompatibility(restored) shouldBe Symbol("compatibleAsIs")
   }

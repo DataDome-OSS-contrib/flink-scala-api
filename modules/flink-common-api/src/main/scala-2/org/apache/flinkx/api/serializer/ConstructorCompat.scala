@@ -28,15 +28,15 @@ private[serializer] trait ConstructorCompat {
     (args: Array[AnyRef]) => constructor.apply(args: _*).asInstanceOf[T]
   }
 
-  /** Names of the constructor parameters that [[lookupConstructor]] uses for the given class, in their order. Empty if
+  /** Names of the constructor parameters that [[lookupConstructor]] uses for the given class, in their order. None if
     * Scala reflection cannot read them.
     */
-  final def lookupFieldNames(cls: Class[_]): Array[String] =
+  final def lookupFieldNames(cls: Class[_]): Option[Array[String]] =
     try {
       val classSymbol = universe.runtimeMirror(cls.getClassLoader).classSymbol(cls)
-      primaryConstructorOf(classSymbol).paramLists.flatten.map(_.name.decodedName.toString).toArray
+      Some(primaryConstructorOf(classSymbol).paramLists.flatten.map(_.name.decodedName.toString).toArray)
     } catch {
-      case NonFatal(_) => Array.empty
+      case NonFatal(_) => None
     }
 
   @nowarn("msg=eliminated by erasure")

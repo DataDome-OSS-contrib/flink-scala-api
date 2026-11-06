@@ -19,15 +19,16 @@ private[serializer] trait ConstructorCompat:
       else constructor.newInstance(args*).asInstanceOf[T]
     }
 
-  /** Names of the constructor parameters that [[lookupConstructor]] uses for the given class, in their order. Empty if
+  /** Names of the constructor parameters that [[lookupConstructor]] uses for the given class, in their order. None if
     * the class file does not record them.
     */
-  final def lookupFieldNames(cls: Class[?]): Array[String] =
+  final def lookupFieldNames(cls: Class[?]): Option[Array[String]] =
     try
       val parameters = constructorOf(cls).getParameters
-      if parameters.forall(_.isNamePresent) then parameters.map(parameter => NameTransformer.decode(parameter.getName))
-      else Array.empty
-    catch case NonFatal(_) => Array.empty
+      Option.when(parameters.forall(_.isNamePresent))(
+        parameters.map(parameter => NameTransformer.decode(parameter.getName))
+      )
+    catch case NonFatal(_) => None
 
   // Types of parameters can fail to match when (un)boxing is used.
   // Say you have a class `final case class Foo(a: String, b: Int)`.

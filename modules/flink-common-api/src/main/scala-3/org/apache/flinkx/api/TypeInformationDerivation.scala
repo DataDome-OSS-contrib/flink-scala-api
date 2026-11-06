@@ -38,7 +38,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
         val fieldNames = ctx.parameters.map(_.label).toArray
 
-        val evolution = new NoEvolution(clazz, evolvable.version, fieldNames)
+        val evolution = new NoEvolution(clazz, evolvable.version, Some(fieldNames))
 
         val serializer =
           if typeTag.isEnum then new Scala3EnumValueSerializer[T & Product](evolution, ctx.typeInfo.short)
