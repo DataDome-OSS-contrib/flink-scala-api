@@ -2,12 +2,13 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flinkx.api.TestUtils
-import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.TestUtils.{evolutionOf, formerCaseClassSerializer}
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.AdtEvolution.NoEvolution
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
 import org.apache.flinkx.api.evolution.EvolutionTest._
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
+import org.apache.flinkx.api.util.ClassUtil.resolveFormerClassName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -17,15 +18,8 @@ import org.scalatest.matchers.should.Matchers
 class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils {
 
   /** The restored serializer of Click-v0.snapshot, with the ADT evolution of `T` for the data written at version 0. */
-  private def clickV0As[T <: Product](clazz: Class[T]): CaseClassSerializer[T] = {
-    val clickV0 = restoreSerializerFromFile[Click]("Click-v0").asInstanceOf[CaseClassSerializer[Click]]
-    new CaseClassSerializer[T](
-      evolution = evolutionOf(clazz),
-      isCaseClassImmutable = clickV0.isCaseClassImmutable,
-      fieldNames = clickV0.fieldNames,
-      scalaFieldSerializers = clickV0.getFieldSerializers.asInstanceOf[Array[TypeSerializer[_]]]
-    )
-  }
+  private def clickV0As[T <: Product](clazz: Class[T]): CaseClassSerializer[T] =
+    EvolutionTest.clickV0As(restoreSerializerFromFile[Click]("Click-v0"), clazz)
 
   it should "resolve the schema compatibility of Click v0 to Click v3 as compatible after migration" in {
     compatibilityWithFile[Click]("Click-v0") shouldBe Symbol("compatibleAfterMigration")
@@ -43,12 +37,11 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
   // The lookup gives the current class of the former class name, so the case class is compared with itself
   it should "resolve the schema compatibility of a renamed case class as compatible after migration" in {
     // No class has the former class name now: only the former snapshot records it
-    val formerName       = classOf[RenamedCaseClass].getName.replace("RenamedCaseClass", "FormerRenamedCaseClass")
-    val formerSerializer = new CaseClassSerializer[RenamedCaseClass](
-      evolution = new AdtEvolution(formerName, 0, classOf[RenamedCaseClass]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("a", "deleted")),
-      scalaFieldSerializers = Array(infoToSer[String], infoToSer[String])
+    val formerName       = resolveFormerClassName("FormerRenamedCaseClass", classOf[RenamedCaseClass])
+    val formerSerializer = formerCaseClassSerializer[RenamedCaseClass](
+      new AdtEvolution(formerName, 0, classOf[RenamedCaseClass]),
+      "a"       -> infoToSer[String],
+      "deleted" -> infoToSer[String]
     )
 
     compatibilityWith[RenamedCaseClass](formerSerializer) shouldBe Symbol("compatibleAfterMigration")
@@ -86,11 +79,10 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
 
   // The migration never converts an ADT to an unrelated ADT, even if the evolutions make their schemas identical
   it should "resolve the schema compatibility of an unrelated case class as incompatible" in {
-    val formerSerializer = new CaseClassSerializer[UnrelatedFormerCaseClass](
-      evolution = evolutionOf(classOf[UnrelatedFormerCaseClass]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("a", "deleted")),
-      scalaFieldSerializers = Array(infoToSer[String], infoToSer[String])
+    val formerSerializer = formerCaseClassSerializer[UnrelatedFormerCaseClass](
+      evolutionOf(classOf[UnrelatedFormerCaseClass]),
+      "a"       -> infoToSer[String],
+      "deleted" -> infoToSer[String]
     )
 
     compatibilityWith[UnrelatedCurrentCaseClass](formerSerializer) shouldBe Symbol("incompatible")
@@ -133,17 +125,13 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
 
   it should "resolve the schema compatibility of an evolved case class with an incompatible nested field as incompatible" in {
     // The outer case class has a rename, and the type of its nested field has one more field without @added
-    val formerNestedSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
-      evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("a")),
-      scalaFieldSerializers = Array(infoToSer[String])
+    val formerNestedSerializer = formerCaseClassSerializer[AddedFieldWithoutAnnotation](
+      evolutionOf(classOf[AddedFieldWithoutAnnotation]),
+      "a" -> infoToSer[String]
     )
-    val formerSerializer = new CaseClassSerializer[OuterEvolvedWithNested](
-      evolution = evolutionOf(classOf[OuterEvolvedWithNested]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("formerNested")),
-      scalaFieldSerializers = Array(formerNestedSerializer)
+    val formerSerializer = formerCaseClassSerializer[OuterEvolvedWithNested](
+      evolutionOf(classOf[OuterEvolvedWithNested]),
+      "formerNested" -> formerNestedSerializer
     )
 
     compatibilityWith[OuterEvolvedWithNested](formerSerializer) shouldBe Symbol("incompatible")
@@ -151,11 +139,9 @@ class EvolutionCompatibilityTest extends AnyFlatSpec with Matchers with TestUtil
 
   // Without @added, the migration does not use the default value of the case class: the evolution must be declared
   it should "resolve the schema compatibility of a case class with a field added without annotation as incompatible" in {
-    val formerSerializer = new CaseClassSerializer[AddedFieldWithoutAnnotation](
-      evolution = evolutionOf(classOf[AddedFieldWithoutAnnotation]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("a")),
-      scalaFieldSerializers = Array(infoToSer[String])
+    val formerSerializer = formerCaseClassSerializer[AddedFieldWithoutAnnotation](
+      evolutionOf(classOf[AddedFieldWithoutAnnotation]),
+      "a" -> infoToSer[String]
     )
 
     compatibilityWith[AddedFieldWithoutAnnotation](formerSerializer) shouldBe Symbol("incompatible")

@@ -4,10 +4,11 @@ import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnap
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flinkx.api.TestUtils
-import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.TestUtils.{evolutionOf, formerCaseClassSerializer}
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.serializer.CoproductSerializer.CoproductSerializerSnapshot
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer}
+import org.apache.flinkx.api.util.ClassUtil.resolveFormerClassName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -31,7 +32,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The snapshot of a user type information records no class name: the deleted subtype has the version 0 too
   it should "migrate a deleted unversioned subtype under a sealed trait of a higher version" in {
-    val runtName          = classOf[Dog].getName.replace("Dog", "Runt")
+    val runtName          = resolveFormerClassName("Runt", classOf[Dog])
     val userTypeRuntTrait = formerTrait(classOf[Litter], 2, (runtName, classOf[String], StringSerializer.INSTANCE))
 
     deserializeFormerForm[Litter](formerLitter, FormerRunt("Tiny")) shouldBe null
@@ -40,7 +41,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // Herd keeps its version: the rename of its subtype counts only in the versions of the subtype
   it should "migrate a renamed subtype under an unchanged sealed trait" in {
-    val foalName         = classOf[Colt].getName.replace("Colt", "Foal")
+    val foalName         = resolveFormerClassName("Foal", classOf[Colt])
     val formerSerializer =
       formerTrait(classOf[Herd], 1, (foalName, classOf[FormerCaseClass], formerCaseClass(foalName, 0)))
 
@@ -49,7 +50,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   it should "migrate a renamed subtype of a version higher than the one of its sealed trait" in {
-    val lambName         = classOf[Sheep].getName.replace("Sheep", "Lamb")
+    val lambName         = resolveFormerClassName("Lamb", classOf[Sheep])
     val formerSerializer =
       formerTrait(classOf[Flock], 1, (lambName, classOf[FormerCaseClass], formerCaseClass(lambName, 3)))
 
@@ -59,7 +60,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // Ram had the version 2: its deletion counts in its own versions, above the version of Flock
   it should "migrate a deleted versioned subtype" in {
-    val ramName          = classOf[Sheep].getName.replace("Sheep", "Ram")
+    val ramName          = resolveFormerClassName("Ram", classOf[Sheep])
     val formerSerializer =
       formerTrait(classOf[Flock], 1, (ramName, classOf[FormerCaseClass], formerCaseClass(ramName, 2)))
 
@@ -68,7 +69,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // Before release 2.4.0, the snapshot format version 2 records the subtype names, then the snapshots of the subtypes
   it should "migrate a renamed subtype from a snapshot of format version 2" in {
-    val puppyName = classOf[Dog].getName.replace("Dog", "Puppy")
+    val puppyName = resolveFormerClassName("Puppy", classOf[Dog])
     val puppy     = new CaseClassSerializer[Product](
       new AdtEvolution(puppyName, 0, classOf[Product]),
       isCaseClassImmutable = true,
@@ -116,7 +117,7 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   it should "tell the last version that the evolutions declare for a former class name" in {
-    val puppyName = classOf[Dog].getName.replace("Dog", "Puppy")
+    val puppyName = resolveFormerClassName("Puppy", classOf[Dog])
     val exception = intercept[MissingEvolutionException](Evolutions.get(puppyName, 1, getClass.getClassLoader))
     exception.getMessage shouldBe s"Cannot restore '$puppyName' written at version 1: the evolutions declare this class" +
       " name up to version 0. Declare its @renamed or @deletedClasses since a version above 1"
@@ -124,9 +125,9 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   /** The serializer of Litter at version 2. The stand-in classes take the place of its former subtypes. */
   private def formerLitter: TypeSerializer[AnyRef] = {
-    val puppyName  = classOf[Dog].getName.replace("Dog", "Puppy")
-    val strayName  = classOf[Dog].getName.replace("Dog", "Stray$")
-    val runtName   = classOf[Dog].getName.replace("Dog", "Runt")
+    val puppyName  = resolveFormerClassName("Puppy", classOf[Dog])
+    val strayName  = resolveFormerClassName("Stray$", classOf[Dog])
+    val runtName   = resolveFormerClassName("Runt", classOf[Dog])
     val caseObject = new ScalaCaseObjectSerializer[AnyRef](
       new AdtEvolution(strayName, 0, FormerCaseObject.getClass.asInstanceOf[Class[AnyRef]])
     )
@@ -156,11 +157,9 @@ class SubtypeVersionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   /** The serializer of a former case class with one String field, written at `version` under `formerClassName`. */
   private def formerCaseClass(formerClassName: String, version: Int): TypeSerializer[_] =
-    new CaseClassSerializer[Product](
+    formerCaseClassSerializer[Product](
       new AdtEvolution(formerClassName, version, classOf[Product]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("name")),
-      scalaFieldSerializers = Array(StringSerializer.INSTANCE)
+      "name" -> StringSerializer.INSTANCE
     )
 
 }

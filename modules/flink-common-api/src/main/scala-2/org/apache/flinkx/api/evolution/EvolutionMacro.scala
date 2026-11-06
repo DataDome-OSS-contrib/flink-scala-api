@@ -91,7 +91,7 @@ private[api] object EvolutionMacro {
     parameters
       .find(parameter => isVersioned(c)(parameter))
       .foreach(parameter =>
-        c.abort(c.enclosingPosition, notAllowed("version", s"$symbol.${parameter.name.decodedName.toString}"))
+        c.abort(c.enclosingPosition, versionOnField(symbol.fullName, parameter.name.decodedName.toString))
       )
 
   /** Reject an evolution annotation on an ADT without version, or on its fields: no evolving companion checks them. */
@@ -106,23 +106,25 @@ private[api] object EvolutionMacro {
       }
     }
 
+  /** The first annotation of the given symbol that satisfies `p`, or none if its annotations do not load. */
+  private def findAnnotation(c: blackbox.Context)(symbol: c.Symbol)(
+      p: c.universe.Annotation => Boolean
+  ): Option[c.universe.Annotation] =
+    try {
+      symbol.info // Forces the symbol: else its annotations are not loaded
+      symbol.annotations.find(p)
+    } catch { case NonFatal(_) => None }
+
   /** The name of the first evolution annotation of the given symbol, if it has one. */
   private def evolutionAnnotationOf(c: blackbox.Context)(symbol: c.Symbol): Option[String] = {
     import c.universe._
-    try {
-      symbol.info // Forces the symbol: else its annotations are not loaded
-      symbol.annotations
-        .find(_.tree.tpe <:< typeOf[EvolutionAnnotation])
-        .map(_.tree.tpe.typeSymbol.name.decodedName.toString)
-    } catch { case NonFatal(_) => None }
+    findAnnotation(c)(symbol)(_.tree.tpe <:< typeOf[EvolutionAnnotation])
+      .map(_.tree.tpe.typeSymbol.name.decodedName.toString)
   }
 
   /** Whether the given symbol declares a schema version of its own. */
   private def isVersioned(c: blackbox.Context)(symbol: c.Symbol): Boolean =
-    try {
-      symbol.info // Forces the symbol: else its annotations are not loaded
-      symbol.annotations.exists(_.tree.tpe.typeSymbol == versionSymbol(c))
-    } catch { case NonFatal(_) => false }
+    findAnnotation(c)(symbol)(_.tree.tpe.typeSymbol == versionSymbol(c)).isDefined
 
   /** The schema version that the `@version` of the given symbol declares, or 0 without `@version`. Rejects a version
     * that is negative or not an integer literal.
@@ -212,7 +214,7 @@ private[api] object EvolutionMacro {
       }
 
       if (symbol.annotations.count(annotation => is(annotation, PostEvolution)) > 1) {
-        c.abort(c.enclosingPosition, notAllowed("postEvolution", s"${symbol.fullName} twice"))
+        c.abort(c.enclosingPosition, postEvolutionTwice(symbol.fullName))
       }
 
       parameters.foreach { parameter =>

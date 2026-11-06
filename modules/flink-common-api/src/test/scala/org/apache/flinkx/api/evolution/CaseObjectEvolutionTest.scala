@@ -3,9 +3,10 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.common.typeutils.base.IntSerializer
 import org.apache.flinkx.api.TestUtils
-import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.TestUtils.{evolutionOf, formerCaseClassSerializer}
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ScalaCaseObjectSerializer}
+import org.apache.flinkx.api.serializer.{CoproductSerializer, ScalaCaseObjectSerializer}
+import org.apache.flinkx.api.util.ClassUtil.resolveFormerClassName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -17,7 +18,7 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
   import CaseObjectEvolutionTest._
 
   /** The class name of the class `name` next to Litter. */
-  private def named(name: String): String = classOf[Litter].getName.replace("Litter", name)
+  private def named(name: String): String = resolveFormerClassName(name, classOf[Litter])
 
   /** The former class name of the case object `name`, as its snapshot records it. */
   private def recorded(name: String): String = named(s"$name$$")
@@ -78,11 +79,9 @@ class CaseObjectEvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
       subtypeClasses = Array[Class[_]](classOf[FormerOn], Off.getClass),
       subtypeNames = Array(named("On"), Off.getClass.getName),
       subtypeSerializers = Array[TypeSerializer[_]](
-        new CaseClassSerializer[FormerOn](
+        formerCaseClassSerializer[FormerOn](
           new AdtEvolution(named("On"), 0, classOf[FormerOn]),
-          isCaseClassImmutable = true,
-          fieldNames = Some(Array("level")),
-          scalaFieldSerializers = Array(IntSerializer.INSTANCE)
+          "level" -> IntSerializer.INSTANCE
         ),
         new ScalaCaseObjectSerializer[Off.type](evolutionOf(Off.getClass.asInstanceOf[Class[Off.type]]))
       )

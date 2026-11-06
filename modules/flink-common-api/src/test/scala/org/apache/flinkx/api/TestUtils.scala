@@ -87,6 +87,12 @@ trait TestUtils extends Matchers with Inspectors {
   def compatibilityWith[T: TypeSerializer](formerSerializer: TypeSerializer[_]): TypeSerializerSchemaCompatibility[T] =
     implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(savepointed[T](formerSerializer))
 
+  /** Resolves the schema compatibility of the current serializer with the given former snapshot. */
+  def compatibilityWithSnapshot[T: TypeSerializer](
+      formerSnapshot: TypeSerializerSnapshot[T]
+  ): TypeSerializerSchemaCompatibility[T] =
+    implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(formerSnapshot)
+
   /** Resolves the schema compatibility of the current serializer with the former snapshot of the given file. */
   def compatibilityWithFile[T: TypeSerializer](fileName: String): TypeSerializerSchemaCompatibility[T] =
     implicitly[TypeSerializer[T]].snapshotConfiguration().resolveSchemaCompatibility(snapshotFromFile[T](fileName))
@@ -399,5 +405,19 @@ object TestUtils {
   /** The ADT evolution of the data of `clazz` written at `version`, as a former snapshot looks it up. */
   def evolutionOf[T](clazz: Class[T], version: Int = 0): AdtEvolution[T] =
     Evolutions.get[T](clazz.getName, version, clazz.getClassLoader)
+
+  /** The serializer of a former case class, written under the class name and at the version of `evolution`. The fields
+    * are in their former order, with their names.
+    */
+  def formerCaseClassSerializer[T <: Product](
+      evolution: AdtEvolution[T],
+      fields: (String, TypeSerializer[_])*
+  ): CaseClassSerializer[T] =
+    new CaseClassSerializer[T](
+      evolution,
+      isCaseClassImmutable = true,
+      Some(fields.map(_._1).toArray),
+      fields.map(_._2).toArray
+    )
 
 }

@@ -4,9 +4,10 @@ import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flinkx.api.TestUtils
-import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.TestUtils.{evolutionOf, formerCaseClassSerializer}
 import org.apache.flinkx.api.auto.*
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, Scala3EnumSerializer, Scala3EnumValueSerializer}
+import org.apache.flinkx.api.serializer.{Scala3EnumSerializer, Scala3EnumValueSerializer}
+import org.apache.flinkx.api.util.ClassUtil.resolveFormerClassName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -29,7 +30,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // A deleted value can have parameters, and then a class of its own in each name of its enum
   it should "declare the enum, the former name it was renamed from and the class names of its deleted value" in {
-    val formerName = classOf[FailureCategory].getName.replace("FailureCategory", "FailureType")
+    val formerName = resolveFormerClassName("FailureType", classOf[FailureCategory])
     FailureCategory.evolutions.declarations.map(_.className).toSet shouldBe Set(
       classOf[FailureCategory].getName,
       formerName,
@@ -113,7 +114,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
   // The class name of an enum value with parameters contains the name of its enum. A rename alone reads as is
   it should "migrate an enum value with parameters of a renamed enum" in {
     given TypeSerializer[Fleet] = infoToSer[Fleet]
-    val navyName                = classOf[Fleet].getName.replace("Fleet", "Navy")
+    val navyName                = resolveFormerClassName("Navy", classOf[Fleet])
     val formerSerializer        = new Scala3EnumSerializer[Product](
       evolution = Some(Evolutions.get(navyName, 0, getClass.getClassLoader)),
       enumValueNames = Array("Ship"),
@@ -135,7 +136,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The migration skips the deleted field: it builds no value of the deleted enum. A state of the deleted enum reads it
   it should "migrate a case class whose deleted field holds a value of a deleted enum" in {
-    val levelName            = classOf[Logged].getName.replace("Logged", "Level")
+    val levelName            = resolveFormerClassName("Level", classOf[Logged])
     val (snapshot, restored) = deserializeFormerFields(
       classOf[Logged],
       0,
@@ -144,9 +145,7 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
     )
 
     restored shouldBe Logged("a")
-    infoToSer[Logged].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Logged](snapshot) shouldBe Symbol("compatibleAfterMigration")
     val deletedLevel = lowHigh(Evolutions.get[FormerLevel](levelName, 0, getClass.getClassLoader))
     val failure      =
       intercept[DeletedInstanceException](deletedLevel.deserialize(new DataInputDeserializer(Array[Byte](1))))
@@ -186,11 +185,9 @@ class EvolutionMacroEnumTest extends AnyFlatSpec with Matchers with TestUtils {
 
   /** The serializer of a former enum value with one Int parameter, whose snapshot records `formerClassName`. */
   private def formerValueSerializer(formerClassName: String, field: String): TypeSerializer[?] =
-    new CaseClassSerializer[FormerValue](
-      evolution = new AdtEvolution(formerClassName, 0, classOf[FormerValue]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array(field)),
-      scalaFieldSerializers = Array(IntSerializer.INSTANCE)
+    formerCaseClassSerializer[FormerValue](
+      new AdtEvolution(formerClassName, 0, classOf[FormerValue]),
+      field -> IntSerializer.INSTANCE
     )
 
 }

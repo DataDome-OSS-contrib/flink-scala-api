@@ -3,10 +3,10 @@ package org.apache.flinkx.api.evolution
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.common.typeutils.base.{IntSerializer, StringSerializer}
 import org.apache.flinkx.api.TestUtils
-import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.TestUtils.{evolutionOf, formerCaseClassSerializer}
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.BuiltInCompatibilityTest._
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer}
+import org.apache.flinkx.api.serializer.CoproductSerializer
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -23,9 +23,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
       )
 
     restored shouldBe Pair("John", "Doe")
-    infoToSer[Pair].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Pair](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   it should "migrate the reordered fields of different types of an unversioned case class" in {
@@ -38,9 +36,7 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
       )
 
     restored shouldBe Counter("a", 42)
-    infoToSer[Counter].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Counter](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   it should "read an unchanged unversioned case class as is" in {
@@ -53,18 +49,16 @@ class BuiltInCompatibilityTest extends AnyFlatSpec with Matchers with TestUtils 
       )
 
     restored shouldBe Pair("John", "Doe")
-    infoToSer[Pair].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAsIs"
-    )
+    compatibilityWithSnapshot[Pair](snapshot) shouldBe Symbol("compatibleAsIs")
   }
 
   // Read by position, the former fields 'a' and 'b' would be swapped
   it should "not read the renamed and swapped fields of an unversioned case class as is" in {
-    val formerSerializer = new CaseClassSerializer[Triple](
-      evolution = evolutionOf(classOf[Triple]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("a", "b", "c")),
-      scalaFieldSerializers = Array(infoToSer[String], infoToSer[String], infoToSer[String])
+    val formerSerializer = formerCaseClassSerializer[Triple](
+      evolutionOf(classOf[Triple]),
+      "a" -> infoToSer[String],
+      "b" -> infoToSer[String],
+      "c" -> infoToSer[String]
     )
 
     compatibilityWith[Triple](formerSerializer)(infoToSer[Triple]) shouldBe Symbol("incompatible")

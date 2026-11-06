@@ -4,6 +4,7 @@ import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
 import org.apache.flinkx.api.evolution.EvolutionTest.AddedFieldWithoutAnnotation
 import org.apache.flinkx.api.evolution.FieldEvolution.Former
+import org.apache.flinkx.api.util.ClassUtil.resolveFormerClassName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,17 +43,17 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
   it should "declare the former and the current name of a case class" in {
     namesOf(Probe.evolutions) shouldBe Set(
       classOf[Probe].getName,
-      classOf[Probe].getName.replace("Probe", "FormerProbe"),
+      resolveFormerClassName("FormerProbe", classOf[Probe]),
       // A deleted class name, with and without `$`: the deleted class can be a class or an object
-      classOf[Probe].getName.replace("Probe", "GoneType"),
-      classOf[Probe].getName.replace("Probe", "GoneType$")
+      resolveFormerClassName("GoneType", classOf[Probe]),
+      resolveFormerClassName("GoneType$", classOf[Probe])
     )
   }
 
   it should "declare a sealed trait and the former name it was renamed from" in {
     namesOf(Pet.evolutions) should contain allOf (
       classOf[Pet].getName,
-      classOf[Pet].getName.replace("Pet", "Animal")
+      resolveFormerClassName("Animal", classOf[Pet])
     )
   }
 
@@ -78,7 +79,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
 
   // The field evolutions: a rename, a transform with its mapper, a delete, and an add with its default value
   it should "plan the field evolutions migrating the data written under a former name" in {
-    val formerName = classOf[Probe].getName.replace("Probe", "FormerProbe")
+    val formerName = resolveFormerClassName("FormerProbe", classOf[Probe])
     val evolution  = Evolutions.get[Probe](formerName, 0, getClass.getClassLoader)
 
     // The transformed field and the added field read no former field directly
@@ -128,7 +129,7 @@ class EvolutionMacroTest extends AnyFlatSpec with Matchers {
 
   // The since of a deletion has no upper bound: it declares the class name up to since - 1
   it should "apply a deletion whose since is higher than the versions of the deleted class" in {
-    val overshot = classOf[Probe].getName.replace("Probe", "Overshot")
+    val overshot = resolveFormerClassName("Overshot", classOf[Probe])
     (0 to 4).foreach { version =>
       withClue(s"version $version:")(
         AdtEvolution.isDeletedClass(

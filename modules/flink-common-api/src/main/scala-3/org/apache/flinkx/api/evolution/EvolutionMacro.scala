@@ -73,11 +73,17 @@ private[evolution] object EvolutionMacro:
     val versioned = (values ++ ownValue).filter(isVersioned)
     versioned.headOption.foreach(value => report.errorAndAbort(evolutionNotAllowed("version", value.fullName)))
 
+  /** The first annotation of the given symbol that satisfies `p`, or none if its annotations do not load. */
+  private def findAnnotation(using
+      q: Quotes
+  )(symbol: q.reflect.Symbol)(p: q.reflect.Term => Boolean): Option[q.reflect.Term] =
+    try symbol.annotations.find(p)
+    catch { case NonFatal(_) => None }
+
   /** The name of the first evolution annotation of the given symbol, if it has one. */
   private def evolutionAnnotationOf(using q: Quotes)(symbol: q.reflect.Symbol): Option[String] = {
     import q.reflect.*
-    try symbol.annotations.find(_.tpe <:< TypeRepr.of[EvolutionAnnotation]).map(_.tpe.typeSymbol.name)
-    catch { case NonFatal(_) => None }
+    findAnnotation(symbol)(_.tpe <:< TypeRepr.of[EvolutionAnnotation]).map(_.tpe.typeSymbol.name)
   }
 
   /** The enum of the given enum value with parameters, or none for another type. */
@@ -91,8 +97,7 @@ private[evolution] object EvolutionMacro:
   /** Whether the given symbol declares a schema version of its own. */
   private def isVersioned(using q: Quotes)(symbol: q.reflect.Symbol): Boolean = {
     import q.reflect.*
-    try symbol.annotations.exists(_.tpe <:< TypeRepr.of[version])
-    catch { case NonFatal(_) => false }
+    findAnnotation(symbol)(_.tpe <:< TypeRepr.of[version]).isDefined
   }
 
   /** The value parameters of the primary constructor of the given class, or none for a trait. */
@@ -106,9 +111,7 @@ private[evolution] object EvolutionMacro:
   private def rejectVersionedParameter(using q: Quotes)(symbol: q.reflect.Symbol): Unit =
     parametersOf(symbol)
       .find(isVersioned)
-      .foreach(parameter =>
-        q.reflect.report.errorAndAbort(evolutionNotAllowed("version", s"$symbol.${parameter.name}"))
-      )
+      .foreach(parameter => q.reflect.report.errorAndAbort(versionOnField(symbol.fullName, parameter.name)))
 
   /** The class of the given type, from its class tag. */
   private def classOfExpr(using q: Quotes)(tpe: q.reflect.TypeRepr): Expr[Class[?]] =
@@ -224,7 +227,7 @@ private[evolution] object EvolutionMacro:
       }
 
       if symbol.annotations.count(is[postEvolution[?]]) > 1 then
-        report.errorAndAbort(evolutionNotAllowed("postEvolution", s"${symbol.fullName} twice"))
+        report.errorAndAbort(postEvolutionTwice(symbol.fullName))
 
       parametersOf(symbol).foreach { parameter =>
         evolutionAnnotationsOf(parameter).foreach { term =>

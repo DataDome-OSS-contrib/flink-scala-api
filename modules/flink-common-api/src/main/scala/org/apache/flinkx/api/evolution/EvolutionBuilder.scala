@@ -136,10 +136,9 @@ final class EvolutionBuilder[A](
     */
   private[evolution] def build(): Seq[Declaration] = {
     val names   = classNames
+    val fields  = fieldEvolutionsAtSince.sortBy(evolution => (evolution.since, evolution.phase.rank))
     val current = names.map { case (className, lastVersion) =>
-      declaration(className, lastVersion)(
-        evolution(className, _, fieldEvolutionsAtSince.sortBy(evolution => (evolution.since, evolution.phase.rank)))
-      )
+      declaration(className, lastVersion)(evolution(className, _, fields))
     }
     // A deleted enum value with parameters has a class, named after each name of its enum
     val deletedEnumValues = enumValueEvolutions.toSeq.collect { case Deleted(since, name, throwOnInstance) =>

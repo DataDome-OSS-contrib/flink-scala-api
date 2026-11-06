@@ -2,12 +2,12 @@ package org.apache.flinkx.api.evolution
 
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flink.util.{FileUtils, FlinkRuntimeException}
-import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.TestUtils.{evolutionOf, formerCaseClassSerializer}
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures.DerivedBeforeDeclared
 import org.apache.flinkx.api.evolution.EvolutionMacroTest.Probe
 import org.apache.flinkx.api.evolution.EvolutionRenamedTest.{Horse, Pet, Pony}
-import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.serializer.SnapshotTestUtil.savepointed
+import org.apache.flinkx.api.util.ClassUtil.resolveFormerClassName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -27,7 +27,7 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
 
   private val cl = getClass.getClassLoader
 
-  private val FormerProbe = classOf[Probe].getName.replace("Probe", "FormerProbe")
+  private val FormerProbe = resolveFormerClassName("FormerProbe", classOf[Probe])
 
   // No class has the former class name now: only the companion scan of the jars finds the evolving companion
   it should "resolve a former name by scanning the jars for the companions" in {
@@ -45,7 +45,7 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
   }
 
   it should "declare once a case object that two sealed traits declare" in {
-    val formerName = Both.getClass.getName.replace("Both$", "FormerBoth$")
+    val formerName = resolveFormerClassName("FormerBoth$", Both.getClass)
 
     Evolutions.get[Any](formerName, 0, cl).currentClass shouldBe Both.getClass
   }
@@ -71,17 +71,15 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
   it should "declare the evolutions of a companion deriving its type information before its strict val declaring them" in {
     DerivedBeforeDeclared.typeInfo.getTypeClass shouldBe classOf[DerivedBeforeDeclared]
     val formerName =
-      classOf[DerivedBeforeDeclared].getName.replace("DerivedBeforeDeclared", "FormerDerivedBeforeDeclared")
+      resolveFormerClassName("FormerDerivedBeforeDeclared", classOf[DerivedBeforeDeclared])
     Evolutions.get(formerName, 0, cl).currentClass shouldBe classOf[DerivedBeforeDeclared]
   }
 
   it should "fail to restore a former class name that no class has and no companion declares" in {
     val goneName   = "org.example.Gone"
-    val serializer = new CaseClassSerializer[Probe](
-      evolution = new AdtEvolution[Probe](goneName, 2, classOf[Probe]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("id")),
-      scalaFieldSerializers = Array(StringSerializer.INSTANCE)
+    val serializer = formerCaseClassSerializer[Probe](
+      new AdtEvolution[Probe](goneName, 2, classOf[Probe]),
+      "id" -> StringSerializer.INSTANCE
     )
 
     val exception = intercept[MissingEvolutionException](savepointed[Probe](serializer))
@@ -187,11 +185,9 @@ class EvolutionsRegistryTest extends AnyFlatSpec with Matchers {
   }
 
   // After a move into an enclosing object, a relative former name resolves next to the current class: to itself
-  it should "fail every lookup when a former class name resolves to the current class" in {
-    ConflictingScan.withFixture("selfRenamed") {
-      val failure = intercept[FlinkRuntimeException](evolutionOf(classOf[Probe], 2))
-      failure.getCause.getMessage shouldBe formerNameIsCurrent(classOf[SelfRenamed].getName, "SelfRenamed")
-    }
+  it should "reject a former class name that resolves to the current class" in {
+    val failure = intercept[IllegalArgumentException](Evolutions[SelfRenamed].declarations)
+    failure.getMessage shouldBe formerNameIsCurrent(classOf[SelfRenamed].getName, "SelfRenamed")
   }
 
   // A top-level case object also has a mirror class under its name without `$`, which holds no data
@@ -475,13 +471,11 @@ object EvolutionsRegistryTest {
       ConflictingScan.evolutionsOf("caseObjectReuser", Evolutions[DeletingCaseObjectName])
   }
 
-  // Its relative former name resolves to the current class: a move out of the package needs an absolute name
+  // Its relative former name resolves to the current class: a move out of the package needs an absolute name. Without
+  // evolving companion, the scan does not register it
   @version(1)
   @renamed(since = 1, "SelfRenamed")
   case class SelfRenamed(a: String)
-  object SelfRenamed extends Evolving[SelfRenamed] {
-    def evolutions: Evolutions[SelfRenamed] = ConflictingScan.evolutionsOf("selfRenamed", Evolutions[SelfRenamed])
-  }
 
 }
 

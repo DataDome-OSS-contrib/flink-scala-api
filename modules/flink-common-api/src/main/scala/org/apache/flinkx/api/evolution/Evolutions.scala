@@ -145,9 +145,11 @@ object Evolutions extends EvolutionsFactory {
       .sortBy(_.lastVersion)
     checkNameReuse(className, sorted, cl)
     sorted
-      .groupBy(_.lastVersion)
-      .collectFirst { case (_, sameVersion) if sameVersion.length > 1 => sameVersion }
-      .foreach { decls => throw FormerClassConflictException(className, refersTo(decls.head), refersTo(decls(1))) }
+      .sliding(2)
+      .collectFirst { case Seq(first, second) if first.lastVersion == second.lastVersion => (first, second) }
+      .foreach { case (first, second) =>
+        throw FormerClassConflictException(className, refersTo(first), refersTo(second))
+      }
     sorted
   }
 

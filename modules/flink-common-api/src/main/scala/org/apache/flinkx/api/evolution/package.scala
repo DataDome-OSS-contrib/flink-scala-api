@@ -280,6 +280,12 @@ package object evolution {
   private[api] def companionNotScanned(adt: String): String =
     s"The companion scan missed the evolving companion of $adt. Keep the evolving ADTs in the jar of the job"
 
+  /** Message of a `@version` on a field: only an ADT has a version. */
+  private[api] def versionOnField(adt: String, field: String): String = evolutionNotAllowed("version", s"$adt.$field")
+
+  /** Message of two `@postEvolution` on one ADT. */
+  private[api] def postEvolutionTwice(adt: String): String = evolutionNotAllowed("postEvolution", s"$adt twice")
+
   /** Message of a former class name that resolves to the current class. */
   private[api] def formerNameIsCurrent(adt: String, formerName: String): String =
     s"The former class name \"$formerName\" of $adt resolves to $adt itself. Write the absolute former class name"

@@ -6,11 +6,12 @@ import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.core.memory.{DataInputDeserializer, DataOutputSerializer}
 import org.apache.flink.util.InstantiationUtil
 import org.apache.flinkx.api.TestUtils
-import org.apache.flinkx.api.TestUtils.evolutionOf
+import org.apache.flinkx.api.TestUtils.{evolutionOf, formerCaseClassSerializer}
 import org.apache.flinkx.api.auto._
 import org.apache.flinkx.api.evolution.AdtEvolution.DeletedEvolution
 import org.apache.flinkx.api.evolution.EvolutionErrorFixtures._
 import org.apache.flinkx.api.serializer.{CaseClassSerializer, CoproductSerializer, ListSerializer}
+import org.apache.flinkx.api.util.ClassUtil.resolveFormerClassName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -37,7 +38,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   /** The serializer of a former case class with one field, written at version 0 under the current class name. */
   private def formerField[T <: Product](clazz: Class[T], field: String, serializer: TypeSerializer[_]) =
-    new CaseClassSerializer[T](evolutionOf(clazz), true, Some(Array(field)), Array(serializer))
+    formerCaseClassSerializer[T](evolutionOf(clazz), field -> serializer)
 
   /** The serializer of Chain at version 0, with Link at version 0. */
   private def formerChain: CoproductSerializer[AnyRef] =
@@ -121,18 +122,16 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // By default, a deleted instance throws: the migration discards data only with throwOnInstance = false
   it should "throw when deserializing an instance of a deleted subtype" in {
-    val tapeName         = classOf[Shelf].getName.replace("Shelf", "Tape")
+    val tapeName         = resolveFormerClassName("Tape", classOf[Shelf])
     val formerSerializer = new CoproductSerializer[AnyRef](
       evolution = Some(evolutionOf(classOf[Shelf]).asInstanceOf[AdtEvolution[AnyRef]]),
       subtypeClasses = Array[Class[_]](classOf[Book], classOf[FormerTape]),
       subtypeNames = Array(classOf[Book].getName, tapeName),
       subtypeSerializers = Array[TypeSerializer[_]](
         infoToSer[Book],
-        new CaseClassSerializer[FormerTape](
+        formerCaseClassSerializer[FormerTape](
           new AdtEvolution(tapeName, 0, classOf[FormerTape]),
-          isCaseClassImmutable = true,
-          fieldNames = Some(Array("title")),
-          scalaFieldSerializers = Array(StringSerializer.INSTANCE)
+          "title" -> StringSerializer.INSTANCE
         )
       )
     )
@@ -172,9 +171,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val (snapshot, restored) = deserializeFormerFields(classOf[Ticket], 0, ("id", StringSerializer.INSTANCE, "t"))
 
     restored shouldBe Ticket("t@0")
-    infoToSer[Ticket].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Ticket](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // A case class without field records no field name either, but its snapshot has no field serializer to read by position
@@ -182,9 +179,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val (snapshot, restored) = deserializeFormerFields(classOf[Flag], 0)
 
     restored shouldBe Flag(on = true)
-    infoToSer[Flag].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Flag](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // The migration evaluates the default value for each instance, as the constructor does, not one time for all
@@ -235,9 +230,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
 
     restored shouldBe RenamedOverDeclaredDeleted(2)
-    infoToSer[RenamedOverDeclaredDeleted].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[RenamedOverDeclaredDeleted](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // Version 2 renames 'a' to 'b', then version 3 renames 'b' to 'c'
@@ -247,9 +240,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
         deserializeFormerFields(classOf[RenamedTwice], version, (formerName, StringSerializer.INSTANCE, "x"))
 
       restored shouldBe RenamedTwice("x")
-      infoToSer[RenamedTwice].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-        "compatibleAfterMigration"
-      )
+      compatibilityWithSnapshot[RenamedTwice](snapshot) shouldBe Symbol("compatibleAfterMigration")
     }
   }
 
@@ -292,25 +283,21 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
 
     restored shouldBe Tapped("a")
-    infoToSer[Tapped].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Tapped](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // The deleted subtype reads as null without its fields: its field of a deleted class would throw
   it should "deserialize an instance of a deleted subtype that holds an instance of a deleted class to null" in {
-    val cassetteName     = classOf[Rack].getName.replace("Rack", "Cassette")
+    val cassetteName     = resolveFormerClassName("Cassette", classOf[Rack])
     val formerSerializer = new CoproductSerializer[AnyRef](
       evolution = Some(evolutionOf(classOf[Rack]).asInstanceOf[AdtEvolution[AnyRef]]),
       subtypeClasses = Array[Class[_]](classOf[Disc], classOf[FormerCassette]),
       subtypeNames = Array(classOf[Disc].getName, cassetteName),
       subtypeSerializers = Array[TypeSerializer[_]](
         infoToSer[Disc],
-        new CaseClassSerializer[Product](
+        formerCaseClassSerializer[Product](
           new AdtEvolution(cassetteName, 0, classOf[Product]),
-          isCaseClassImmutable = true,
-          fieldNames = Some(Array("target")),
-          scalaFieldSerializers = Array(formerTarget)
+          "target" -> formerTarget
         )
       )
     )
@@ -321,20 +308,17 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   /** The serializer of the deleted class Target at version 0. FormerTarget takes its place. */
   private def formerTarget: TypeSerializer[_] =
-    new CaseClassSerializer[Product](
-      new AdtEvolution(classOf[Tapped].getName.replace("Tapped", "Target"), 0, classOf[Product]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("name")),
-      scalaFieldSerializers = Array(StringSerializer.INSTANCE)
+    formerCaseClassSerializer[Product](
+      new AdtEvolution(resolveFormerClassName("Target", classOf[Tapped]), 0, classOf[Product]),
+      "name" -> StringSerializer.INSTANCE
     )
 
   /** The serializer of the deleted class TapEvent at version 0. FormerTapEvent takes its place. */
   private def formerTapEvent: TypeSerializer[Product] =
-    new CaseClassSerializer[Product](
-      new AdtEvolution(classOf[Tapped].getName.replace("Tapped", "TapEvent"), 0, classOf[Product]),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("date", "target")),
-      scalaFieldSerializers = Array(StringSerializer.INSTANCE, formerTarget)
+    formerCaseClassSerializer[Product](
+      new AdtEvolution(resolveFormerClassName("TapEvent", classOf[Tapped]), 0, classOf[Product]),
+      "date"   -> StringSerializer.INSTANCE,
+      "target" -> formerTarget
     )
 
   // The plan of the lowest version applies all the deletions: a field renamed, then deleted, is not found
@@ -347,9 +331,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     val (snapshot, restored) = deserializeFormerFields(classOf[Replaced], 0, ("x", IntSerializer.INSTANCE, 7))
 
     restored shouldBe Replaced("s")
-    infoToSer[Replaced].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Replaced](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // Version 1 deletes x: Int, then version 2 adds x: String: the data of versions 0 and 1 migrate
@@ -363,11 +345,10 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The first rename finds its current name taken by the other field: two fields cannot exchange their names
   it should "not exchange the names of two fields with two @renamed in one version" in {
-    val former = new CaseClassSerializer[SwappedFields](
+    val former = formerCaseClassSerializer[SwappedFields](
       evolutionOf(classOf[SwappedFields]),
-      true,
-      Some(Array("a", "b")),
-      Array(IntSerializer.INSTANCE, IntSerializer.INSTANCE)
+      "a" -> IntSerializer.INSTANCE,
+      "b" -> IntSerializer.INSTANCE
     )
 
     compatibilityWith[SwappedFields](former) shouldBe Symbol("incompatible")
@@ -384,9 +365,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
     )
 
     restored shouldBe SwappedByMapper(2, 1)
-    infoToSer[SwappedByMapper].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[SwappedByMapper](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
   // The schema compatibility resolution does not check the former type of a transformed field
@@ -399,15 +378,13 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
 
   // The restored serializer of a deleted class builds no instance: a transform needs the former class, renamed if necessary
   it should "not transform a field whose former type is a deleted class" in {
-    val goneName                              = classOf[Holder].getName.replace("Holder", "Gone")
+    val goneName                              = resolveFormerClassName("Gone", classOf[Holder])
     def former[T <: Product](clazz: Class[T]) = formerField(
       clazz,
       "f",
-      new CaseClassSerializer[FormerGone](
+      formerCaseClassSerializer[FormerGone](
         new AdtEvolution(goneName, 0, classOf[FormerGone]),
-        isCaseClassImmutable = true,
-        fieldNames = Some(Array("a")),
-        scalaFieldSerializers = Array(StringSerializer.INSTANCE)
+        "a" -> StringSerializer.INSTANCE
       )
     )
 
@@ -426,7 +403,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
         deserializeFormerFields(classOf[Bumped], version, ("a", StringSerializer.INSTANCE, "x"))
 
       restored shouldBe Bumped("x")
-      infoToSer[Bumped].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol("compatibleAsIs")
+      compatibilityWithSnapshot[Bumped](snapshot) shouldBe Symbol("compatibleAsIs")
     }
   }
 
@@ -445,9 +422,7 @@ class EvolutionTest extends AnyFlatSpec with Matchers with TestUtils {
       deserializeFormerFields(classOf[Boxed[String]], 0, ("a", StringSerializer.INSTANCE, "x"))
 
     restored shouldBe Boxed("x", 0)
-    infoToSer[Boxed[String]].snapshotConfiguration().resolveSchemaCompatibility(snapshot) shouldBe Symbol(
-      "compatibleAfterMigration"
-    )
+    compatibilityWithSnapshot[Boxed[String]](snapshot) shouldBe Symbol("compatibleAfterMigration")
   }
 
 }

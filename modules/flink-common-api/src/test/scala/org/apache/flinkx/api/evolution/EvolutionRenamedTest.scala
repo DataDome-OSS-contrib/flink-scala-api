@@ -1,10 +1,10 @@
 package org.apache.flinkx.api.evolution
 
-import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.common.typeutils.base.StringSerializer
 import org.apache.flinkx.api.TestUtils
 import org.apache.flinkx.api.auto._
-import org.apache.flinkx.api.serializer.{CaseClassSerializer, SeqSerializer}
+import org.apache.flinkx.api.serializer.SeqSerializer
+import org.apache.flinkx.api.TestUtils.formerCaseClassSerializer
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -34,11 +34,9 @@ class EvolutionRenamedTest extends AnyFlatSpec with Matchers with TestUtils {
   }
 
   it should "deserialize a Seq of a subtype written under its former name, now reused" in {
-    val formerHorse = new CaseClassSerializer[Pony](
-      evolution = Evolutions.get[Pony](classOf[Horse].getName, 0, getClass.getClassLoader),
-      isCaseClassImmutable = true,
-      fieldNames = Some(Array("name")),
-      scalaFieldSerializers = Array[TypeSerializer[_]](StringSerializer.INSTANCE)
+    val formerHorse = formerCaseClassSerializer[Pony](
+      Evolutions.get[Pony](classOf[Horse].getName, 0, getClass.getClassLoader),
+      "name" -> StringSerializer.INSTANCE
     )
     val formerSerializer = new SeqSerializer[Pony](formerHorse, classOf[Horse].asInstanceOf[Class[Pony]])
 
