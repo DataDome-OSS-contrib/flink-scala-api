@@ -6,7 +6,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer
 import org.apache.flinkx.api.evolution.AdtEvolution.NoEvolution
-import org.apache.flinkx.api.evolution.{AdtEvolution, Evolvable}
+import org.apache.flinkx.api.evolution.{AdtEvolution, Evolutions, Evolvable}
 import org.apache.flinkx.api.serializer.*
 import org.apache.flinkx.api.typeinfo.{CaseClassTypeInfo, CoproductTypeInformation}
 import org.apache.flinkx.api.util.ClassUtil.isCaseClassImmutable
@@ -22,12 +22,33 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
   def cache: DerivationCache = TypeInformationDerivation.cache
 
-  // We cannot add a constraint of `T <: Product`, even though `join` is always called on products.
-  // Need to mix in via `& Product`.
-  override def join[T](ctx: CaseClass[Typeclass, T])(using
+  override def join[T](ctx: CaseClass[Typeclass, T])(using classTag: ClassTag[T], typeTag: TypeTag[T]): Typeclass[T] =
+    Evolutions.rejectUnversionedDerivation(classTag.runtimeClass)
+    deriveCaseClass(ctx, Evolvable.unversioned.version)
+
+  override def versionedJoin[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
       typeTag: TypeTag[T],
       evolvable: Evolvable[T]
+  ): Typeclass[T] = deriveCaseClass(ctx, evolvable.version)
+
+  override def split[T](
+      ctx: SealedTrait[Typeclass, T]
+  )(using classTag: ClassTag[T], typeTag: TypeTag[T]): Typeclass[T] =
+    Evolutions.rejectUnversionedDerivation(classTag.runtimeClass)
+    deriveSealedTrait(ctx, Evolvable.unversioned.version)
+
+  override def versionedSplit[T](ctx: SealedTrait[Typeclass, T])(using
+      classTag: ClassTag[T],
+      typeTag: TypeTag[T],
+      evolvable: Evolvable[T]
+  ): Typeclass[T] = deriveSealedTrait(ctx, evolvable.version)
+
+  // We cannot add a constraint of `T <: Product`, even though `join` is always called on products.
+  // Need to mix in via `& Product`.
+  private def deriveCaseClass[T](ctx: CaseClass[Typeclass, T], version: Int)(using
+      classTag: ClassTag[T],
+      typeTag: TypeTag[T]
   ): Typeclass[T] =
     val cacheKey = DerivationCacheKey(classTag.runtimeClass, typeTag.toString, ctx.params.map(_.typeclass).toSeq)
     cache.get(cacheKey) match
@@ -38,7 +59,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         val clazz      = classTag.runtimeClass.asInstanceOf[Class[T & Product]]
         val fieldNames = ctx.parameters.map(_.label).toArray
 
-        val evolution = new NoEvolution(clazz, evolvable.version, Some(fieldNames))
+        val evolution = new NoEvolution(clazz, version, Some(fieldNames))
 
         val serializer =
           if typeTag.isEnum then new Scala3EnumValueSerializer[T & Product](evolution, ctx.typeInfo.short)
@@ -64,10 +85,9 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
         ).asInstanceOf[TypeInformation[T]]
         cache.putIfAbsent(cacheKey, ti).getOrElse(ti).asInstanceOf[TypeInformation[T]]
 
-  override def split[T](ctx: SealedTrait[Typeclass, T])(using
+  private def deriveSealedTrait[T](ctx: SealedTrait[Typeclass, T], version: Int)(using
       classTag: ClassTag[T],
-      typeTag: TypeTag[T],
-      evolvable: Evolvable[T]
+      typeTag: TypeTag[T]
   ): Typeclass[T] =
     val cacheKey = DerivationCacheKey(classTag.runtimeClass, typeTag.toString, ctx.subtypes.map(_.typeclass).toSeq)
     cache.get(cacheKey) match
@@ -76,7 +96,7 @@ private[api] trait TypeInformationDerivation extends TaggedDerivation[TypeInform
 
       case None =>
         val clazz             = classTag.runtimeClass.asInstanceOf[Class[T]]
-        val evolution         = new NoEvolution(clazz, evolvable.version)
+        val evolution         = new NoEvolution(clazz, version)
         val memberSerializers = ctx.subtypes.map(_.typeclass.createSerializer(config)).toArray[TypeSerializer[?]]
 
         val serializer =

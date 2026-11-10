@@ -30,7 +30,7 @@ import scala.reflect.runtime.universe.TypeTag
   *   [[deriveTypeInformation]] for the explicit derivation method
   */
 // Implicits priority order (linearization): semiauto > Implicits
-trait semiauto extends TypeInformationDerivation with Implicits {
+trait semiauto extends EvolvingDerivation with Implicits {
 
   /** Explicitly derives TypeInformation for the given type T.
     *

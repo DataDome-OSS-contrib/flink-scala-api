@@ -280,6 +280,10 @@ package object evolution {
   private[api] def companionNotScanned(adt: String): String =
     s"The companion scan missed the evolving companion of $adt. Keep the evolving ADTs in the jar of the job"
 
+  /** Message of an ADT with an evolving companion, derived by a code compiled without its schema version. */
+  private[api] def derivedWithoutVersion(adt: String): String =
+    s"An evolving companion declares $adt, but code compiled before 2.4.0 derives it at version 0. Recompile this code"
+
   /** Message of a `@version` on a field: only an ADT has a version. */
   private[api] def versionOnField(adt: String, field: String): String = evolutionNotAllowed("version", s"$adt.$field")
 

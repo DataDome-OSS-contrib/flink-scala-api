@@ -129,6 +129,16 @@ class EvolutionValidationTest extends AnyFlatSpec with Matchers {
     )
   }
 
+  // The code compiled before release 2.4.0 derives without Evolvable, at version 0: the derivation fails at runtime
+  it should "reject at runtime the derivation without version of an ADT that an evolving companion declares" in {
+    Seq(classOf[Pony], classOf[CorrectDeletedClassesOnSealedTraitSubtype]).foreach { clazz =>
+      the[IllegalStateException] thrownBy Evolutions.rejectUnversionedDerivation(clazz) should have message
+        derivedWithoutVersion(clazz.getName)
+    }
+    noException should be thrownBy Evolutions.rejectUnversionedDerivation(classOf[NeverDeclared])
+    noException should be thrownBy Evolutions.rejectUnversionedDerivation(CorrectDeletedClassesCaseObject.getClass)
+  }
+
   it should "build the message of a misplaced annotation" in {
     evolutionNotAllowed("added", "class Foo with version 0") shouldBe
       "@added annotation is not allowed on class Foo with version 0"

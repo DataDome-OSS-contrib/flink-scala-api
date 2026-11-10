@@ -13,11 +13,18 @@ import org.apache.flinkx.api.evolution.Evolvable
 trait CommonTaggedDerivation[TypeClass[_]]:
   private[api] type Typeclass[T] = TypeClass[T]
 
+  /** Derivation of a case class without its schema version, kept for the code compiled before release 2.4.0. */
   def join[T](ctx: CaseClass[Typeclass, T])(using
+      classTag: ClassTag[T],
+      typeTag: TypeTag[T]
+  ): Typeclass[T]
+
+  /** Derivation of a case class at its schema version. */
+  def versionedJoin[T](ctx: CaseClass[Typeclass, T])(using
       classTag: ClassTag[T],
       typeTag: TypeTag[T],
       evolvable: Evolvable[T]
-  ): Typeclass[T]
+  ): Typeclass[T] = join(ctx)
 
   inline def derivedMirrorProduct[A](product: Mirror.ProductOf[A])(using
       ClassTag[A],
@@ -82,7 +89,7 @@ trait CommonTaggedDerivation[TypeClass[_]]:
             }
         } { params => product.fromProduct(Tuple.fromArray(params)) }
 
-    join(caseClass)
+    versionedJoin(caseClass)
 
   inline def getParams_[T, Labels <: Tuple, Params <: Tuple](
       annotations: Map[String, List[Any]],
@@ -126,11 +133,18 @@ trait CommonTaggedDerivation[TypeClass[_]]:
     getParams_(annotations, Map.empty, typeAnnotations, repeated, idx)
 
 trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
+  /** Derivation of a sealed trait without its schema version, kept for the code compiled before release 2.4.0. */
   def split[T](ctx: SealedTrait[Typeclass, T])(using
+      classTag: ClassTag[T],
+      typeTag: TypeTag[T]
+  ): Typeclass[T]
+
+  /** Derivation of a sealed trait at its schema version. */
+  def versionedSplit[T](ctx: SealedTrait[Typeclass, T])(using
       classTag: ClassTag[T],
       typeTag: TypeTag[T],
       evolvable: Evolvable[T]
-  ): Typeclass[T]
+  ): Typeclass[T] = split(ctx)
 
   transparent inline def subtypes[T, SubtypeTuple <: Tuple](
       m: Mirror.SumOf[T],
@@ -174,7 +188,7 @@ trait TaggedDerivation[TypeClass[_]] extends CommonTaggedDerivation[TypeClass]:
       IArray.from(inheritedAnns[A])
     )
 
-    split(sealedTrait)
+    versionedSplit(sealedTrait)
 
   inline def derivedMirror[A](using mirror: Mirror.Of[A], c: ClassTag[A], t: TypeTag[A]): Typeclass[A] =
     inline mirror match

@@ -247,19 +247,6 @@ lazy val mimaSettings = Seq(
     ProblemFilters.exclude[DirectMissingMethodProblem](
       "org.apache.flinkx.api.serializer.ScalaCaseObjectSerializer#ScalaCaseObjectSerializerSnapshot.clazz_="
     ),
-    // The derivation of an ADT reads its schema version from an implicit Evolvable
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.CommonTaggedDerivation.join"),
-    ProblemFilters.exclude[ReversedMissingMethodProblem]("org.apache.flinkx.api.CommonTaggedDerivation.join"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TaggedDerivation.split"),
-    ProblemFilters.exclude[ReversedMissingMethodProblem]("org.apache.flinkx.api.TaggedDerivation.split"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TypeInformationDerivation.join"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.TypeInformationDerivation.split"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.auto.join"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.auto.split"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.semiauto.join"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.semiauto.split"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializers.join"),
-    ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.serializers.split"),
     // Evolutions.get now resolves the class names that the snapshots record, deleted class names included
     ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.flinkx.api.util.ClassUtil.resolveClassByName"),
     // Case class field names are in an Array, as in the serializers and their snapshots

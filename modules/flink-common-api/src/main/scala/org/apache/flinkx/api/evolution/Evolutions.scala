@@ -245,6 +245,15 @@ object Evolutions extends EvolutionsFactory {
     submit
   }
 
+  /** Rejects the derivation without [[Evolvable]] of an ADT that an evolving companion declares: the code compiled
+   * before release 2.4.0 derives at version 0 whatever the version of the ADT.
+   * @throws java.lang.IllegalStateException
+   *   if an evolving companion declares the ADT
+   */
+  private[api] def rejectUnversionedDerivation(clazz: Class[_]): Unit =
+    if (hasEvolvingCompanion(clazz, clazz.getClassLoader))
+      throw new IllegalStateException(derivedWithoutVersion(clazz.getName))
+
   /** Empty the registries. The next lookup registers the declarations again. */
   @VisibleForTesting
   private[api] def reset(): Unit = registries.synchronized(registries.clear())
