@@ -1,13 +1,14 @@
 package org.apache.flinkx.api
 
-import org.apache.flink.api.common.serialization.SerializerConfigImpl
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.{TypeSerializer, TypeSerializerSnapshot}
 import org.apache.flink.core.memory._
 import org.apache.flink.util.ChildFirstClassLoader
 import org.apache.flinkx.api.SerializerSnapshotTest._
+import org.apache.flinkx.api.TestUtils.evolutionOf
 import org.apache.flinkx.api.serializer.CaseClassSerializer
 import org.apache.flinkx.api.auto._
+import org.apache.flinkx.api.evolution.{Evolutions, Evolving, added, version}
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -18,57 +19,54 @@ import java.nio.file.{Files, Paths}
 import java.util.UUID
 import java.io.FileInputStream
 
-class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
-
-  def createSerializer[T: TypeInformation] =
-    implicitly[TypeInformation[T]].createSerializer(new SerializerConfigImpl())
+class SerializerSnapshotTest extends AnyFlatSpec with Matchers with TestUtils {
 
   it should "roundtrip product serializer snapshot" in {
-    val ser = createSerializer[SimpleClass1]
+    val ser = infoToSer[SimpleClass1]
     assertRoundtripSerializer(ser)
   }
 
   it should "roundtrip coproduct serializer snapshot" in {
-    val ser = createSerializer[OuterTrait]
+    val ser = infoToSer[OuterTrait]
     assertRoundtripSerializer(ser)
   }
 
   it should "roundtrip coproduct serializer snapshot with singletons" in {
-    val ser = createSerializer[ADT2]
+    val ser = infoToSer[ADT2]
     assertRoundtripSerializer(ser)
   }
 
   it should "roundtrip serializer snapshot with list of primitives" in {
-    val ser = createSerializer[List[Double]]
+    val ser = infoToSer[List[Double]]
     assertRoundtripSerializer(ser)
   }
 
   it should "roundtrip serializer snapshot with set as array of primitives" in {
-    val ser = createSerializer[Set[Double]]
+    val ser = infoToSer[Set[Double]]
     assertRoundtripSerializer(ser)
   }
 
   it should "do array ser snapshot" in {
-    val set = createSerializer[SimpleClassArray]
+    val set = infoToSer[SimpleClassArray]
     assertRoundtripSerializer(set)
   }
 
   it should "do map ser snapshot" in {
-    assertRoundtripSerializer(createSerializer[SimpleClassMap1])
-    assertRoundtripSerializer(createSerializer[SimpleClassMap2])
+    assertRoundtripSerializer(infoToSer[SimpleClassMap1])
+    assertRoundtripSerializer(infoToSer[SimpleClassMap2])
   }
 
   it should "do list ser snapshot" in {
-    assertRoundtripSerializer(createSerializer[SimpleClassList])
+    assertRoundtripSerializer(infoToSer[SimpleClassList])
   }
 
   it should "do map ser snapshot adt " in {
     implicit val ti: TypeInformation[OuterTrait] = deriveTypeInformation[OuterTrait]
-    assertRoundtripSerializer(createSerializer[TraitMap])
+    assertRoundtripSerializer(infoToSer[TraitMap])
   }
 
   it should "be compatible after snapshot deserialization in different classloader" in {
-    val ser = createSerializer[SimpleClass1]
+    val ser = infoToSer[SimpleClass1]
     val cl  = newClassLoader(classOf[SimpleClass1])
     try {
       val restored      = roundtripSerializer(ser, cl)
@@ -141,36 +139,16 @@ class SerializerSnapshotTest extends AnyFlatSpec with Matchers {
     val expectedData = WithDefault(null)
     // Serializer before schema change: without serializers for the second "new" default fields
     val oldSerializer = new CaseClassSerializer[WithDefault](
-      clazz = classOf[WithDefault],
-      scalaFieldSerializers = Array(implicitly[TypeSerializer[SimpleClass1]]),
-      isCaseClassImmutable = false
+      evolution = evolutionOf(classOf[WithDefault]),
+      isCaseClassImmutable = false,
+      fieldNames = Some(Array("sc1")),
+      scalaFieldSerializers = Array(implicitly[TypeSerializer[SimpleClass1]])
     )
-    val oldSnapshot = oldSerializer.snapshotConfiguration()
+    deserializeFormerForm[WithDefault](oldSerializer, expectedData) shouldBe expectedData
 
-    // Serialize the old snapshot
-    val output = new DataOutputSerializer(1024 * 1024)
-    TypeSerializerSnapshot.writeVersionedSnapshot(output, oldSnapshot) // Flink always calls this
-
-    // Serialize the "old" data with "old" serializer
-    oldSerializer.serialize(expectedData, output)
-
-    // Deserialize the old snapshot
-    val input                   = new DataInputDeserializer(output.getSharedBuffer)
-    val deserializedOldSnapshot = TypeSerializerSnapshot
-      .readVersionedSnapshot[WithDefault](input, getClass.getClassLoader) // Flink always calls this
-
-    // Deserialize the old data with the new serializer
-    val newSerializer    = implicitly[TypeSerializer[WithDefault]]
-    val deserializedData = newSerializer.deserialize(input)
-    deserializedData should be(expectedData)
-
-    // serialize modified data with new serializer
+    // The job restarts with the current source code, which serializes the added field
     expectedData.sc2 = SimpleClass2("c", 3)
-    newSerializer.serialize(expectedData, output)
-
-    // deserialize modified data with new serializer
-    val modifiedResult = newSerializer.deserialize(input)
-    modifiedResult shouldBe expectedData
+    roundtrip(implicitly[TypeSerializer[WithDefault]], expectedData)
   }
 
   def roundtripSerializer[T](ser: TypeSerializer[T], cl: ClassLoader = getClass.getClassLoader): TypeSerializer[T] = {
@@ -214,6 +192,11 @@ object SerializerSnapshotTest {
 
   case class OuterClass(map: Map[UUID, List[OuterTrait]])
 
-  case class WithDefault(var sc1: SimpleClass1 = SimpleClass1("a", 1), var sc2: SimpleClass2 = SimpleClass2("b", 2))
+  @version(1)
+  case class WithDefault(
+      var sc1: SimpleClass1 = SimpleClass1("a", 1),
+      @added(since = 1) var sc2: SimpleClass2 = SimpleClass2("b", 2)
+  )
+  object WithDefault extends Evolving[WithDefault] { val evolutions = Evolutions[WithDefault] }
 
 }

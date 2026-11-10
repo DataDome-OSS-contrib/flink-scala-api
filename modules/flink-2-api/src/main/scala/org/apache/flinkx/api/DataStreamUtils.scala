@@ -4,6 +4,7 @@ import org.apache.flink.annotation.Experimental
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.functions.KeySelector
 import org.apache.flink.streaming.api.datastream.{DataStreamUtils => JavaStreamUtils}
+import org.apache.flinkx.api.evolution.Evolutions
 
 import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
@@ -25,7 +26,7 @@ class DataStreamUtils[T: TypeInformation: ClassTag](val self: DataStream[T]) {
     *   The iterator
     */
   def collect(): Iterator[T] =
-    self.javaStream.executeAndCollect().asScala
+    Evolutions.checked(self.javaStream.executeAndCollect().asScala)
 
   /** Reinterprets the given [[DataStream]] as a [[KeyedStream]], which extracts keys with the given [[KeySelector]].
     *
